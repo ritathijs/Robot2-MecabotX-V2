@@ -1,0 +1,48 @@
+ 
+# ROS2 build en log directories
+build/
+install/
+log/
+colcon_install/
+colcon_build/
+
+# CMake en Python cache
+CMakeFiles/
+CMakeCache.txt
+*.pyc
+__pycache__/
+
+# ROS message/service/action generatie
+msg_gen/
+srv_gen/
+action_gen/
+msg/_*.py
+srv/_*.py
+action/_*.py
+
+# Dynamische configuratie
+*.cfgc
+cfg/cpp/
+cfg/*.py
+
+# IDE-specifiek
+.vscode/
+.idea/
+*.user
+*.sublime-project
+*.sublime-workspace
+
+# OS-specifiek
+.DS_Store
+Thumbs.db
+
+# Emacs en backupbestanden
+*~
+.#*
+
+# Eigen test- of sim-output
+*.log
+*.bag
+*.pcd
+*.launch.py~
+
