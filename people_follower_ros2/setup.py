@@ -23,7 +23,6 @@ setup(
     entry_points={
         'console_scripts': [
             'visualtracker = people_follower_ros2.visualTracker:main',
-            'visualfollow = people_follower_ros2.visualFollower:main',
     
         ],
     },
