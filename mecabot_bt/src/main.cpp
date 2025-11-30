@@ -30,7 +30,6 @@ public:
         if (child_state == BT::NodeStatus::RUNNING) {
             return BT::NodeStatus::RUNNING;
         }
-        // Altijd SUCCESS teruggeven, ongeacht wat het kind doet
         return BT::NodeStatus::SUCCESS;
     }
 };
@@ -931,7 +930,7 @@ public:
     BT::NodeStatus onStart() override
     {
         success_count_ = 0;
-        latest_value_ = 999.0; // Initieel onrealistische waarde
+        latest_value_ = 999.0; 
         std_msgs::msg::String msg;
         msg.data = "CheckingNearbyVisitors";
         pub_->publish(msg);
@@ -948,11 +947,11 @@ public:
         if (latest_value_ < 2.0)
         {
             success_count_++;
-            std::cout << "  Below 2.0 (" << success_count_ << "/3)" << std::endl;
+            std::cout << "  Below 2.0 (" << success_count_ << "/2)" << std::endl;
         }
         else
         {
-            success_count_ = 0; // reset bij overschrijding
+            success_count_ = 0;
         }
 
         if (success_count_ >= 2)
@@ -1750,7 +1749,6 @@ public:
     {
         while (true)
         {
-
             const BT::NodeStatus child_state = child_node_->executeTick();
 
             if (child_state == BT::NodeStatus::RUNNING)
