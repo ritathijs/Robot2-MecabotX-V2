@@ -28,13 +28,7 @@ def generate_launch_description():
             package='people_follower_ros2', 
             executable='visualtracker', 
             name='visualtracker',
-             ),
-        launch_ros.actions.Node(
-            package='people_follower_ros2', 
-            executable='visualfollow', 
-            name='visualfollow',
-            output='screen',
-            ),]
+             ),]
             
     )
 

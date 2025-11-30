@@ -16,7 +16,7 @@ from cv_bridge import CvBridge
 from ultralytics import YOLO
 from sensor_msgs.msg import Image
 from turn_on_wheeltec_robot.msg import Position as PositionMsg
-from geometry_msgs.msg import PointStamped
+from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Float32
 
 
@@ -108,7 +108,7 @@ class PeopleFollowerNode(Node):
         # ------------------------------------------------------------------
         # Relative coordinates (x,y,z) in camera frame as PointStamped
         # Distance-only topic as Float32 (meters)
-        self.pub_rel_point = self.create_publisher(PointStamped, '/peoplesearchcoord', QoSProfile(depth=10))
+        self.pub_rel_point = self.create_publisher(PoseStamped, '/peoplesearchcoord', QoSProfile(depth=10))
         self.pub_distance  = self.create_publisher(Float32,      '/target_distance',  QoSProfile(depth=10))
         # ------------------------------------------------------------------
 
@@ -190,12 +190,23 @@ class PeopleFollowerNode(Node):
         # ------------------------------------------------------------------
         # publishes for relative coordinates + distance-only
         
-        pt = PointStamped()
-        pt.header = rgb_msg.header
-        pt.point.x = float(rel_x)   # meters, +X right
-        pt.point.y = float(rel_y)   # meters, +Y down
-        pt.point.z = float(rel_z)   # meters, +Z forward
-        self.pub_rel_point.publish(pt)
+        pose = PoseStamped()
+        pose.header = rgb_msg.header
+        # eventueel expliciet frame_id zetten:
+        # pose.header.frame_id = 'camera_link'  # of wat jouw frame is
+
+        pose.pose.position.x = float(rel_x)   # meters, +X right
+        pose.pose.position.y = float(rel_y)   # meters, +Y down
+        pose.pose.position.z = float(rel_z)   # meters, +Z forward
+
+        # Geen oriëntatie info → identity quaternion
+        pose.pose.orientation.x = 0.0
+        pose.pose.orientation.y = 0.0
+        pose.pose.orientation.z = 0.0
+        pose.pose.orientation.w = 1.0
+
+        self.pub_rel_point.publish(pose)
+
         
         self.pub_distance.publish(Float32(data=float(dist_m)))  # meters only
         # ------------------------------------------------------------------

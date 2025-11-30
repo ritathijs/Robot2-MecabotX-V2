@@ -118,7 +118,7 @@ controller_server:
       primary_controller: "nav2_mppi_controller::MPPIController" #MPPI控制器
       angular_dist_threshold: 0.785
       forward_sampling_distance: 0.5
-      rotate_to_heading_angular_vel: 1.8
+      rotate_to_heading_angular_vel: 0.8 #origineel 1.8
       max_angular_accel: 3.2
       simulate_ahead_time: 1.0
       rotate_to_goal_heading: True
@@ -129,10 +129,10 @@ controller_server:
       vx_std: 0.2       #Vx 的抽样标准差
       vy_std: 0.2       #Vy 的抽样标准差
       wz_std: 0.4       #Wz（角速度）的抽样标准差
-      vx_max: 0.5       #目标最大前进速度（米/秒）
-      vx_min: -0.5      #目标最大反向速度（米/秒）
-      vy_max: 0.5       #如果使用Omni运动模型，目标最大横向速度（m/s）
-      wz_max: 2.0       #最大旋转速度（弧度/秒）
+      vx_max: 0.25      #Origineel 0.5	#目标最大前进速度（米/秒）
+      vx_min: -0.1      #Origineel -0.5 #目标最大反向速度（米/秒）
+      vy_max: 0.05      #Origineel 0.5  #如果使用Omni运动模型，目标最大横向速度（m/s）
+      wz_max: 0.5       #Origineel 2.0  #最大旋转速度（弧度/秒）
       ax_max: 1.5
       ax_min: -1.5
       ay_max: 0.0
@@ -233,7 +233,7 @@ local_costmap:
       resolution: 0.05     #代价地图1像素的分辨率，以米为单位
       #robot_radius: 0.20   #机器人半径，如果未提供足迹坐标，则使用机器人半径。
       footprint: "[ [-0.290, -0.313], [-0.290, 0.313],[0.290,0.313],[0.290, -0.313] ]"
-      plugins: ["voxel_layer","inflation_layer"] #插件包括:{“体素层”，“膨胀层”}
+      plugins: ["voxel_layer","inflation_layer", "no_go_zones"] #插件包括:{“体素层”，“膨胀层”}
       inflation_layer:                             #膨胀层参数
         plugin: "nav2_costmap_2d::InflationLayer"  #膨胀层插件。
         cost_scaling_factor: 3.0                   #成本缩放因子，决定障碍物成本随距离的递减速度。
@@ -258,6 +258,13 @@ local_costmap:
           raytrace_min_range: 0.0                  #控制光线追踪从代价地图中清除障碍物的最大范围 
           obstacle_max_range: 2.5                   #控制代价地图上标记障碍物的最大范围
           obstacle_min_range: 0.0                   #控制代价地图上标记障碍物的最小范围
+          
+  	no_go_zones:					#Toegevoegd om de no_go_zone node te laten werken
+	  plugin: "nav2_costmap_2d::ObstacleLayer"	#Deze 5 regels + de vermelding hierboven
+	  topic: /no_go_zones/floor_obstacles		#Zie ook global costmap
+	  data_type: "PointCloud2"
+	  marking: True
+	  clearing: True
 
       always_send_full_costmap: True                 #是否每次更新时都发送完整的成本图，而不是更新
   local_costmap_client:
@@ -279,7 +286,7 @@ global_costmap:
       footprint: "[ [-0.290, -0.313], [-0.290, 0.313],[0.290,0.313],[0.290, -0.313] ]"
       resolution: 0.05                  #全局地图1像素的分辨率，以米为单位
       track_unknown_space: true
-      plugins: ["static_layer", "obstacle_layer", "inflation_layer"] #插件包括：{“静态层”，“障碍层”，“膨胀层”}
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer", "no_go_zones"] #插件包括：{“静态层”，“障碍层”，“膨胀层”}
       obstacle_layer:  #障碍层参数
         plugin: "nav2_costmap_2d::ObstacleLayer" #障碍层插件
         enabled: True
@@ -301,6 +308,11 @@ global_costmap:
         plugin: "nav2_costmap_2d::InflationLayer"  #膨胀层插件
         cost_scaling_factor: 3.0                   #成本缩放因子，决定障碍物成本随距离的递减速度。
         inflation_radius: 0.45                     #膨胀半径
+      no_go_zones:					#Toegevoegd om de no_go_zone node te laten werken
+	  topic: /no_go_zones/floor_obstacles		#Deze 5 lijnen + de vermelding in de array hierboven
+	  data_type: "PointCloud2"			#Zie ook localcostmap
+	  marking: True
+	  clearing: True
       always_send_full_costmap: True               #是否每次更新时都发送完整的成本图，而不是更新
   global_costmap_client:
     ros__parameters:
