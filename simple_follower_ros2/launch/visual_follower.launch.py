@@ -14,15 +14,11 @@ def generate_launch_description():
     bringup_dir = get_package_share_directory('turn_on_wheeltec_robot')
     launch_dir = os.path.join(bringup_dir, 'launch')
 
-    wheeltec_robot = IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(os.path.join(launch_dir, 'turn_on_wheeltec_robot.launch.py')),
-    )
-
     wheeltec_camera = IncludeLaunchDescription(
             PythonLaunchDescriptionSource(os.path.join(launch_dir, 'wheeltec_camera.launch.py')),
     )
     return LaunchDescription([
-        wheeltec_robot,wheeltec_camera,
+        wheeltec_camera,
                 
         launch_ros.actions.Node(
             package='simple_follower_ros2', 

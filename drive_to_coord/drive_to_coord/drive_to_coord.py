@@ -18,7 +18,7 @@ class DriveToCoord(Node):
 		self.last_peoplesearchcoord = None
 		
 		self.currentgoal = None
-		self._goal_handle = None  # <--- NIEUW: Variabele initialiseren om crash te voorkomen
+		self._goal_handle = None
 
 		# Action client
 		self._action_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')

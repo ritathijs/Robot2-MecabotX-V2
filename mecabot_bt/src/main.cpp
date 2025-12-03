@@ -92,7 +92,7 @@ public:
         // Als batterij al te laag is, meteen FAILURE
         if (level_ < 30.0)
         {
-	std::cout << "[CheckNetworkError] NETWORK ERROR -> FAILURE. Level: " << level_ << std::endl;
+	//std::cout << "[CheckNetworkError] NETWORK ERROR -> FAILURE. Level: " << level_ << std::endl;
 	level_ += 0;
 
             return BT::NodeStatus::FAILURE;
@@ -100,7 +100,7 @@ public:
 
         // Anders RUNNING totdat de volgende tick komt
         level_ -= 0.0;
-        std::cout << "[CheckNetworkError] NETWORK oke: " << level_ << std::endl;
+        //std::cout << "[CheckNetworkError] NETWORK oke: " << level_ << std::endl;
         return BT::NodeStatus::RUNNING;
     }
 
@@ -113,10 +113,10 @@ public:
         if (level_ < 30.0)
         {
             level_ += 0;
-	std::cout << "[CheckNetworkError] NETWORK ERROR -> FAILURE. Level: " << level_ << std::endl;
+	//std::cout << "[CheckNetworkError] NETWORK ERROR -> FAILURE. Level: " << level_ << std::endl;
             return BT::NodeStatus::FAILURE;
         }
-        std::cout << "[CheckNetworkError] NETWORK oke: " << level_ << std::endl;
+        //std::cout << "[CheckNetworkError] NETWORK oke: " << level_ << std::endl;
         return BT::NodeStatus::RUNNING;
     }
 
@@ -145,13 +145,13 @@ public:
         // Als batterij al te laag is, meteen FAILURE
         if (level_ < 30.0)
         {
-            std::cout << "[CheckCollision] COLLSION!!!" << std::endl;
+        //    std::cout << "[CheckCollision] COLLSION!!!" << std::endl;
             level_ += 0;
             return BT::NodeStatus::FAILURE;
         }
 
         // Anders RUNNING totdat de volgende tick komt
-        std::cout << "[CheckCollision] noCollisionDetected" << std::endl;
+        //std::cout << "[CheckCollision] noCollisionDetected" << std::endl;
         return BT::NodeStatus::RUNNING;
     }
 
@@ -162,17 +162,17 @@ public:
 
         if (level_ < 30.0)
         {
-            std::cout << "[CheckCollision] COLLSION!!!" << std::endl;
+          //std::cout << "[CheckCollision] COLLSION!!!" << std::endl;
             level_ += 0;
             return BT::NodeStatus::FAILURE;
         }
-        std::cout << "[CheckCollision] noCollisionDetected" << std::endl;
+        //std::cout << "[CheckCollision] noCollisionDetected" << std::endl;
         return BT::NodeStatus::RUNNING;
     }
 
     void onHalted() override
     {
-        std::cout << "[CheckCollision] HALTED" << std::endl;
+        //std::cout << "[CheckCollision] HALTED" << std::endl;
     }
 
 private:
@@ -252,11 +252,11 @@ public:
     BT::NodeStatus onStart() override
     {
         rclcpp::spin_some(node_);
-        std::cout << "[BatteryOk] START, last_event=" << last_event_ << std::endl;
+        //std::cout << "[BatteryOk] START, last_event=" << last_event_ << std::endl;
 
         if (last_event_ == "BATTERY-LOW")
         {
-            std::cout << "[BatteryOk] Battery low -> FAILURE" << std::endl;
+          //  std::cout << "[BatteryOk] Battery low -> FAILURE" << std::endl;
             return BT::NodeStatus::FAILURE;
         }
         return BT::NodeStatus::RUNNING;
@@ -267,17 +267,17 @@ public:
         rclcpp::spin_some(node_);
         if (last_event_ == "BATTERY-LOW")
         {
-            std::cout << "[BatteryOk] Battery low detected -> FAILURE" << std::endl;
+            //std::cout << "[BatteryOk] Battery low detected -> FAILURE" << std::endl;
             return BT::NodeStatus::FAILURE;
         }
 
-        std::cout << "[BatteryOk] Battery OK -> RUNNING" << std::endl;
+        //std::cout << "[BatteryOk] Battery OK -> RUNNING" << std::endl;
         return BT::NodeStatus::RUNNING;
     }
 
     void onHalted() override
     {
-        std::cout << "[BatteryOk] HALTED" << std::endl;
+        //std::cout << "[BatteryOk] HALTED" << std::endl;
     }
 
 private:
@@ -946,7 +946,7 @@ public:
 
         if (latest_value_ < 2.0)
         {
-            success_count_++;
+            success_count_ = 3;
             std::cout << "  Below 2.0 (" << success_count_ << "/2)" << std::endl;
         }
         else
@@ -992,7 +992,7 @@ public:
         pub_quiz_ = node_->create_publisher<std_msgs::msg::String>("/rpitopic", 10);
 
         sub_follow_ = node_->create_subscription<std_msgs::msg::Float32>(
-            "/FollowMeTopic", 10,
+            "/target_distance", 10,
             [this](std_msgs::msg::Float32::SharedPtr msg)
             {
                 follow_value_ = msg->data;
@@ -1043,6 +1043,7 @@ public:
 
         rclcpp::spin_some(node_);
 
+        //std::cout << "[ArrivedAtVisitors] Measured distance: " << follow_value_ << std::endl;
 
         if (received_drive_to_quiz_)
         {
@@ -1060,10 +1061,10 @@ public:
             overlimit_count_ = 0;
         }
 
-        if (overlimit_count_ >= 3)
+        if (overlimit_count_ >= 5)
         {
-            std::cout << "[ArrivedAtVisitors] 3 metingen > 3.0 -> FAILURE" << std::endl;
-            return BT::NodeStatus::FAILURE;
+            //std::cout << "[ArrivedAtVisitors] 3 metingen > 3.0 -> FAILURE" << std::endl;
+            //return BT::NodeStatus::FAILURE;
         }
 
 
@@ -1076,8 +1077,8 @@ public:
             return BT::NodeStatus::FAILURE;
         }
 
-        std::cout << "[ArrivedAtVisitors] Running... distance=" << follow_value_
-                  << " overlimit_count=" << overlimit_count_ << std::endl;
+        //std::cout << "[ArrivedAtVisitors] Running... distance=" << follow_value_
+          //        << " overlimit_count=" << overlimit_count_ << std::endl;
 
         return BT::NodeStatus::RUNNING;
     }

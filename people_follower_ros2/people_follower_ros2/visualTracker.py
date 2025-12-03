@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
 
-# DIT WERKTTTTTT
-
-
 from __future__ import division
 import math
 import numpy as np
@@ -20,7 +17,6 @@ from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Float32
 
 
-
 class PeopleFollowerNode(Node):
     def __init__(self):
         super().__init__('people_follower')
@@ -33,7 +29,7 @@ class PeopleFollowerNode(Node):
 
         self.declare_parameter('yolo_model', 'yolov8n.pt')
         self.declare_parameter('conf', 0.5)
-        self.declare_parameter('use_cuda', True)
+        self.declare_parameter('use_cuda', False)
 
         # Half FOVs (radians)
         self.declare_parameter('horizontal_half_fov', 0.5235987755982988)
@@ -112,6 +108,11 @@ class PeopleFollowerNode(Node):
         self.pub_distance  = self.create_publisher(Float32,      '/target_distance',  QoSProfile(depth=10))
         # ------------------------------------------------------------------
 
+        # throttle-instellingen voor /peoplesearchcoord en /target_distance
+        self.coord_pub_hz = 2.0  # frequentie waarmee coords worden gepubliceerd (Hz)
+        self.coord_pub_period = 1.0 / self.coord_pub_hz  
+        self.last_coord_pub_time = self.get_clock().now()  
+
         self.get_logger().info(f'RGB: {self.rgb_topic}, Depth: {self.depth_topic}')
         self.get_logger().info(f'Annotated: {self.annotated_topic}, Position: {self.position_topic}')
         self.get_logger().info(f'publish_distance_mm={self.dist_mm_out}, invert_x={self.invert_x}, invert_y={self.invert_y}')
@@ -177,42 +178,47 @@ class PeopleFollowerNode(Node):
         rel_z = dist_m                      # +Z forward
         # ------------------------------------------------------------------
 
-
         # Distance output units
         distance_out = dist_m * 1000.0 if self.dist_mm_out else dist_m
 
-        # Publish
+        # Publish PositionMsg (oude topic, ongewijzigd)
         self.pos_msg.angle_x = float(angle_x)
         self.pos_msg.angle_y = float(angle_y)
         self.pos_msg.distance = float(distance_out)
         self.pub_pos.publish(self.pos_msg)
 
         # ------------------------------------------------------------------
-        # publishes for relative coordinates + distance-only
-        
-        pose = PoseStamped()
-        pose.header = rgb_msg.header
-        # eventueel expliciet frame_id zetten:
-        # pose.header.frame_id = 'camera_link'  # of wat jouw frame is
+        # throttle voor relative coordinates + distance-only
+        now = self.get_clock().now()  
+        elapsed = (now - self.last_coord_pub_time).nanoseconds / 1e9  
 
-        pose.pose.position.x = float(rel_x)   # meters, +X right
-        pose.pose.position.y = float(rel_y)   # meters, +Y down
-        pose.pose.position.z = float(rel_z)   # meters, +Z forward
+        if elapsed >= self.coord_pub_period:  
+            pose = PoseStamped()
+            pose.header = rgb_msg.header
+            # eventueel expliciet frame_id zetten:
+            # pose.header.frame_id = 'camera_link'  # of wat jouw frame is
 
-        # Geen oriëntatie info → identity quaternion
-        pose.pose.orientation.x = 0.0
-        pose.pose.orientation.y = 0.0
-        pose.pose.orientation.z = 0.0
-        pose.pose.orientation.w = 1.0
+            pose.pose.position.x = float(rel_x)   # meters, +X right
+            pose.pose.position.y = float(rel_y)   # meters, +Y down
+            pose.pose.position.z = float(rel_z)   # meters, +Z forward
 
-        self.pub_rel_point.publish(pose)
+            # Geen oriëntatie info → identity quaternion
+            pose.pose.orientation.x = 0.0
+            pose.pose.orientation.y = -1.0
+            pose.pose.orientation.z = 0.0
+            pose.pose.orientation.w = 1.0
 
-        
-        self.pub_distance.publish(Float32(data=float(dist_m)))  # meters only
+            self.pub_rel_point.publish(pose)  
+            self.pub_distance.publish(Float32(data=float(dist_m)))  
+
+            self.last_coord_pub_time = now  
         # ------------------------------------------------------------------
 
         # Quick debug (one line, easy to watch)
-        self.get_logger().info(f'cx={cx} cy={cy} angle_x={angle_x:.3f} angle_y={angle_y:.3f} dist={"{:.0f}mm".format(distance_out) if self.dist_mm_out else f"{distance_out:.2f}m"}')
+        self.get_logger().info(
+            f'cx={cx} cy={cy} angle_x={angle_x:.3f} angle_y={angle_y:.3f} '
+            f'dist={"{:.0f}mm".format(distance_out) if self.dist_mm_out else f"{distance_out:.2f}m"}'
+        )
 
         self._publish_annotated(rgb_msg.header, annotated)
 
