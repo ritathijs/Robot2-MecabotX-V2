@@ -42,7 +42,7 @@ class PeopleFollowerNode(Node):
         self.declare_parameter('patch_radius_px', 6)       # sampling patch radius
 
         # OUTPUT conventions (to match your controller)
-        self.declare_parameter('invert_angle_x', False)    # flip left/right sign
+        self.declare_parameter('invert_angle_x', True)    # flip left/right sign
         self.declare_parameter('invert_angle_y', False)    # flip up/down sign
         self.declare_parameter('publish_distance_mm', True)# publish mm instead of meters (old code likely used mm)
 

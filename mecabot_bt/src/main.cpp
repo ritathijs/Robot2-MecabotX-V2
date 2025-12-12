@@ -944,10 +944,10 @@ public:
         rclcpp::spin_some(node_);
         std::cout << "[CheckingNearbyVisitors] Measured distance: " << latest_value_ << std::endl;
 
-        if (latest_value_ < 2.0)
+        if (latest_value_ < 1.5)
         {
             success_count_ = 3;
-            std::cout << "  Below 2.0 (" << success_count_ << "/2)" << std::endl;
+
         }
         else
         {
@@ -956,7 +956,7 @@ public:
 
         if (success_count_ >= 2)
         {
-            std::cout << "[CheckingNearbyVisitors] 2 consecutive measurements < 2.0 -> SUCCESS" << std::endl;
+            std::cout << "[CheckingNearbyVisitors] STOP BIJ PERSOON -> SUCCESS" << std::endl;
             return BT::NodeStatus::SUCCESS;
         }
 
@@ -1550,7 +1550,7 @@ public:
             "/quiz", 10,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
-                if (msg->data == "quiz_finished" || msg->data == "quiz_inactive")
+                if (msg->data == "quiz-finished" || msg->data == "quiz-inactive")
                 {
                     received_ = true;
                     last_msg_ = msg->data;

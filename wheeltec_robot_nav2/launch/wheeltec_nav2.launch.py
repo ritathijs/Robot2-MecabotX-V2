@@ -38,7 +38,7 @@ def generate_launch_description():
             'map',
             default_value=map_file,
             description='Full path to map file to load'),
-
+            
         DeclareLaunchArgument(
             'params',
             default_value=param_file,

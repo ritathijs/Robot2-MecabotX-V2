@@ -1,29 +1,20 @@
 #!/usr/bin/env python3
+
 import os
-from ament_index_python.packages import get_package_share_directory
-import cv2
 import yaml
 import numpy as np
+import cv2
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, DurabilityPolicy
 from rclpy.parameter import Parameter
 from rcl_interfaces.msg import SetParametersResult
 from sensor_msgs.msg import PointCloud2, PointField
-from std_msgs.msg import Header, Bool
-import struct
+from std_msgs.msg import Bool
+from ament_index_python.packages import get_package_share_directory
 
-# --- INSTELLINGEN VOOR PIXEL RANGES ---
-# Pas deze aan als je map net iets andere kleuren heeft
-
-# 1. DE WEG (Wit)
-# Alles met een waarde HOGER dan dit is 'weg' (vrij).
-# Wit is normaal 255, maar door compressie vaak 250-254.
-THRESHOLD_WEG_MIN = 225 
-
-# 2. DE EXTENDED ZONE (Lichtgrijs)
-# Dit moet een bereik zijn waar jouw lichtgrijze kleur (189) in valt.
-# We pakken een ruime marge (bijv. 175 tot 205).
+# --- PIXEL THRESHOLDS ---
+THRESHOLD_WEG_MIN = 225
 RANGE_EXTENDED_MIN = 175
 RANGE_EXTENDED_MAX = 205
 
@@ -32,89 +23,63 @@ class DynamicObstaclePublisher(Node):
     def __init__(self, yaml_file):
         super().__init__('dynamic_obstacle_publisher')
 
-        # --- 1. Parameters declareren ---
+        # --- Parameters ---
         self.declare_parameter('allow_extended_zone', True)
-        
-        # Lees de initiële status
         self.allow_extended_zone = self.get_parameter('allow_extended_zone').value
-        self.get_logger().info(f"Initiële status allow_extended_zone: {self.allow_extended_zone}")
-
-        # --- 2. YAML en PGM inlezen ---
+        
+        # --- YAML & PGM Laden ---
         try:
             with open(yaml_file, 'r') as f:
                 map_yaml = yaml.safe_load(f)
         except Exception as e:
             self.get_logger().error(f"Kon YAML niet laden: {yaml_file}. Fout: {e}")
-            rclpy.shutdown()
-            return
+            raise e
 
         yaml_dir = os.path.dirname(yaml_file)
-        pgm_file_relative = map_yaml['image']
-        pgm_file_absolute = os.path.join(yaml_dir, pgm_file_relative)
-
+        pgm_file_absolute = os.path.join(yaml_dir, map_yaml['image'])
         self.resolution = map_yaml['resolution']
         self.origin_x, self.origin_y, _ = map_yaml['origin']
 
         self.get_logger().info(f"Kaart laden: {pgm_file_absolute}")
-        self.get_logger().info(f"Resolutie: {self.resolution}, Origin: ({self.origin_x}, {self.origin_y})")
-
-        # Lees afbeelding in (Grayscale)
         self.img = cv2.imread(pgm_file_absolute, cv2.IMREAD_GRAYSCALE)
+        
         if self.img is None:
             self.get_logger().error(f"Kon afbeelding {pgm_file_absolute} niet laden!")
-            rclpy.shutdown()
+            # Graceful exit in main, but here we construct nothing
             return
-            
-        self.img_height = self.img.shape[0]
 
-        # --- 3. Publisher ---
-        # Transient Local is belangrijk zodat nieuwe subscribers (zoals Nav2 of RViz) 
-        # de kaart direct krijgen, ook al zijn ze later ingestapt.
+        self.img_height, self.img_width = self.img.shape
+
+        # --- Publisher (Transient Local voor late-joiners) ---
         qos_profile = QoSProfile(
             depth=1,
             durability=DurabilityPolicy.TRANSIENT_LOCAL
         )
-        
         self.pub = self.create_publisher(PointCloud2, '/no_go_zones/floor_obstacles', qos_profile)
 
-        # --- 4. Callbacks ---
-        # Voor parameter updates (bijv. via CLI)
+        # --- Callbacks ---
         self.add_on_set_parameters_callback(self.parameter_callback)
+        self.create_subscription(Bool, '/allow_extended_zone', self.topic_callback, 10)
 
-        # Voor live updates via topic (bijv. vanuit GUI)
-        self.subscription = self.create_subscription(
-            Bool,
-            '/allow_extended_zone',
-            self.topic_callback,
-            10
-        )
-
-        # --- 5. Publiceer de eerste keer ---
+        # --- Eerste publicatie ---
         self.publish_obstacles()
 
-    # --- CALLBACKS ---
-
+    # --- Callbacks ---
     def topic_callback(self, msg):
-        """Wordt aangeroepen bij een bericht op /control/allow_extended_zone"""
         new_state = msg.data
-        
         if new_state != self.allow_extended_zone:
-            self.get_logger().info(f"TOPIC: Schakelen naar {new_state}. Direct publiceren...")
-            
-            # 1. Update intern
+            self.get_logger().info(f"TOPIC: Schakelen naar {new_state}.")
+            # Update interne variabele
             self.allow_extended_zone = new_state
-            
-            # 2. Publiceer nieuwe kaart direct
+            # Publiceer update
             self.publish_obstacles()
-            
-            # 3. Sync parameter op achtergrond
+            # Probeer parameter te syncen (zonder error als node afsluit)
             try:
                 self.set_parameters([Parameter('allow_extended_zone', Parameter.Type.BOOL, new_state)])
             except Exception:
-                pass # Sync foutje is niet kritiek voor de werking
+                pass
 
     def parameter_callback(self, params):
-        """Wordt aangeroepen bij wijziging via 'ros2 param set' of RQT"""
         should_republish = False
         for param in params:
             if param.name == 'allow_extended_zone':
@@ -124,59 +89,75 @@ class DynamicObstaclePublisher(Node):
                     should_republish = True
         
         if should_republish:
+            # We roepen publish niet direct aan hier, maar plannen het in of doen het na return
+            # Echter, in Python ROS2 is het vaak veilig om direct te doen als de berekening snel is.
             self.publish_obstacles()
             
         return SetParametersResult(successful=True)
 
-    # --- CORE LOGICA ---
-
+    # --- Core Logica (Geoptimaliseerd) ---
     def publish_obstacles(self):
-        """Genereert de pointcloud op basis van pixelwaarden."""
+        """Genereer voxel pointcloud met NumPy vectorisatie (veel sneller)."""
         
-        # DEBUG: Print de waarden die in je kaart zitten. 
-        # Als je nog steeds ruis ziet, kijk dan of hier vreemde waarden tussen staan.
-        unique_vals = np.unique(self.img)
-        self.get_logger().info(f"DEBUG MAP PIXELS: {unique_vals}")
-
-        # Startsituatie: ALLES is obstakel (255)
+        # 1. Maak Masker
+        # Alles is initieel obstakel (255)
         mask = np.full(self.img.shape, 255, dtype=np.uint8)
-
-        # 1. Maak de 'gewone' weg vrij (Wit)
-        # Alles wat lichter is dan de threshold wordt 0 (geen obstakel)
+        
+        # Witte gebieden zijn vrij (0)
         mask[self.img >= THRESHOLD_WEG_MIN] = 0
-
-        # 2. Maak de 'extended' weg vrij (Lichtgrijs) - Alleen als True
+        
+        # Extended zone logica
         if self.allow_extended_zone:
-            # Alles BINNEN het grijze bereik wordt 0
             mask[(self.img >= RANGE_EXTENDED_MIN) & (self.img <= RANGE_EXTENDED_MAX)] = 0
-            self.get_logger().info("Zone status: OPEN (Grijs is vrij)")
-        else:
-            self.get_logger().info("Zone status: DICHT (Grijs is obstakel)")
 
-        # Nu halen we alle coördinaten op die nog op 255 (obstakel) staan
-        y_coords, x_coords = np.where(mask == 255)
+        # 2. Vind pixel coördinaten van obstakels (waar mask nog steeds 255 is)
+        # y_indices (rijen), x_indices (kolommen)
+        y_indices, x_indices = np.where(mask == 255)
+        
+        if len(x_indices) == 0:
+            self.pub.publish(self.create_pointcloud2(np.array([])))
+            return
 
-        points = []
-        for px, py in zip(x_coords, y_coords):
-            # Formule: world = origin + pixel * resolutie
-            world_x = self.origin_x + px * self.resolution
-            # Y-as van afbeelding staat vaak "op zijn kop" t.o.v. wereldcoördinaten
-            world_y = self.origin_y + (self.img_height - py - 1) * self.resolution
-            points.append([world_x, world_y, 0.0])
+        # 3. Conversie naar Wereld Coördinaten (Vectorized)
+        # Formule: origin + (index * resolutie)
+        # We voegen 0.5 * res toe om het punt in het midden van de pixel te centreren
+        z_base = 0.05
+        voxel_height = 0.05
+        num_voxels_z = 4
+        
+        # Bereken X en Y arrays
+        world_x = self.origin_x + (x_indices * self.resolution) + (self.resolution / 2)
+        # Let op de Y-flip: (height - y - 1)
+        world_y = self.origin_y + ((self.img_height - y_indices - 1) * self.resolution) + (self.resolution / 2)
 
-        # Maak en publiceer bericht
-        if not points:
-            pc2_msg = self.create_pointcloud2([])
-        else:
-            pc2_msg = self.create_pointcloud2(points)
+        # 4. Creëer voxels in de hoogte (Z-as)
+        # We herhalen de X en Y arrays voor elke Z laag
+        all_x = np.tile(world_x, num_voxels_z)
+        all_y = np.tile(world_y, num_voxels_z)
+        
+        # Maak Z array: [0.05, 0.05... 0.10, 0.10...]
+        z_levels = [z_base + i * voxel_height for i in range(num_voxels_z)]
+        all_z = np.repeat(z_levels, len(world_x)) # Repeat elk level N keer
 
+        # 5. Samenvoegen tot PointCloud2 data structuur
+        # We gebruiken een structured array voor snelheid
+        cloud_data = np.zeros(len(all_x), dtype=[('x', np.float32), ('y', np.float32), ('z', np.float32)])
+        cloud_data['x'] = all_x
+        cloud_data['y'] = all_y
+        cloud_data['z'] = all_z
+
+        # Publiceren
+        pc2_msg = self.create_pointcloud2(cloud_data)
         self.pub.publish(pc2_msg)
+        self.get_logger().info(f"Gepubliceerd: {len(all_x)} voxelpunten")
 
-    def create_pointcloud2(self, points):
-        """Helper om PointCloud2 binary data te maken"""
-        header = Header()
+    def create_pointcloud2(self, cloud_data):
+        header = PointCloud2().header
         header.stamp = self.get_clock().now().to_msg()
         header.frame_id = 'map'
+
+        if len(cloud_data) == 0:
+            return PointCloud2(header=header)
 
         fields = [
             PointField(name='x', offset=0, datatype=PointField.FLOAT32, count=1),
@@ -184,23 +165,18 @@ class DynamicObstaclePublisher(Node):
             PointField(name='z', offset=8, datatype=PointField.FLOAT32, count=1)
         ]
 
-        data = []
-        # Gebruik struct pack voor snelheid en correcte binary format
-        for x, y, z in points:
-            data.append(struct.pack('fff', x, y, z))
-        
-        data_binary = b"".join(data)
-
         pc2_msg = PointCloud2()
         pc2_msg.header = header
         pc2_msg.height = 1
-        pc2_msg.width = len(points)
+        pc2_msg.width = len(cloud_data)
         pc2_msg.fields = fields
         pc2_msg.is_bigendian = False
-        pc2_msg.point_step = 12
-        pc2_msg.row_step = pc2_msg.point_step * len(points)
+        pc2_msg.point_step = 12  # 3 * float32 (4 bytes)
+        pc2_msg.row_step = pc2_msg.point_step * len(cloud_data)
         pc2_msg.is_dense = True
-        pc2_msg.data = data_binary
+        # Hier is de magie: NumPy array direct naar bytes converteren
+        pc2_msg.data = cloud_data.tobytes()
+        
         return pc2_msg
 
 def main(args=None):
@@ -208,7 +184,7 @@ def main(args=None):
     node = None
     try:
         package_share_dir = get_package_share_directory('no_go_zones')
-        # Zorg dat deze map naam en bestandsnaam kloppen!
+        # Zorg dat dit pad klopt in je systeem
         yaml_file = os.path.join(package_share_dir, 'map', 'WHEELTEC.yaml')
         
         node = DynamicObstaclePublisher(yaml_file)
@@ -216,7 +192,7 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     except Exception as e:
-        print(f"CRASH: {e}")
+        print(f"Error in main: {e}")
     finally:
         if node:
             node.destroy_node()

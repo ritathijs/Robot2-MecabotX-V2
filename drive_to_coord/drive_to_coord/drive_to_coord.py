@@ -75,7 +75,7 @@ class DriveToCoord(Node):
 				return
 			self.send_goal(self.last_btDriveCoord)
 
-		elif self.last_BehaviorTreeNode in ["StartDrivingToPeople", "CheckingNearbyVisitors", "DriveWorkArea", "DriveQuizLocation"]:
+		elif self.last_BehaviorTreeNode in ["CheckingNearbyVisitors", "DriveWorkArea", "DriveQuizLocation"]:
 			if self.last_peoplesearchcoord is None:
 				self.get_logger().warn("Geen coördinaat ontvangen van peoplesearch — goal niet gestuurd!")
 				self.publish_status(12, "geen coördinaat ontvangen van peoplesearch")

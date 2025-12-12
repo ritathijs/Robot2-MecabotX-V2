@@ -55,7 +55,7 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /robot_description
-      Enabled: false
+      Enabled: true
       Links:
         All Links Enabled: true
         Expand Joint Details: false
@@ -145,7 +145,7 @@ Visualization Manager:
       Size (m): 0.009999999776482582
       Style: Flat Squares
       Topic:
-        Depth: 5
+        Depth: 20
         Durability Policy: Volatile
         Filter size: 10
         History Policy: Keep Last
@@ -179,7 +179,7 @@ Visualization Manager:
       Size (m): 0.07999999821186066
       Style: Spheres
       Topic:
-        Depth: 5
+        Depth: 20
         Durability Policy: Volatile
         Filter size: 10
         History Policy: Keep Last
@@ -218,7 +218,7 @@ Visualization Manager:
       Name: Amcl Particle Swarm
       Shape: Arrow (Flat)
       Topic:
-        Depth: 5
+        Depth: 20
         Durability Policy: Volatile
         Filter size: 10
         History Policy: Keep Last
@@ -447,7 +447,7 @@ Visualization Manager:
           Size (m): 0.009999999776482582
           Style: Flat Squares
           Topic:
-            Depth: 5
+            Depth: 20
             Durability Policy: Volatile
             Filter size: 10
             History Policy: Keep Last
