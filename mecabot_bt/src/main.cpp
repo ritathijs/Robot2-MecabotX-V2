@@ -929,6 +929,7 @@ public:
 
     BT::NodeStatus onStart() override
     {
+
         success_count_ = 0;
         latest_value_ = 999.0; 
         std_msgs::msg::String msg;
@@ -1042,6 +1043,10 @@ public:
     {
 
         rclcpp::spin_some(node_);
+        
+        std_msgs::msg::String msg_bt_;
+        msg_bt_.data = "ArrivedAtVisitors";
+        pub_bt_->publish(msg_bt_);
 
         //std::cout << "[ArrivedAtVisitors] Measured distance: " << follow_value_ << std::endl;
 
@@ -1238,7 +1243,7 @@ public:
                 {
                     if (status_code == "04")
                         received_success_ = true;
-                    else if (status_code == "05" || status_code == "06" || status_code == "07")
+                    else if (status_code == "05" ||  status_code == "07")
                         received_failure_ = true;
                         std::cout << "FAILURE ONTVANGEN";
                         
@@ -1689,6 +1694,8 @@ public:
 
     BT::NodeStatus onStart() override
     {
+
+
         getInput("timeout", timeout_);
 
         start_time_ = std::chrono::steady_clock::now();
@@ -1748,6 +1755,7 @@ public:
 
     BT::NodeStatus tick() override
     {
+
         while (true)
         {
             const BT::NodeStatus child_state = child_node_->executeTick();

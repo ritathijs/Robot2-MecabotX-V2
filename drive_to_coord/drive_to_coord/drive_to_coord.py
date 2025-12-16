@@ -29,9 +29,9 @@ class DriveToCoord(Node):
 		self.extendedzone_pub = self.create_publisher(String, '/allow_extended_zone', 1)
 
 		# Subscribers
-		self.BehaviorTreeNode_sub = self.create_subscription(String, '/BehaviorTreeNode', self.BehaviorTreeNode_callback, 10)
-		self.btDriveCoord_sub = self.create_subscription(PoseStamped, '/btDriveCoord', self.btDriveCoord_callback, 10)
-		self.BTnode_sub = self.create_subscription(PoseStamped, '/peoplesearchcoord', self.peoplesearchcoord_callback, 10)
+		self.BehaviorTreeNode_sub = self.create_subscription(String, '/BehaviorTreeNode', self.BehaviorTreeNode_callback, 1)
+		self.btDriveCoord_sub = self.create_subscription(PoseStamped, '/btDriveCoord', self.btDriveCoord_callback, 1)
+		self.BTnode_sub = self.create_subscription(PoseStamped, '/peoplesearchcoord', self.peoplesearchcoord_callback, 1)
 
 		# Wachten op nav server & Status versturen
 		self._action_client.wait_for_server()
@@ -106,7 +106,6 @@ class DriveToCoord(Node):
 		stop_msg = Twist()
 		for i in range(20):
 			self.cmd_vel_pub.publish(stop_msg)
-			time.sleep(0.1) # <--- GEWIJZIGD: Gebruik standaard python 'time' library
 
 	def send_goal(self, coordinate):
 		self.currentgoal = NavigateToPose.Goal()

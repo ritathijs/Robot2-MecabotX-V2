@@ -44,14 +44,14 @@
 				<Sequence name="FollowMeSequence">
 				    <StartDrivingToPeople timeout="5.0"/>
 				    <CheckingNearbyVisitors/>
-				    <ArrivedAtVisitors timeout="50.0" />
+				    <ArrivedAtVisitors timeout="20.0" />
 				</Sequence>  
 			</LoopSequence>
 
                       <DriveQuizLocation 
 			    timeout="5.0" 
-			    x="-0.8336695859122913" 
-			    y=" 1.360172128345675" 
+			    x="1.8136291736433354" 
+			    y="11.938536238983975" 
 			    z="0.0"
 			    sent_timestamp="{quiz_timestamp}" />
                       <IsRobotAtQuiz timeout="200.0" sent_timestamp="{quiz_timestamp}" />
