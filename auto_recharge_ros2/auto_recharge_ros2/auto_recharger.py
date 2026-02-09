@@ -652,7 +652,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 					# 获取反馈
 					nav_feedback = self.nav_controller.getFeedback()
 					if nav_feedback!=None:
-						if nav_feedback.distance_remaining < 0.2 and Duration.from_msg(nav_feedback.navigation_time) > Duration(seconds=120.0):
+						if ((nav_feedback.distance_remaining < 0.1) or ((nav_feedback.distance_remaining < 0.2) and Duration.from_msg(nav_feedback.navigation_time) > Duration(seconds=120.0))):
 							print_and_fixRetract('长时间无法到达目标点,导航已取消')
 							self.Pub_NavGoal_Cancel()
 							if self.robot['RED']==1:

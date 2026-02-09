@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>quiz_bt_node</name>
+  <version>0.0.1</version>
+  <description>
+    Combined ROS 2 node for communicating between a quiz web server and the robot.
+    Handles both receiving quiz status (publish to 'quiz') and sending robot actions
+    from 'rpitopic' to the web server via Socket.IO.
+  </description>
+  <maintainer email="rthijs@yahoo.com">wheeltec</maintainer>
+  <license>MIT</license>
+
+  <!-- ROS 2 dependencies -->
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+
+  <!-- Python package dependency -->
+  <exec_depend>python-socketio</exec_depend>
+
+  <!-- Optional test dependencies -->
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
+

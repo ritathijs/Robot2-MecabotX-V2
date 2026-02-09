@@ -499,30 +499,45 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
 };
 
-class BatteryStopDrive : public BT::SyncActionNode
+class BatteryStopDrive : public BT::StatefulActionNode
 {
 public:
-    BatteryStopDrive(const std::string &name) : BT::SyncActionNode(name, {})
+    BatteryStopDrive(const std::string &name, const BT::NodeConfiguration &config)
+        : BT::StatefulActionNode(name, config)
     {
         node_ = rclcpp::Node::make_shared("btBatteryStopDrive");
-        pub_speed_ = node_->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
+
+        pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
     }
 
-    BT::NodeStatus tick() override
+    static BT::PortsList providedPorts()
     {
-        geometry_msgs::msg::Twist stop_msg;
-        stop_msg.linear.x = 0.0;
-        stop_msg.angular.z = 0.0;
-        pub_speed_->publish(stop_msg);
+        return {};  
+    }
 
-        std::cout << "[BatteryStopDrive] Robot stopped" << std::endl;
-        return BT::NodeStatus::SUCCESS;
+    BT::NodeStatus onStart() override
+    {
+        std_msgs::msg::String msg;
+        msg.data = "BatteryStopDrive";
+        pub_->publish(msg);
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    BT::NodeStatus onRunning() override
+    {
+        std::cout << "[BatteryStopDrive] BEREIKT" << std::endl;
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override
+    {
+        std::cout << "[BatteryStopDrive] HALTED" << std::endl;
     }
 
 private:
     rclcpp::Node::SharedPtr node_;
-    rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr pub_speed_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_goal_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
 };
 
 
@@ -1243,10 +1258,10 @@ public:
                 {
                     if (status_code == "04")
                         received_success_ = true;
-                    else if (status_code == "05" ||  status_code == "07")
+                    else if (status_code == "05" ||  status_code == "07"){
                         received_failure_ = true;
                         std::cout << "FAILURE ONTVANGEN";
-                        
+                    }
                    
                 }
             });
