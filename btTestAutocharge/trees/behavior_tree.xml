@@ -1,0 +1,47 @@
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <Fallback name="TopLevelFallback">
+      
+      <Fallback name="BatteryLowFallback">
+        
+        <Parallel name="BatteryAndQuizParallel" success_threshold="1" failure_threshold="1">
+          
+          <BatteryOk/>
+
+          <Sequence name="QuizSequence">
+            <DriveQuizLocation 
+                               timeout="5.0" 
+			       x="-0.8336695859122913" 
+			       y=" 1.360172128345675" 
+			       z="0.0"
+                               sent_timestamp="{quiz_timestamp}"/>
+            
+            <IsRobotAtQuiz 
+                           timeout="200.0" 
+                           sent_timestamp="{quiz_timestamp}"/>
+            
+            <QuizActive/>
+          </Sequence>
+        </Parallel>
+
+        <Sequence name="ChargingSequence">
+          <DriveToChargingStation timeout="10.0"/>
+          
+          <StatusDriveToChargingDock timeout="100.0"/>
+          
+          <IsRobotCharging timeout="100.0"/>
+          
+          <IsBatteryFull robotLocation="{robotLocation}"/>
+          
+          <BatteryCharged timeout="5.0"/>
+        </Sequence>
+
+        <BatteryStopDrive/>
+        
+      </Fallback>
+
+      <BatteryStopDrive/>
+
+    </Fallback>
+  </BehaviorTree>
+</root>

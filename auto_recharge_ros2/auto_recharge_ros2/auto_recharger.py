@@ -9,6 +9,7 @@ import rclpy
 from rclpy.node import Node
 from nav2_simple_commander.robot_navigator import BasicNavigator,TaskResult
 from rclpy.duration import Duration
+from std_msgs.msg import String  
 
 # 用到的变量定义
 from std_msgs.msg import Bool 
@@ -112,6 +113,8 @@ class AutoRecharger(Node):
         'car_mode':'mini_mec'
         }
 
+		self.Event_pub = self.create_publisher(String, '/auto_recharge_event', 10)
+
         #用于记录导航结束是的机器人Z轴姿态
 		self.nav_end_z=0
 		self.start_turn = 0
@@ -197,6 +200,14 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 		response = res.result()
 		self.server_set_state = response.name
 
+	def publish_event(self, msg):
+		"""Publish an auto recharge event to /auto_recharge_event"""
+		event_msg = String()
+		event_msg.data = msg
+		self.Event_pub.publish(event_msg)
+		print_and_fixRetract(msg)  
+
+
 	# 设置自动回充的状态
 	def set_charge_mode(self,value,max_callcount=10):
 		# 注:不可在回调函数调用服务,否则卡死
@@ -269,6 +280,9 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 			self.json_data['orien_z'], 
 			self.json_data['orien_w'])
 		
+		# BT HIER START RIJDEN
+		self.publish_event("DRIVING-TO-DOCK")
+
 		# 导航到充电桩
 		self.nav_controller.goToPose(nav_goal)
 
@@ -367,6 +381,8 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 	def Charging_Flag_callback(self, topic):
 		'''更新机器人充电状态'''
 		if(self.robot['Charging']==0 and topic.data==1):
+			# BT Start met opladen
+			self.publish_event("ROBOT-CHARGING")
 			print_and_fixRetract(GREEN+"Charging started!"+RESET)
 		if(self.robot['Charging']==1 and topic.data==0):
 			print_and_fixRetract(YELLOW+"Charging disconnected!"+RESET)
@@ -556,7 +572,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
 		#电压过低时开启导航自动回充
 		if self.robot['Charging']==0:
-			if (self.robot['Type']=='Plus'and self.robot['Voltage']<20) or (self.robot['Type']=='Mini' and self.robot['Voltage']<10):
+			if (self.robot['Type']=='Plus'and self.robot['Voltage']<23) or (self.robot['Type']=='Mini' and self.robot['Voltage']<10):
 				time.sleep(1)
 				self.power_lost_count=self.power_lost_count+1 # 低电量滤波
 
@@ -567,6 +583,9 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 					# 电量低且小车不在回充模式,开启导航充电
 					if self.chargeflag==0:
 						self.Pub_NavGoal_Cancel() # 取消导航
+                        # BT: batterij laag, laden moet starten
+						self.publish_event("BATTERY-LOW")
+			
 
 						if 'akm' in self.robot['car_mode']:
 							self.chargeflag=2
@@ -594,12 +613,14 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 			# 需要监听导航结果
 			res = None
 			nav_feedback = None
-			if self.star_getNav_Feedback_Flag==1:
+			if self.star_getNav_Feedback_Flag==1:  # Als deze vlag gezet is moet er actief geluisterd worden naar de feedback van de nav-code
 				# 等待导航结束
 				if self.nav_controller.isTaskComplete()==True:
 					self.star_getNav_Feedback_Flag = 0 # 导航任务结束,结束监听
 					res = self.nav_controller.getResult()
 					if res==TaskResult.SUCCEEDED:
+						# BT rijden naar dock succesvol => nu nog docken zelf
+						self.publish_event("DRIVE-TO-DOCK-SUCCESS")
 						print("已到达目标点.")
 						if self.robot['RED']==1:
 							# 成功到达目标点,开启自动回充
@@ -617,10 +638,16 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 					# 导航被取消了
 					elif res==TaskResult.CANCELED:
 						print_and_fixRetract('nav was canceled.') 
+						# BT rijden naar dock gecanceled
+						self.publish_event("DRIVE-TO-DOCK-CANCELED")
+
 
 					elif res==TaskResult.FAILED:
 						# 导航失败,可能是用户使用rviz新建了目标点,也可能是无法规划到目的
 						print_and_fixRetract('goal failed.')
+						# BT rijden naar dock gefaald
+						self.publish_event("DRIVE-TO-DOCK-FAILED")
+
 				else:
 					# 获取反馈
 					nav_feedback = self.nav_controller.getFeedback()
@@ -636,6 +663,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
 			#充电期间打印电池电压、充电时间
 			if self.robot['Charging']==1:
+
 				self.lost_power_once=1
 				percent=0
 				percen_form=0
@@ -679,6 +707,9 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 				self.start_turn=0
 				self.Stop_Charge()
 				print_and_fixRetract(RED+'自转已完成,无法找到充电桩位置,已停止自动回充.(Rotation completed, unable to locate charging station, automatic recharging has been stopped.)'+RESET)
+				#BT docking gefaald, wel aan laadstation geraakt
+				self.publish_event("DOCKING-FAILED")
+
 
 		#机器人充电完成判断
 		if self.charge_complete>10:
@@ -687,6 +718,9 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 				self.last_charge_complete=0
 				self.Stop_Charge()			
 			print_and_fixRetract(GREEN+'充电已完成.(Chrge complete.)'+RESET)#Charging complete
+			#BT charging gelukt
+			self.publish_event("CHARGING-COMPLETED")
+
 		self.last_charge_complete=self.charge_complete
 
 	

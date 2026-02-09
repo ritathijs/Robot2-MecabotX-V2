@@ -96,7 +96,7 @@ controller_server:
       vx_max: 0.2       #目标最大前进速度（米/秒）
       vx_min: -0.2      #目标最大反向速度（米/秒）
       vy_max: 0.2       #如果使用Omni运动模型，目标最大横向速度（m/s）
-      vy_max: -0.2       #如果使用Omni运动模型，目标最大横向速度（m/s）
+      vy_min: -0.2       #如果使用Omni运动模型，目标最大横向速度（m/s） RT: origineel stond er foutief een tweede keer vy_max aangepast naar vy_min=-0.2
       wz_max: 1.3       #最大旋转速度（弧度/秒）
       iteration_count: 1 #迭代次数
       prune_distance: 1.7 #路径上距离机器人最近点的距离（米）

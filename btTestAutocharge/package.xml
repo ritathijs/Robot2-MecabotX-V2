@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>btTestAutocharge</name>
+  <version>0.0.1</version>
+  <description>
+    BehaviorTree.CPP based main behavior tree for autonomous robot with charging and quiz logic
+  </description>
+
+  <maintainer email="you@todo.todo">your_name</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>behaviortree_cpp_v3</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
+

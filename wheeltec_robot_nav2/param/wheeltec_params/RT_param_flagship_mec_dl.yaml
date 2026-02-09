@@ -29,7 +29,6 @@ amcl:
     resample_interval: 1            #重采样之前所需的过滤器更新次数
     robot_model_type: "nav2_amcl::DifferentialMotionModel" #插件类的完全限定类型。
     #选项为“nav2_amcl::DifferentialMotionModel”和“nav2_amcl::OmniMotionModel”。
-
     save_pose_rate: 0.5             #将最后估计的姿势和协方差存储到参数服务器的最大速率（Hz）
     sigma_hit: 0.02                 #模型的 z_hit 部分中使用的高斯模型的标准差
     tf_broadcast: true              #将其设置为 false 以防止 amcl 发布全局框架和里程计框架之间的变换
@@ -111,14 +110,15 @@ controller_server:
       batch_size: 2000  #在给定迭代中从当前最佳控制序列中随机采样的候选轨迹的数量
       vx_std: 0.2       #Vx 的抽样标准差
       vy_std: 0.2       #Vy 的抽样标准差
-      wz_std: 0.2       #org: 0.4 Wz（角速度）的抽样标准差
+      wz_std: 0.2       #org: 0.4 Wz（角速度）的抽样标准差  
       vx_max: 0.25       #org: 0.5 目标最大前进速度（米/秒）
       vx_min: -0.1      #org: -0,5 目标最大反向速度（米/秒）
       vy_max: 0.2       #org: 0.5 如果使用Omni运动模型，目标最大横向速度（m/s）
+      vy_min: -0.2 	#RT toegevoegd, ontbrak 
       wz_max: 0.5       #org 0.2 最大旋转速度（弧度/秒）
       ax_max: 0.5       #org 1.5
       ax_min: -0.5      #org: -1.5
-      ay_max: 0.0       #org: 0
+      ay_max: 0.4       #org: 0   RT aangepast stond org op "0" maar dan mag hij niet naar y bewegen.
       az_max: 1.0       #org: 1.5
       iteration_count: 4 #org: 1迭代次数
       prune_distance: 1.5 #路径上距离机器人最近点的距离（米）
@@ -126,7 +126,7 @@ controller_server:
       transform_tolerance: 0.1 #使用 TF（s）进行数据转换的时间容差
       temperature: 0.3 #org: 0.5根据成本选择轨迹，0表示使用成本最佳的控制，巨大的值将导致仅取所有轨迹的平均值而不考虑成本。
       gamma: 0.015 #平滑度（高）和低能耗（低）之间的权衡,保持默认值
-      motion_model: "DiffDrive" #org DiffDrive 用于轨迹规划的所需运动模型。选项包括DiffDrive、Omni或Ackermann。
+      motion_model: "Omni" #org DiffDrive 用于轨迹规划的所需运动模型。选项包括DiffDrive、Omni或Ackermann。 RT->op Omni gezet
       visualize: false #是否发布调试轨迹以供可视化。
       TrajectoryVisualizer: #轨迹可视化
         trajectory_step: 5 #轨迹之间的步骤可视化以对候选轨迹池进行下采样
