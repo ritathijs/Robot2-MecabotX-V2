@@ -651,15 +651,34 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 				else:
 					# 获取反馈
 					nav_feedback = self.nav_controller.getFeedback()
+					huidige_afstand = nav_feedback.distance_remaining
 					if nav_feedback!=None:
-						if ((nav_feedback.distance_remaining < 0.1) or ((nav_feedback.distance_remaining < 0.2) and Duration.from_msg(nav_feedback.navigation_time) > Duration(seconds=120.0))):
+						if ((huidige_afstand < 0.1) or ((huidige_afstand < 0.2) and Duration.from_msg(nav_feedback.navigation_time) > Duration(seconds=120.0))):
 							print_and_fixRetract('长时间无法到达目标点,导航已取消')
+
+					# Maak een gedetailleerd bericht voor het topic
+							event_msg = f"DICHT-GENOEG: afstand={huidige_afstand:.3f}m"
+							self.publish_event(event_msg) # Dit gaat naar /auto_recharge_event
 							self.Pub_NavGoal_Cancel()
 							if self.robot['RED']==1:
 								self.chargeflag=1
 								self.Pub_Recharger_Flag()
-					else:
-						pass
+							else:
+								# We zien niets, dus we moeten gaan zoeken!
+								print_and_fixRetract(YELLOW + 'Nog geen infrarood gevonden, start zwenken om te zoeken...' + RESET)
+								
+								#self.nav_end_z = self.robot['Rotation_Z']
+								#self.start_turn = 1 # Activeer de zoek-modus
+            
+								#topic = Twist()
+								#topic.angular.z = 0.2
+								#self.Cmd_vel_pub.publish(topic)
+
+								topic=Twist()
+								topic.linear.x = 0.1
+								self.Cmd_vel_pub.publish(topic)
+						else:
+							pass
 
 			#充电期间打印电池电压、充电时间
 			if self.robot['Charging']==1:
