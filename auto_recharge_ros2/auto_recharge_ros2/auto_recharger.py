@@ -384,8 +384,13 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 			# BT Start met opladen
 			self.publish_event("ROBOT-CHARGING")
 			print_and_fixRetract(GREEN+"Charging started!"+RESET)
+			self.hard_stop_robot()
 		if(self.robot['Charging']==1 and topic.data==0):
 			print_and_fixRetract(YELLOW+"Charging disconnected!"+RESET)
+			if self.chargeflag == 1:
+				print_and_fixRetract(YELLOW+"Code bereikt"+RESET)
+				self.hard_stop_robot()
+				self.retry_docking_if_not_charging()
 		self.robot['Charging']=topic.data
 
 	def Charging_Current_callback(self, topic):
@@ -508,6 +513,24 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 		'''更新的机器人实时位姿'''
 		self.robot['Rotation_Z']=topic.pose.pose.position.z	 
 
+	def hard_stop_robot(self):
+		# Stop Nav2
+		try:
+			self.nav_controller.cancelTask()
+		except Exception:
+			pass
+
+		# Stop zoek-rotatie
+		self.start_turn = 0
+		self.find_redsignal = 0
+
+		# Publiceer expliciet 0-velocity
+		stop = Twist()
+		for _ in range(25):
+			self.Cmd_vel_pub.publish(stop)
+			time.sleep(0.05)
+
+
 	def Stop_Charge(self):
 		#如果在导航回充模式下，关闭导航
 		self.Pub_NavGoal_Cancel() 
@@ -536,6 +559,37 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 				time.sleep(1)
 			topic.linear.x = 0.0
 			self.Cmd_vel_pub.publish(topic)
+
+	def retry_docking_if_not_charging(self):
+		# kleine wachttijd na hard stop
+		print_and_fixRetract(
+				YELLOW + "Time delay voor retry docking ingezet (verwacht stilstaan)" + RESET
+			)
+		time.sleep(2)
+
+	
+		print_and_fixRetract(
+				YELLOW + "Niet aan het laden na hard stop, probeer opnieuw te docken..." + RESET
+			)
+
+		# Klein stukje vooruit
+		move = Twist()
+		move.linear.x = 0.20
+		self.Cmd_vel_pub.publish(move)
+		time.sleep(3.0)
+
+		# Stop opnieuw
+		self.Cmd_vel_pub.publish(Twist())
+
+		# Start opnieuw IR-zoekactie
+		self.start_turn = 1
+		self.find_redsignal = 0
+		self.nav_end_z = self.robot['Rotation_Z']
+
+		rotate = Twist()
+		rotate.angular.z = 0.2
+		self.Cmd_vel_pub.publish(rotate)
+
 
 	def autoRecharger(self, key):
 		'''键盘控制开始自动回充:1-导航控制寻找充电桩,2-纯回充装备控制寻找充电桩
@@ -686,6 +740,8 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 				self.lost_power_once=1
 				percent=0
 				percen_form=0
+				#self.hard_stop_robot() #harde stop van robot als hij aan het laden is
+				#self.retry_docking_if_not_charging()
 				if self.robot['Type']=='Plus':
 					percent= (self.robot['Voltage']-20)/5 
 					percent_form=format(percent, '.0%')
