@@ -1,0 +1,6 @@
+image: keepout_mask.pgm
+resolution: 0.05
+origin: [-43.6, -37.2, 0] # exact hetzelfde als de originele map.yaml!
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.25

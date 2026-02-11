@@ -572,7 +572,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
 		#电压过低时开启导航自动回充
 		if self.robot['Charging']==0:
-			if (self.robot['Type']=='Plus'and self.robot['Voltage']<23) or (self.robot['Type']=='Mini' and self.robot['Voltage']<10):
+			if (self.robot['Type']=='Plus'and self.robot['Voltage']<20) or (self.robot['Type']=='Mini' and self.robot['Voltage']<10):
 				time.sleep(1)
 				self.power_lost_count=self.power_lost_count+1 # 低电量滤波
 
@@ -653,7 +653,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 					nav_feedback = self.nav_controller.getFeedback()
 					huidige_afstand = nav_feedback.distance_remaining
 					if nav_feedback!=None:
-						if ((huidige_afstand < 0.1) or ((huidige_afstand < 0.2) and Duration.from_msg(nav_feedback.navigation_time) > Duration(seconds=120.0))):
+						if (((huidige_afstand < 0.2) and Duration.from_msg(nav_feedback.navigation_time) > Duration(seconds=120.0))):
 							print_and_fixRetract('长时间无法到达目标点,导航已取消')
 
 					# Maak een gedetailleerd bericht voor het topic

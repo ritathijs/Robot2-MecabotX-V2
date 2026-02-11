@@ -1,8 +1,8 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>no_go_zones</name>
+  <name>keepout_filter_throttle</name>
   <version>0.0.1</version>
-  <description>Stelt de no_go_zones dynamisch in</description>
+  <description>Veranderd de YAML van de keepout_filter_server</description>
   <maintainer email="matthijs.mondelaers@student.kuleuven.be">Student</maintainer>
   <license>MIT</license>
 
