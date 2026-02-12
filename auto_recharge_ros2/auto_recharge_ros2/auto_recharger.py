@@ -507,6 +507,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 	# 				self.start_turn = 1
 	# 				self.nav_end_z = self.robot['Rotation_Z']
 
+	
 
 
 	def Odom_callback(self, topic):
