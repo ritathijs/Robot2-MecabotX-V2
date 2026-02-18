@@ -28,7 +28,7 @@ class QuizBTNode(Node):
         self.sio.on('drive_to_quiz_location', self.on_drive_to_quiz_location)
 
         # Connect to server
-        server_ip = 'http://192.168.137.199:80'
+        server_ip = 'http://192.168.137.100:80'
         self.sio.connect(server_ip, retry=True)
         self.get_logger().info(f"Connected to server at {server_ip}")
 

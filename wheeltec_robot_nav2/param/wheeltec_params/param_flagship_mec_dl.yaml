@@ -110,15 +110,15 @@ controller_server:
       model_dt: 0.05    #每个时间步长的时间步长的长度dt（以秒为单位）是预测范围
       batch_size: 2000  #在给定迭代中从当前最佳控制序列中随机采样的候选轨迹的数量
       vx_std: 0.2       #Vx 的抽样标准差
-      vy_std: 0.2       #Vy 的抽样标准差
+      vy_std: 0.02       #Vy 的抽样标准差
       wz_std: 0.2       #org: 0.4 Wz（角速度）的抽样标准差
       vx_max: 0.25       #org: 0.5 目标最大前进速度（米/秒）
       vx_min: -0.1      #org: -0,5 目标最大反向速度（米/秒）
-      vy_max: 0.2       #org: 0.5 如果使用Omni运动模型，目标最大横向速度（m/s）
+      vy_max: 0.05       #org: 0.5 如果使用Omni运动模型，目标最大横向速度（m/s）
       wz_max: 0.5       #org 0.2 最大旋转速度（弧度/秒）
       ax_max: 0.5       #org 1.5
       ax_min: -0.5      #org: -1.5
-      ay_max: 0.0       #org: 0
+      ay_max: 0.1       #org: 0
       az_max: 1.0       #org: 1.5
       iteration_count: 4 #org: 1迭代次数
       prune_distance: 1.5 #路径上距离机器人最近点的距离（米）
@@ -126,7 +126,7 @@ controller_server:
       transform_tolerance: 0.5 #使用 TF（s）进行数据转换的时间容差
       temperature: 0.3 #org: 0.5根据成本选择轨迹，0表示使用成本最佳的控制，巨大的值将导致仅取所有轨迹的平均值而不考虑成本。
       gamma: 0.015 #平滑度（高）和低能耗（低）之间的权衡,保持默认值
-      motion_model: "DiffDrive" #org DiffDrive 用于轨迹规划的所需运动模型。选项包括DiffDrive、Omni或Ackermann。
+      motion_model: "Omni" #org DiffDrive 用于轨迹规划的所需运动模型。选项包括DiffDrive、Omni或Ackermann。
       visualize: false #是否发布调试轨迹以供可视化。
       TrajectoryVisualizer: #轨迹可视化
         trajectory_step: 5 #轨迹之间的步骤可视化以对候选轨迹池进行下采样
@@ -154,14 +154,14 @@ controller_server:
       ObstaclesCritic:
         enabled: true
         cost_power: 1
-        repulsion_weight: 1.5 #权重参数，通常优先选择成本较低的空间中的路线。
+        repulsion_weight: 4.0 #org 1.5权重参数，通常优先选择成本较低的空间中的路线。
         critical_weight: 30.0 #应用于临界碰撞的权重，用于collision_margin_distance防止近距离碰撞
         consider_footprint: true #org: false 是否使用点成本（如果机器人是圆形的或者计算能力低）或计算 SE2 足迹成本
         collision_cost: 10000.0 #应用于轨迹中真实碰撞的成本。
-        collision_margin_distance: 0.1 # 碰撞边缘距离，应该设置在0.05-0.2之间，请确保将此参数设置为预计机器人需要穿越的最窄空间
+        collision_margin_distance: 0.15 # org:0.1 碰撞边缘距离，应该设置在0.05-0.2之间，请确保将此参数设置为预计机器人需要穿越的最窄空间
         near_goal_distance: 0.4 #靠近目标的距离（米）停止应用优先障碍物项，以允许机器人平稳地收敛到靠近障碍物的目标姿势，0.5 --> 0.6 -->0.3(Tues) 
         cost_scaling_factor: 5.0
-        inflation_radius: 0.15  #膨胀半径，仅限Humble
+        inflation_radius: 0.40  #org: 0.15 膨胀半径，仅限Humble
 
       PreferForwardCritic: #激励机器人前进，而不是后退
         enabled: true
@@ -216,12 +216,14 @@ local_costmap:
       resolution: 0.05     #代价地图1像素的分辨率，以米为单位
       #robot_radius: 0.20   #机器人半径，如果未提供足迹坐标，则使用机器人半径。
       #original footprint: "[ [-0.288, -0.303], [-0.288, 0.303],[0.288,0.303],[0.288, -0.303] ]"
-      footprint: "[ [-0.488, -0.503], [-0.488, 0.503], [0.488, 0.503], [0.488, -0.503] ]"
-      plugins: ["voxel_layer", "inflation_layer"] #插件包括:{“体素层”，“膨胀层”}
+      #testfootprint: "[ [-0.488, -0.503], [-0.488, 0.503], [0.488, 0.503], [0.488, -0.503] ]"
+      footprint: "[ [-0.288, -0.303], [-0.288, 0.303],[0.288,0.303],[0.288, -0.303] ]"
+      footprint_padding: 0.2
+      plugins: ["voxel_layer", "camera_layer", "inflation_layer"] #插件包括:{“体素层”，“膨胀层”}
       inflation_layer:                             #膨胀层参数
         plugin: "nav2_costmap_2d::InflationLayer"  #膨胀层插件。
-        cost_scaling_factor: 3.0                   #成本缩放因子，决定障碍物成本随距离的递减速度。
-        inflation_radius: 0.55                     #org: 0.35 膨胀半径       
+        cost_scaling_factor: 3.5                   #org: 3成本缩放因子，决定障碍物成本随距离的递减速度。
+        inflation_radius: 0.8                     #testwaarden tot nu 0.55; org: 0.35 膨胀半径       
         
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"      #体素层插件。
@@ -232,7 +234,7 @@ local_costmap:
         z_voxels: 16                               #体素地图的Z轴体素数量
         max_obstacle_height: 2.0                   #可检测障碍物的最大高度（米）
         mark_threshold: 0                          #标记体素的阈值
-        observation_sources: scan #camera_points    #观测源
+        observation_sources: scan                  #观测源
         scan:
           topic: /scan
           max_obstacle_height: 2.0                  #可检测障碍物的最大高度（米）
@@ -243,16 +245,22 @@ local_costmap:
           raytrace_min_range: 0.0                   #控制光线追踪从代价地图中清除障碍物的最大范围 
           obstacle_max_range: 2.5                   #控制代价地图上标记障碍物的最大范围
           obstacle_min_range: 0.0                   #控制代价地图上标记障碍物的最小范围
-        camera_points:                              #Toevoeging van de camera, ook hierboven in de lijst
-          topic: /camera/depth/points
-          data_type: "PointCloud2" 
-          marking: True
-          clearing: True
-          obstacle_max_range: 2.5
-          max_obstacle_height: 2.0
-          min_obstacle_height: 0.1
 
+      camera_layer:
+        plugin: "nav2_costmap_2d::VoxelLayer" # Of ObstacleLayer
+        enabled: True
+        mark_threshold: 1
+        max_obstacle_height: 2.0
+        min_obstacle_height: 0.01
+        observation_sources: camera_points
+        camera_points:
+          topic: /camera_scan
+          data_type: "LaserScan"
+          clearing: True
+          marking: True
+          
       always_send_full_costmap: True                 #是否每次更新时都发送完整的成本图，而不是更新
+      
   local_costmap_client:
     ros__parameters:
       use_sim_time: False
@@ -268,16 +276,18 @@ global_costmap:
       global_frame: map                 #全局框架
       robot_base_frame: base_footprint  #机器人底座框架
       use_sim_time: False               #仿真时间 
-      #robot_radius: 0.20                #机器人半径
+      #robot_radius: 0.20               #机器人半径
       #original footprint: "[ [-0.288, -0.303], [-0.288, 0.303],[0.288,0.303],[0.288, -0.303] ]"
-      footprint: "[ [-0.488, -0.503], [-0.488, 0.503], [0.488, 0.503], [0.488, -0.503] ]"
+      #test footprint: "[ [-0.488, -0.503], [-0.488, 0.503], [0.488, 0.503], [0.488, -0.503] ]"
+      footprint: "[ [-0.288, -0.303], [-0.288, 0.303],[0.288,0.303],[0.288, -0.303] ]"
+      footprint_padding: 0.2
       resolution: 0.05                  #全局地图1像素的分辨率，以米为单位
       track_unknown_space: true
 
-      plugins: ["static_layer", "obstacle_layer", "keepout_filter", "inflation_layer"]
+      plugins: ["static_layer", "obstacle_layer", "camera_layer", "keepout_filter", "inflation_layer"]
        
-      obstacle_layer:  #障碍层参数
-        plugin: "nav2_costmap_2d::ObstacleLayer" #障碍层插件
+      obstacle_layer:                              #障碍层参数
+        plugin: "nav2_costmap_2d::ObstacleLayer"   #障碍层插件
         enabled: True
         observation_sources: scan                  #观测源
         scan:
@@ -290,6 +300,19 @@ global_costmap:
           raytrace_min_range: 0.0                  #控制光线追踪从代价地图中清除障碍物的最大范围 
           obstacle_max_range: 2.5                  #控制代价地图上标记障碍物的最大范围
           obstacle_min_range: 0.0                  #控制代价地图上标记障碍物的最小范围
+ 
+      camera_layer:
+        plugin: "nav2_costmap_2d::VoxelLayer"
+        enabled: True
+        mark_threshold: 1
+        observation_sources: camera_points
+        camera_points:
+          topic: /camera_scan
+          data_type: "LaserScan"
+          clearing: True
+          marking: True
+          max_obstacle_height: 2.0
+          min_obstacle_height: 0.01
           
       static_layer: #静态层参数
         plugin: "nav2_costmap_2d::StaticLayer"     #静态层插件
@@ -302,9 +325,10 @@ global_costmap:
           
       inflation_layer: #膨胀层参数
         plugin: "nav2_costmap_2d::InflationLayer"  #膨胀层插件
-        cost_scaling_factor: 3.0                   #成本缩放因子，决定障碍物成本随距离的递减速度。
-        inflation_radius: 0.55                     #org: 0.3 膨胀半径
+        cost_scaling_factor: 3.5                   #org: 3成本缩放因子，决定障碍物成本随距离的递减速度。
+        inflation_radius: 0.85                     #testwaarde: 0.55; org: 0.3 膨胀半径
       always_send_full_costmap: True               #是否每次更新时都发送完整的成本图，而不是更新
+      
   global_costmap_client:
     ros__parameters:
       use_sim_time: False

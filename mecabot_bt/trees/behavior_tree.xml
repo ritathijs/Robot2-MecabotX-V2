@@ -50,8 +50,8 @@
 
                       <DriveQuizLocation 
 			    timeout="5.0" 
-			    x="1.8136291736433354" 
-			    y="11.938536238983975" 
+			    x="4.0390801429748535" 
+			    y="3.406137228012085" 
 			    z="0.0"
 			    sent_timestamp="{quiz_timestamp}" />
                       <IsRobotAtQuiz timeout="200.0" sent_timestamp="{quiz_timestamp}" />

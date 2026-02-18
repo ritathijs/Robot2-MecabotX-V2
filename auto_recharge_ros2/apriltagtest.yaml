@@ -1,0 +1,5 @@
+# Bestand: tags.yaml
+apriltag:
+  ros__parameters:
+    family: "36h11"
+    size: 0.08  # BELANGRIJK: Verander dit naar de werkelijke breedte van het zwarte vierkant in meters!

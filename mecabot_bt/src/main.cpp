@@ -357,7 +357,7 @@ public:
     }
 
     BT::NodeStatus tick() override {
-         return BT::NodeStatus::SUCCESS;
+        return BT::NodeStatus::SUCCESS;
         std::string location;
         if (!getInput("robotLocation", location)) {
             std::cerr << "[CheckInWorkingZone] Geen robotLocation gevonden op blackboard!\n";
@@ -565,6 +565,8 @@ public:
 
     BT::NodeStatus onStart() override
     {
+        return BT::NodeStatus::SUCCESS;
+
         // Publish BT node naam
         std_msgs::msg::String bt_msg;
         bt_msg.data = "DriveWorkArea";
@@ -960,7 +962,7 @@ public:
         rclcpp::spin_some(node_);
         std::cout << "[CheckingNearbyVisitors] Measured distance: " << latest_value_ << std::endl;
 
-        if (latest_value_ < 1.5)
+        if (latest_value_ < 2)
         {
             success_count_ = 3;
 
@@ -1094,7 +1096,7 @@ public:
         if (elapsed >= timeout_)
         {
             std::cout << "[ArrivedAtVisitors] Timeout (" << elapsed << "s) -> FAILURE" << std::endl;
-            return BT::NodeStatus::FAILURE;
+            return BT::NodeStatus::SUCCESS;  // TIJDELIJK NAAR SUCCESS VOOR TESTING ZONDER QUINTEN
         }
 
         //std::cout << "[ArrivedAtVisitors] Running... distance=" << follow_value_
@@ -1153,6 +1155,8 @@ public:
 
     BT::NodeStatus onStart() override
     {
+        return BT::NodeStatus::SUCCESS;
+
         // Publish BT node naam
         std_msgs::msg::String bt_msg;
         bt_msg.data = "DriveQuizLocation";
@@ -1279,6 +1283,8 @@ public:
 
     BT::NodeStatus onStart() override
     {
+        return BT::NodeStatus::SUCCESS;
+
         received_success_ = false;
         received_failure_ = false;
         start_time_ = std::chrono::steady_clock::now();
@@ -1488,6 +1494,8 @@ public:
 
     BT::NodeStatus onStart() override
     {
+        return BT::NodeStatus::SUCCESS;
+
         received_success_ = false;
         received_failure_ = false;
         start_time_ = std::chrono::steady_clock::now();
@@ -1773,6 +1781,7 @@ public:
 
         while (true)
         {
+
             const BT::NodeStatus child_state = child_node_->executeTick();
 
             if (child_state == BT::NodeStatus::RUNNING)
