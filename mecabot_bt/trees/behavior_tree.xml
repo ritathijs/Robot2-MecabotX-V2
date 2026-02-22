@@ -24,16 +24,25 @@
               <!-- Linkerkid: Parallel RootParallel -->
               <Parallel name="RootParallel" success_threshold="1" failure_threshold="1">
                 <!-- Linkerkid: BatteryOk -->
-                <BatteryOk/>
+		<BatteryOk robotLocationBAT="{robotLocationBAT}"/>
 
                 <!-- Rechterkind: ForceSuccess op de Fallback MainFallback -->
                 <ForceSuccess name="MainFallbackForceSuccess">
                   <Fallback name="MainFallback">
                     <!-- Linkerkind: MainSequence -->
                     <Sequence name="MainSequence">
-                      <Fallback name="CheckWorkingZone">
-                        <CheckInWorkingZone robotLocation="{robotLocation}"/>
-			<Sequence name="GoToWorkAreaSequence">
+			<Fallback name="CheckWorkingZone">
+
+			  <CheckInWorkingZone
+			      robotLocation="{robotLocation}"
+			      start_hour="13"
+			      start_minute="0"
+			      end_hour="17"
+			      end_minute="0"
+			      robotLocationBAT="{robotLocationBAT}"
+			  />
+
+			  <Sequence name="GoToWorkAreaSequence">
 
 			  <DriveWorkArea 
 			      timeout="5.0"
@@ -80,8 +89,17 @@
                 <Sequence name="ChargingSequence">
                   <CheckMainBTErrorState stop_flag="{stop_flag}"/>
                   <DriveToChargingStation timeout="5.0"/>
-                  <StatusDriveToChargingDock timeout="5.0"/>
+                  <StatusDriveToChargingDock timeout="200.0"/>
                   <IsRobotCharging timeout="200"/>
+                  
+                  <RobotWaitInChargingStation
+		      start_hour="9"
+		      start_minute="0"
+		      end_hour="17"
+		      end_minute="0"/>
+
+	
+		  <StopRobotCharging/>
                   <IsBatteryFull robotLocation="{robotLocation}"/>
                   <BatteryCharged timeout="5"/>
                 </Sequence>

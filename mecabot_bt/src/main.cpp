@@ -179,59 +179,9 @@ private:
     double level_;
 };
 
-// KOPPEL ONDERAAN BIJ FACTORY.REGISTERNODE DEZE NODE AAN DE XML NODE VOOR SIMULATIE (FOUTEN SIMULEREN) 
-class BatterySimOk : public BT::StatefulActionNode
-{
-public:
-    BatterySimOk(const std::string &name, const BT::NodeConfiguration &config)
-        : BT::StatefulActionNode(name, config), level_(100.0)
-    {}
 
-    static BT::PortsList providedPorts() { return {}; }
 
-    BT::NodeStatus onStart() override
-    {
-        std::cout << "[BatteryOk] Starting check, level = " << level_ << "%" << std::endl;
-        level_ -= 0.0;
-        // Als batterij al te laag is, meteen FAILURE
-        if (level_ < 30.0)
-        {
-      
-            std::cout << "[BatteryOk] Battery too low! -> FAILURE" << std::endl;
-            level_ += 0;
-            return BT::NodeStatus::FAILURE;
-        }
 
-        // Anders RUNNING totdat de volgende tick komt
-        return BT::NodeStatus::RUNNING;
-    }
-
-    BT::NodeStatus onRunning() override
-    {
-        // Simuleer dat de batterij afneemt
-        level_ -= 5.0;
-        std::cout << "[BatteryOk] Battery level = " << level_ << "% -> RUNNING" << std::endl;
-
-        if (level_ < 30.0)
-        {
-            std::cout << "[BatteryOk] Battery too low! -> FAILURE" << std::endl;
-            level_ += 0;
-            return BT::NodeStatus::FAILURE;
-        }
-
-        return BT::NodeStatus::RUNNING;
-    }
-
-    void onHalted() override
-    {
-        std::cout << "[BatteryOk] HALTED" << std::endl;
-    }
-
-private:
-    double level_;
-};
-
-// GEBRUIK DEZE BATTERIJCHECK VOOR DE ECHTE FUNCTIONALITEIT TE TESTEN
 class BatteryOk : public BT::StatefulActionNode
 {
 public:
@@ -239,51 +189,95 @@ public:
         : BT::StatefulActionNode(name, config)
     {
         node_ = rclcpp::Node::make_shared("bt_BatteryOk_node");
+
         sub_ = node_->create_subscription<std_msgs::msg::String>(
             "/auto_recharge_event", 10,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
                 last_event_ = msg->data;
             });
+
+        // Nieuwe publisher voor force charge
+        force_charge_pub_ = node_->create_publisher<std_msgs::msg::String>(
+            "/force_charge", 10);
     }
 
-    static BT::PortsList providedPorts() { return {}; }
+    static BT::PortsList providedPorts()
+    {
+        return {
+            BT::InputPort<std::string>("robotLocationBAT")
+        };
+    }
 
     BT::NodeStatus onStart() override
     {
         rclcpp::spin_some(node_);
-        //std::cout << "[BatteryOk] START, last_event=" << last_event_ << std::endl;
 
+        // ----------------------------
+        // Blackboard policy check eerst
+        // ----------------------------
+        std::string bat_state;
+
+        if (getInput("robotLocationBAT", bat_state))
+        {
+            if (bat_state == "FORCE-CHARGING")
+            {
+                std::cout << "[BatteryOk] FORCE-CHARGING detected -> sending START" << std::endl;
+
+                std_msgs::msg::String msg;
+                msg.data = "START";
+                force_charge_pub_->publish(msg);
+
+                return BT::NodeStatus::FAILURE;
+            }
+        }
+
+        // ----------------------------
+        // Bestaande logica
+        // ----------------------------
         if (last_event_ == "BATTERY-LOW")
         {
-          //  std::cout << "[BatteryOk] Battery low -> FAILURE" << std::endl;
             return BT::NodeStatus::FAILURE;
         }
+
         return BT::NodeStatus::RUNNING;
     }
 
     BT::NodeStatus onRunning() override
     {
         rclcpp::spin_some(node_);
+
+        // Policy check opnieuw tijdens running
+        std::string bat_state;
+
+        if (getInput("robotLocationBAT", bat_state))
+        {
+            if (bat_state == "FORCE-CHARGING")
+            {
+                std_msgs::msg::String msg;
+                msg.data = "START";
+                force_charge_pub_->publish(msg);
+
+                return BT::NodeStatus::FAILURE;
+            }
+        }
+
         if (last_event_ == "BATTERY-LOW")
         {
-            //std::cout << "[BatteryOk] Battery low detected -> FAILURE" << std::endl;
             return BT::NodeStatus::FAILURE;
         }
 
-        //std::cout << "[BatteryOk] Battery OK -> RUNNING" << std::endl;
         return BT::NodeStatus::RUNNING;
     }
 
-    void onHalted() override
-    {
-        //std::cout << "[BatteryOk] HALTED" << std::endl;
-    }
+    void onHalted() override {}
 
 private:
     std::string last_event_;
+
     rclcpp::Node::SharedPtr node_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr force_charge_pub_;
 };
 
 
@@ -346,40 +340,84 @@ class CheckInWorkingZone : public BT::SyncActionNode
 {
 public:
     CheckInWorkingZone(const std::string& name, const BT::NodeConfiguration& config)
-        : BT::SyncActionNode(name, config) {
-       node_ = rclcpp::Node::make_shared("btInWorkingZone");
-       pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
-       }
-
-        static BT::PortsList providedPorts()
+        : BT::SyncActionNode(name, config)
     {
-        return { BT::InputPort<std::string>("robotLocation") };
+        node_ = rclcpp::Node::make_shared("btInWorkingZone");
+
+        pub_ = node_->create_publisher<std_msgs::msg::String>(
+            "/BehaviorTreeNode", 10);
     }
 
-    BT::NodeStatus tick() override {
-        return BT::NodeStatus::SUCCESS;
-        std::string location;
-        if (!getInput("robotLocation", location)) {
-            std::cerr << "[CheckInWorkingZone] Geen robotLocation gevonden op blackboard!\n";
-            return BT::NodeStatus::FAILURE;
-        }
+    static BT::PortsList providedPorts()
+    {
+        return {
+            BT::InputPort<std::string>("robotLocation"),
+            BT::InputPort<int>("start_hour"),
+            BT::InputPort<int>("start_minute"),
+            BT::InputPort<int>("end_hour"),
+            BT::InputPort<int>("end_minute"),
 
-        std::cout << "[CheckInWorkingZone] robotLocation gevonden: " << location << std::endl;
-        
-        std::cout << "[CheckInWorkingZone] Checking if in work zone (sim)" << std::endl;
-        std::string state = "CheckInWorkingZone";
-    	std_msgs::msg::String msg;
-        msg.data = state;
-        pub_->publish(msg);
-       
+            // Blackboard outputs
+            BT::OutputPort<std::string>("robotLocationBAT")
+        };
+    }
 
-        if (location == "WORKING") {
+    BT::NodeStatus tick() override
+    {
+ 
+        int start_h, start_m, end_h, end_m;
+
+        if (!getInput("start_hour", start_h)) start_h = 9;
+        if (!getInput("start_minute", start_m)) start_m = 0;
+        if (!getInput("end_hour", end_h)) end_h = 17;
+        if (!getInput("end_minute", end_m)) end_m = 0;
+
+        std::time_t now = std::time(nullptr);
+        std::tm *local = std::localtime(&now);
+
+        int current_minutes = local->tm_hour * 60 + local->tm_min;
+        int start_minutes = start_h * 60 + start_m;
+        int end_minutes = end_h * 60 + end_m;
+
+        std_msgs::msg::String bt_msg;
+
+        if (!(current_minutes >= start_minutes && current_minutes < end_minutes))
+        {
+            std::cout << "[CheckInWorkingZone] Buiten werkuren -> FORCE-CHARGING" << std::endl;
+
+            setOutput("robotLocationBAT", std::string("FORCE-CHARGING"));
+
+            bt_msg.data = "FORCE-CHARGING";
+            pub_->publish(bt_msg);
+
             return BT::NodeStatus::SUCCESS;
-        } else {
+        }
+
+
+        setOutput("robotLocationBAT", std::string("WORKING"));
+
+        bt_msg.data = "CheckInWorkingZone-WORKING";
+        pub_->publish(bt_msg);
+
+
+        std::string location;
+        if (!getInput("robotLocation", location))
+        {
+            std::cerr << "[CheckInWorkingZone] Geen robotLocation gevonden!\n";
             return BT::NodeStatus::FAILURE;
         }
+
+        std::cout << "[CheckInWorkingZone] robotLocation = " << location << std::endl;
+
+        if (location == "WORKING")
+        {
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        return BT::NodeStatus::FAILURE;
     }
-        private:
+
+private:
     rclcpp::Node::SharedPtr node_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
 };
@@ -912,7 +950,7 @@ public:
     {
         setOutput("robotLocation", "CHARGING");
         rclcpp::spin_some(node_);
-        if (last_event_ == "CHARGING-COMPLETED")
+        if (last_event_ == "BATTERY-FULL")
         {
             std::cout << "[IsBatteryFull] CHARGING COMPLETED -> SUCCESS" << std::endl;
             return BT::NodeStatus::SUCCESS;
@@ -923,7 +961,7 @@ public:
     BT::NodeStatus onRunning() override
     {
         rclcpp::spin_some(node_);
-        if (last_event_ == "CHARGING-COMPLETED")
+        if (last_event_ == "BATTERY-FULL")
             return BT::NodeStatus::SUCCESS;
         return BT::NodeStatus::RUNNING;
     }
@@ -1369,6 +1407,138 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
 };
 
+
+
+class RobotWaitInChargingStation : public BT::StatefulActionNode
+{
+public:
+    RobotWaitInChargingStation(const std::string &name, const BT::NodeConfiguration &config)
+        : BT::StatefulActionNode(name, config)
+    {
+        node_ = rclcpp::Node::make_shared("btRobotWaitInChargingStation");
+
+        pub_ = node_->create_publisher<std_msgs::msg::String>(
+            "/BehaviorTreeNode", 10);
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {
+            BT::InputPort<int>("start_hour"),
+            BT::InputPort<int>("start_minute"),
+            BT::InputPort<int>("end_hour"),
+            BT::InputPort<int>("end_minute")
+        };
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        std_msgs::msg::String msg;
+        msg.data = "RobotWaitInChargingStation";
+        pub_->publish(msg);
+
+        return checkTime();
+    }
+
+    BT::NodeStatus onRunning() override
+    {
+        return checkTime();
+    }
+
+    void onHalted() override
+    {
+        std::cout << "[RobotWaitInChargingStation] HALTED" << std::endl;
+    }
+
+private:
+
+    BT::NodeStatus checkTime()
+    {
+        int start_h, start_m, end_h, end_m;
+
+        // Haal waarden uit blackboard / XML
+        if (!getInput("start_hour", start_h)) start_h = 9;
+        if (!getInput("start_minute", start_m)) start_m = 0;
+        if (!getInput("end_hour", end_h)) end_h = 17;
+        if (!getInput("end_minute", end_m)) end_m = 0;
+
+   
+        std::time_t now = std::time(nullptr);
+        std::tm *local = std::localtime(&now);
+
+        int current_minutes = local->tm_hour * 60 + local->tm_min;
+        int start_minutes = start_h * 60 + start_m;
+        int end_minutes = end_h * 60 + end_m;
+
+        std::cout << "[RobotWaitInChargingStation] Current time: "
+                  << local->tm_hour << ":" << local->tm_min << std::endl;
+
+        if (current_minutes >= start_minutes && current_minutes < end_minutes)
+        {
+            std::cout << "[RobotWaitInChargingStation] Within time window -> SUCCESS" << std::endl;
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        std::cout << "[RobotWaitInChargingStation] Outside time window -> RUNNING" << std::endl;
+        return BT::NodeStatus::RUNNING;
+    }
+
+    rclcpp::Node::SharedPtr node_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+}; 
+
+class StopRobotCharging : public BT::StatefulActionNode
+{
+public:
+    StopRobotCharging(const std::string &name, const BT::NodeConfiguration &config)
+        : BT::StatefulActionNode(name, config)
+    {
+        node_ = rclcpp::Node::make_shared("btStopRobotCharging");
+
+        pub_bt_ = node_->create_publisher<std_msgs::msg::String>(
+            "/BehaviorTreeNode", 10);
+
+        force_charge_pub_ = node_->create_publisher<std_msgs::msg::String>(
+            "/force_charge", 10);
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {};
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        // Publish BT node naam
+        std_msgs::msg::String bt_msg;
+        bt_msg.data = "StopRobotCharging";
+        pub_bt_->publish(bt_msg);
+
+        // Publish STOP command
+        std_msgs::msg::String cmd_msg;
+        cmd_msg.data = "STOP";
+        force_charge_pub_->publish(cmd_msg);
+
+        std::cout << "[StopRobotCharging] Published STOP to /force_charge" << std::endl;
+
+        return BT::NodeStatus::SUCCESS;
+    }
+
+    BT::NodeStatus onRunning() override
+    {
+        return BT::NodeStatus::SUCCESS;
+    }
+
+    void onHalted() override
+    {
+        std::cout << "[StopRobotCharging] HALTED" << std::endl;
+    }
+
+private:
+    rclcpp::Node::SharedPtr node_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr force_charge_pub_;
+};
 
 class RobotAtQuiz : public BT::SyncActionNode
 {
@@ -1866,11 +2036,13 @@ int main(int argc, char **argv)
     factory.registerNodeType<IsRobotCharging>("IsRobotCharging");
     factory.registerNodeType<IsBatteryFull>("IsBatteryFull");
     factory.registerNodeType<BatteryCharged>("BatteryCharged");
+    factory.registerNodeType<RobotWaitInChargingStation>("RobotWaitInChargingStation");
     factory.registerNodeType<BatteryStopDrive>("BatteryStopDrive");
     factory.registerNodeType<CheckCollision>("CheckCollision");
     factory.registerNodeType<CheckNetworkError>("CheckNetworkError");
     factory.registerNodeType<StopNode>("StopNode");
     factory.registerNodeType<WaitDriving>("WaitDriving");
+    factory.registerNodeType<StopRobotCharging>("StopRobotCharging");
     factory.registerNodeType<MainBTStopDrive>("MainBTStopDrive");
     factory.registerNodeType<ForceSuccess>("MainFallbackForceSuccess");
     factory.registerNodeType<CheckMainBTErrorState>("CheckMainBTErrorState");
