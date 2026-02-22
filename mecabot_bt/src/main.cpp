@@ -542,7 +542,6 @@ private:
 
 
 
-
 class DriveWorkArea : public BT::StatefulActionNode
 {
 public:
@@ -559,34 +558,51 @@ public:
     {
         return {
             BT::InputPort<double>("timeout"),
+            BT::InputPort<double>("x"),
+            BT::InputPort<double>("y"),
+            BT::InputPort<double>("z"),
             BT::OutputPort<std::string>("workarea_timestamp")
         };
     }
 
     BT::NodeStatus onStart() override
     {
-        return BT::NodeStatus::SUCCESS;
-
         // Publish BT node naam
         std_msgs::msg::String bt_msg;
         bt_msg.data = "DriveWorkArea";
         pub_bt_->publish(bt_msg);
 
+
         sent_coord_.header.stamp = node_->get_clock()->now();
         sent_coord_.header.frame_id = "map";
-        sent_coord_.pose.position.x = 20.0;  
-        sent_coord_.pose.position.y = 10.0;  
-        sent_coord_.pose.position.z = 0.0;
-        sent_coord_.pose.orientation.w = 0.0;
+
+        
+        double x, y, z;
+        getInput("x", x);
+        getInput("y", y);
+        getInput("z", z);
+
+        sent_coord_.pose.position.x = x;
+        sent_coord_.pose.position.y = y;
+        sent_coord_.pose.position.z = z;
+
+        sent_coord_.pose.orientation.x = 0.0;
+        sent_coord_.pose.orientation.y = 0.0;
+        sent_coord_.pose.orientation.z = 0.0;
+        sent_coord_.pose.orientation.w = 1.0;
+
         pub_coord_->publish(sent_coord_);
 
-        // Timestamp opslaan en op blackboard
+        // Timestamp opslaan
         sent_timestamp_ = std::to_string(sent_coord_.header.stamp.sec) + "." +
                           std::to_string(sent_coord_.header.stamp.nanosec);
+
         setOutput("workarea_timestamp", sent_timestamp_);
 
-        std::cout << "[DriveWorkArea] Published coordinate at timestamp: " << sent_timestamp_ << std::endl;
+        std::cout << "[DriveWorkArea] Published coordinate at timestamp: "
+                  << sent_timestamp_ << std::endl;
 
+        // Timeout ophalen
         if (!getInput<double>("timeout", timeout_))
             timeout_ = 5.0;
 
@@ -597,11 +613,15 @@ public:
 
     BT::NodeStatus onRunning() override
     {
-        auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start_time_).count();
+        auto elapsed =
+            std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - start_time_)
+                .count();
 
         if (elapsed >= timeout_)
         {
-            std::cout << "[DriveWorkArea] Timeout (" << timeout_ << "s) -> SUCCESS" << std::endl;
+            std::cout << "[DriveWorkArea] Timeout ("
+                      << timeout_ << "s) -> SUCCESS" << std::endl;
             return BT::NodeStatus::SUCCESS;
         }
 
@@ -1468,16 +1488,21 @@ public:
                 std::string status_code = parts[0];
                 std::string recv_timestamp = parts[1];
 
-                // Eerste 10 cijfers van timestamp vergelijken
+                // Alleen eerste 10 cijfers vergelijken
                 std::string expected_prefix = sent_timestamp_.substr(0, 10);
                 std::string recv_prefix = recv_timestamp.substr(0, 10);
 
                 if (recv_prefix == expected_prefix)
                 {
                     if (status_code == "04")
+                    {
                         received_success_ = true;
-                    else if (status_code == "05" || status_code == "06" || status_code == "07")
+                    }
+                    else if (status_code == "05" || status_code == "07")
+                    {
                         received_failure_ = true;
+                        std::cout << "[IsRobotAtWorkArea] FAILURE ONTVANGEN" << std::endl;
+                    }
                 }
             });
 
@@ -1494,8 +1519,6 @@ public:
 
     BT::NodeStatus onStart() override
     {
-        return BT::NodeStatus::SUCCESS;
-
         received_success_ = false;
         received_failure_ = false;
         start_time_ = std::chrono::steady_clock::now();
@@ -1504,7 +1527,7 @@ public:
             timeout_ = 10.0;
 
         if (!getInput<std::string>("workarea_timestamp", sent_timestamp_))
-            std::cout << "[IsRobotAtWorkArea] Geen timestamp ontvangen!" << std::endl;
+            std::cout << "[IsRobotAtWorkArea] Geen timestamp ontvangen van blackboard!" << std::endl;
         else
             std::cout << "[IsRobotAtWorkArea] Verwachte timestamp = " << sent_timestamp_ << std::endl;
 
@@ -1519,7 +1542,9 @@ public:
     BT::NodeStatus onRunning() override
     {
         rclcpp::spin_some(node_);
-        auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start_time_).count();
+
+        auto elapsed = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - start_time_).count();
 
         if (received_success_)
         {
@@ -1535,7 +1560,8 @@ public:
 
         if (elapsed >= timeout_)
         {
-            std::cout << "[IsRobotAtWorkArea] Timeout (" << timeout_ << "s) -> FAILURE" << std::endl;
+            std::cout << "[IsRobotAtWorkArea] Timeout (" 
+                      << timeout_ << "s) -> FAILURE" << std::endl;
             return BT::NodeStatus::FAILURE;
         }
 

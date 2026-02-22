@@ -33,10 +33,20 @@
                     <Sequence name="MainSequence">
                       <Fallback name="CheckWorkingZone">
                         <CheckInWorkingZone robotLocation="{robotLocation}"/>
-                        <Sequence name="GoToWorkAreaSequence">
-                          <DriveWorkArea workarea_timestamp = "{workarea_timestamp}" timeout="5.0"/>
-                          <IsRobotAtWorkArea workarea_timestamp = "{workarea_timestamp}" timeout="200.0"/>
-                        </Sequence>
+			<Sequence name="GoToWorkAreaSequence">
+
+			  <DriveWorkArea 
+			      timeout="5.0"
+			      x="20.0"
+			      y="10.0"
+			      z="0.0"
+			      workarea_timestamp="{workarea_timestamp}" />
+
+			  <IsRobotAtWorkArea 
+			      timeout="200.0"
+			      workarea_timestamp="{workarea_timestamp}" />
+
+			</Sequence>
                       </Fallback>
 
                       <RobotExplore robotLocation="{robotLocation}"/>
