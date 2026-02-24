@@ -2,9 +2,10 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch_ros.actions import Node
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, GroupAction #Groupaction toegevoegd voor mux 
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node, SetRemap # Toegevoegd om de mux te tesen
 
 def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time', default='false')
@@ -31,6 +32,22 @@ def generate_launch_description():
     param_dir = os.path.join(wheeltec_nav_dir, 'param','wheeltec_params')
     param_file = LaunchConfiguration('params', default=os.path.join(
         param_dir, 'param_flagship_mec_dl.yaml'))
+        
+    # Toegevoegd om de mux te testen
+    nav2_group = GroupAction(
+        actions=[
+            SetRemap(src='/cmd_vel', dst='/nav_cmd_vel'),
+    
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource([wheeltec_nav_launchr, '/bringup_launch.py']),
+                launch_arguments={
+                    'map': map_file,
+                    'use_sim_time': use_sim_time,
+                    'params_file': param_file
+                }.items()
+            )
+        ]
+    )
 
 
     return LaunchDescription([
@@ -56,13 +73,16 @@ def generate_launch_description():
             PythonLaunchDescriptionSource(
                 [wheeltec_launch_dir, '/wheeltec_lidar.launch.py']),
         ),        
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                [wheeltec_nav_launchr, '/bringup_launch.py']),
-            launch_arguments={
-                'map': map_file,
-                'use_sim_time': use_sim_time,
-                'params_file': param_file}.items(),
-        ),
-
+        
+        # In commentaar gezet om de mux te testen
+        #IncludeLaunchDescription(
+        #    PythonLaunchDescriptionSource(
+        #        [wheeltec_nav_launchr, '/bringup_launch.py']),
+        #    launch_arguments={
+        #        'map': map_file,
+        #        'use_sim_time': use_sim_time,
+        #        'params_file': param_file}.items(),
+        #),
+        
+        nav2_group #Testen om de mux
     ])

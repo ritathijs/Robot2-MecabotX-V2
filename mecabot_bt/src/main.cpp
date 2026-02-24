@@ -365,6 +365,7 @@ public:
     BT::NodeStatus tick() override
     {
  
+        return BT::NodeStatus::SUCCESS;
         int start_h, start_m, end_h, end_m;
 
         if (!getInput("start_hour", start_h)) start_h = 9;

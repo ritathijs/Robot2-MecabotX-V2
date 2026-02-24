@@ -98,12 +98,23 @@ def generate_launch_description():
             launch_arguments={'flagship_mec_dl_robot': 'true'}.items(),
     )
     
+    twist_mux_node = launch_ros.actions.Node(
+        package='twist_mux',
+        executable='twist_mux',
+        name='twist_mux',
+        parameters=['/home/wheeltec/wheeltec_ros2/src/turn_on_wheeltec_robot/param/param_mux.yaml'],
+        remappings=[
+            ('cmd_vel_out', '/cmd_vel')
+        ]
+    )
+    
     ld = LaunchDescription()
 
     #ld.add_action(minibot_type)
     ld.add_action(flagship_type)
     ld.add_action(carto_slam_dec)
     ld.add_action(wheeltec_robot)
+    ld.add_action(twist_mux_node)
     ld.add_action(base_to_link)
     ld.add_action(base_to_gyro)
     ld.add_action(joint_state_publisher_node)
