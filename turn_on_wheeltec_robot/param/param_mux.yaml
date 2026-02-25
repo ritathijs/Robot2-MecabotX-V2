@@ -1,11 +1,22 @@
 twist_mux:
   ros__parameters:
     topics:
+      gui:
+        topic   : gui_cmd_vel
+        timeout : 0.5
+        priority: 255
+      
+      estop:
+        topic   : estop_cmd_vel
+        timeout : 0.5
+        priority: 200
+        
+      bumper:
+        topic   : bump_cmd_vel
+        timeout : 0.5
+        priority: 100
+      
       navigation:
         topic   : nav_cmd_vel
         timeout : 0.5
-        priority: 10
-      prior:
-        topic   : estop_cmd_vel
-        timeout : 0.5
-        priority: 255
+        priority: 10  

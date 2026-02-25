@@ -5,7 +5,7 @@ import Jetson.GPIO as GPIO
 import time
 
 
-PINS = [7, 15, 31]
+PINS = [7,15,31,32]
 
 class GPIOReaderNode(Node):
     def __init__(self):

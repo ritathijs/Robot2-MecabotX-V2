@@ -365,7 +365,7 @@ public:
     BT::NodeStatus tick() override
     {
  
-        return BT::NodeStatus::SUCCESS;
+        //return BT::NodeStatus::SUCCESS;
         int start_h, start_m, end_h, end_m;
 
         if (!getInput("start_hour", start_h)) start_h = 9;
@@ -627,8 +627,8 @@ public:
 
         sent_coord_.pose.orientation.x = 0.0;
         sent_coord_.pose.orientation.y = 0.0;
-        sent_coord_.pose.orientation.z = 0.0;
-        sent_coord_.pose.orientation.w = 1.0;
+        sent_coord_.pose.orientation.z = 0.9599275506038583;
+        sent_coord_.pose.orientation.w = 0.28024827848120143;
 
         pub_coord_->publish(sent_coord_);
 
@@ -950,6 +950,7 @@ public:
     BT::NodeStatus onStart() override
     {
         setOutput("robotLocation", "CHARGING");
+        return BT::NodeStatus::SUCCESS;
         rclcpp::spin_some(node_);
         if (last_event_ == "BATTERY-FULL")
         {
@@ -1214,7 +1215,7 @@ public:
 
     BT::NodeStatus onStart() override
     {
-        return BT::NodeStatus::SUCCESS;
+        //return BT::NodeStatus::SUCCESS;
 
         // Publish BT node naam
         std_msgs::msg::String bt_msg;
@@ -1342,7 +1343,7 @@ public:
 
     BT::NodeStatus onStart() override
     {
-        return BT::NodeStatus::SUCCESS;
+        //return BT::NodeStatus::SUCCESS;
 
         received_success_ = false;
         received_failure_ = false;
@@ -1587,47 +1588,74 @@ private:
 };
 
 
-class BatteryCharged : public TimedCondition
+class BatteryCharged : public BT::StatefulActionNode
 {
 public:
     BatteryCharged(const std::string &name, const BT::NodeConfiguration &config)
-        : TimedCondition(name, config)
+        : BT::StatefulActionNode(name, config),
+          timeout_(10.0)   // default timeout
     {
-        // Node voor ROS2 publishers
         node_ = rclcpp::Node::make_shared("btBatteryCharged");
-        pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
+
+        pub_ = node_->create_publisher<std_msgs::msg::String>(
+            "/BehaviorTreeNode", 10);
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return { BT::InputPort<double>("timeout"), 
+                BT::OutputPort<std::string>("robotLocationBAT")};
     }
 
     BT::NodeStatus onStart() override
     {
-        // Eerste, roep de originele TimedCondition onStart aan om timer te starten
-        BT::NodeStatus status = TimedCondition::onStart();
+        // timeout uit XML of default
+        if (!getInput<double>("timeout", timeout_))
+            timeout_ = 10.0;
 
-        // Publiceer de naam naar /BehaviorTreeNode
+        start_time_ = std::chrono::steady_clock::now();
+
         std_msgs::msg::String msg;
         msg.data = "BatteryCharged";
         pub_->publish(msg);
 
-        return status; // RUNNING
+        std::cout << "[BatteryCharged] START (timeout="
+                  << timeout_ << "s)" << std::endl;
+
+        return BT::NodeStatus::RUNNING;
     }
 
     BT::NodeStatus onRunning() override
     {
-        // Roep originele TimedCondition aan
-        BT::NodeStatus status = TimedCondition::onRunning();
+        auto elapsed = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - start_time_)
+                           .count();
 
-        // Optioneel: telkens bij tick de status publiceren
-        std_msgs::msg::String msg;
-        msg.data = "BatteryCharged";
-        pub_->publish(msg);
+        if (elapsed >= timeout_)
+        {
+            std::cout << "[BatteryCharged] Timeout reached -> SUCCESS"
+                      << std::endl;
+            setOutput("robotLocationBAT",
+                  std::string("RETURN-FROM-CHARGING"));
+            return BT::NodeStatus::SUCCESS;
+        }
 
-        return status; // RUNNING of SUCCESS als timer afgelopen
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override
+    {
+        std::cout << "[BatteryCharged] HALTED" << std::endl;
     }
 
 private:
+    double timeout_;
+    std::chrono::steady_clock::time_point start_time_;
+
     rclcpp::Node::SharedPtr node_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
 };
+
 
 class IsRobotAtWorkArea : public BT::StatefulActionNode
 {
@@ -1823,7 +1851,8 @@ public:
         if (elapsed >= timeout_)
         {
             std::cout << "[WaitQuizToEnd] Timeout reached after " << elapsed << "s -> FAILURE" << std::endl;
-            return BT::NodeStatus::FAILURE;
+            //return BT::NodeStatus::FAILURE;
+            return BT::NodeStatus::SUCCESS;
         }
 
         std::cout << "[WaitQuizToEnd] Still waiting... (" << elapsed << "s)" << std::endl;

@@ -35,10 +35,10 @@
 
 			  <CheckInWorkingZone
 			      robotLocation="{robotLocation}"
-			      start_hour="13"
-			      start_minute="0"
-			      end_hour="17"
-			      end_minute="0"
+			      start_hour="16"
+			      start_minute="47"
+			      end_hour="16"
+			      end_minute="50"
 			      robotLocationBAT="{robotLocationBAT}"
 			  />
 
@@ -46,9 +46,9 @@
 
 			  <DriveWorkArea 
 			      timeout="5.0"
-			      x="20.0"
-			      y="10.0"
-			      z="0.0"
+			      x= "1.9707672595977783"
+		              y= "0.4888995885848999"
+			      z= "0.0"
 			      workarea_timestamp="{workarea_timestamp}" />
 
 			  <IsRobotAtWorkArea 
@@ -69,13 +69,13 @@
 
                       <DriveQuizLocation 
 			    timeout="5.0" 
-			    x="4.0390801429748535" 
-			    y="3.406137228012085" 
-			    z="0.0"
+			    x="-2.2921230792999268" 
+			    y="2.3765931129455566" 
+			    z="0.0033969879150390625"
 			    sent_timestamp="{quiz_timestamp}" />
                       <IsRobotAtQuiz timeout="200.0" sent_timestamp="{quiz_timestamp}" />
                       <RobotAtQuiz robotLocation="{robotLocation}"/>
-                      <WaitQuizToEnd timeout="100.0"/>
+                      <WaitQuizToEnd timeout="10.0"/>
                     </Sequence>
 
                     <!-- Rechterkind van MainFallback -->
@@ -93,15 +93,15 @@
                   <IsRobotCharging timeout="200"/>
                   
                   <RobotWaitInChargingStation
-		      start_hour="9"
-		      start_minute="0"
-		      end_hour="17"
-		      end_minute="0"/>
+		      start_hour="16"
+		      start_minute="47"
+		      end_hour="16"
+		      end_minute="50"/>
 
 	
 		  <StopRobotCharging/>
                   <IsBatteryFull robotLocation="{robotLocation}"/>
-                  <BatteryCharged timeout="5"/>
+                  <BatteryCharged timeout="5" robotLocationBAT="{robotLocationBAT}"/>
                 </Sequence>
                 <BatteryStopDrive/>
               </Fallback>
