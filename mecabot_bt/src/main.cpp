@@ -475,6 +475,7 @@ public:
           success_received_(false), timeout_(5.0)
     {
         node_ = rclcpp::Node::make_shared("btDriveToChargingStation");
+
         sub_ = node_->create_subscription<std_msgs::msg::String>(
             "/auto_recharge_event", 10,
             [this](std_msgs::msg::String::SharedPtr msg)
@@ -484,6 +485,8 @@ public:
             });
 
         pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
+
+        pub_quiz_ = node_->create_publisher<std_msgs::msg::String>("/rpitopic", 10);
     }
 
     static BT::PortsList providedPorts()
@@ -496,9 +499,17 @@ public:
         success_received_ = false;
         start_time_ = std::chrono::steady_clock::now();
         getInput("timeout", timeout_);
+
+        // ---- Bestaande BT publish ----
         std_msgs::msg::String msg;
         msg.data = "DriveToChargingStation";
         pub_->publish(msg);
+
+        // SENDING TO QUIZ (verander scherm wanneer er geladen moet worden naar robotexplore (kan later nog een 'ik ga laden scherm worden'))
+        std_msgs::msg::String quiz_msg;
+        quiz_msg.data = "RobotExplore";
+        pub_quiz_->publish(quiz_msg);
+
         std::cout << "[DriveToChargingStation] START waiting for DRIVING-TO-DOCK" << std::endl;
         return BT::NodeStatus::RUNNING;
     }
@@ -506,6 +517,7 @@ public:
     BT::NodeStatus onRunning() override
     {
         rclcpp::spin_some(node_);
+
         if (success_received_)
         {
             std::cout << "[DriveToChargingStation] Received DRIVING-TO-DOCK -> SUCCESS" << std::endl;
@@ -524,6 +536,7 @@ public:
         std::cout << "[DriveToChargingStation] Waiting... elapsed=" << elapsed << "s" << std::endl;
         return BT::NodeStatus::RUNNING;
     }
+
     void onHalted() override
     {
         std::cout << "[DriveToChargingStation] HALTED" << std::endl;
@@ -536,6 +549,7 @@ private:
     rclcpp::Node::SharedPtr node_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;  // ➕ toegevoegd
 };
 
 class BatteryStopDrive : public BT::StatefulActionNode
@@ -600,6 +614,10 @@ public:
             BT::InputPort<double>("x"),
             BT::InputPort<double>("y"),
             BT::InputPort<double>("z"),
+            BT::InputPort<double>("qx"),
+            BT::InputPort<double>("qy"),
+            BT::InputPort<double>("qz"),
+            BT::InputPort<double>("qw"),
             BT::OutputPort<std::string>("workarea_timestamp")
         };
     }
@@ -616,19 +634,25 @@ public:
         sent_coord_.header.frame_id = "map";
 
         
-        double x, y, z;
+        double x, y, z, qx , qy, qz, qw;
         getInput("x", x);
         getInput("y", y);
         getInput("z", z);
+
+        getInput("qx", qx);
+        getInput("qy", qy);
+        getInput("qz", qz);
+        getInput("qw", qw);
+
 
         sent_coord_.pose.position.x = x;
         sent_coord_.pose.position.y = y;
         sent_coord_.pose.position.z = z;
 
-        sent_coord_.pose.orientation.x = 0.0;
-        sent_coord_.pose.orientation.y = 0.0;
-        sent_coord_.pose.orientation.z = 0.9599275506038583;
-        sent_coord_.pose.orientation.w = 0.28024827848120143;
+        sent_coord_.pose.orientation.x = qx;
+        sent_coord_.pose.orientation.y = qy;
+        sent_coord_.pose.orientation.z = qz;
+        sent_coord_.pose.orientation.w = qw;
 
         pub_coord_->publish(sent_coord_);
 
@@ -1209,6 +1233,10 @@ public:
             BT::InputPort<double>("x"),
             BT::InputPort<double>("y"),
             BT::InputPort<double>("z"),
+            BT::InputPort<double>("qx"),
+            BT::InputPort<double>("qy"),
+            BT::InputPort<double>("qz"),
+            BT::InputPort<double>("qw"),
             BT::OutputPort<std::string>("sent_timestamp")
         };
     }
@@ -1226,16 +1254,25 @@ public:
         sent_coord_.header.stamp = node_->get_clock()->now();
         sent_coord_.header.frame_id = "map";
 
-        double x, y, z;
+        double x, y, z, qx, qy, qz, qw;
         getInput("x", x);
         getInput("y", y);
         getInput("z", z);
+
+        getInput("qx", qx);
+        getInput("qy", qy);
+        getInput("qz", qz);
+        getInput("qw", qw);
+
 
         sent_coord_.pose.position.x = x;
         sent_coord_.pose.position.y = y;
         sent_coord_.pose.position.z = z;
 
-        sent_coord_.pose.orientation.w = 1.0;
+        sent_coord_.pose.orientation.x = qx;
+        sent_coord_.pose.orientation.y = qy;
+        sent_coord_.pose.orientation.z = qz;
+        sent_coord_.pose.orientation.w = qw;
         pub_coord_->publish(sent_coord_);
 
         // Timestamp opslaan en op blackboard zetten
