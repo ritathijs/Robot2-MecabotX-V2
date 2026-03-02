@@ -102,7 +102,7 @@ class DriveToCoord(Node):
 	def actiondistribute(self):
 		# Aangeroepen vanuit de control_loop, de lock is al actief.
 		
-		if self.last_BehaviorTreeNode in ["DriveToChargingStation","StatusDriveToChargingDock","IsRobotCharging","IsBatteryFull","BatteryCharged"]:
+		if self.last_BehaviorTreeNode in ["DriveToChargingStation","StatusDriveToChargingDock","IsRobotCharging","IsBatteryFull","BatteryCharged", "RobotWaitInChargingStation", "StopRobotCharging"]:
 			self.keepout_filter(True)
 		else:
 			self.keepout_filter(False)
@@ -113,7 +113,7 @@ class DriveToCoord(Node):
 		elif self.last_BehaviorTreeNode in ["CheckingNearbyVisitors", "DriveWorkArea", "DriveQuizLocation"]:
 			self.send_goal("peoplesearch", self.last_peoplesearchcoord)
 
-		elif self.last_BehaviorTreeNode in ["DriveToChargingStation","StatusDriveToChargingDock","IsRobotCharging","IsBatteryFull","BatteryCharged"]:
+		elif self.last_BehaviorTreeNode in ["DriveToChargingStation","StatusDriveToChargingDock","IsRobotCharging","IsBatteryFull","BatteryCharged", "RobotWaitInChargingStation", "StopRobotCharging"]:
 			return
 			
 		else:

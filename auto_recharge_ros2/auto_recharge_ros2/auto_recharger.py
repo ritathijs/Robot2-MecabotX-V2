@@ -212,7 +212,11 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         """Publish an auto recharge event to /auto_recharge_event"""
         event_msg = String()
         event_msg.data = msg
-        self.Event_pub.publish(event_msg)
+
+        for i in range(3):
+            self.Event_pub.publish(event_msg)
+            time.sleep(0.05)  # 50ms vertraging tussen berichten
+
         print_and_fixRetract(msg)  
 
 

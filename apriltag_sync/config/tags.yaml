@@ -1,0 +1,10 @@
+apriltag: 
+  ros__parameters:
+    family: "36h11"
+    size: 0.08
+    max_hamming: 0
+    publish_tag_detections_poses: true
+    tag:
+      ids: [0, 1]
+      frames: ["laadstation", "werkreferentie_1"]
+      sizes: [0.08, 0.08]

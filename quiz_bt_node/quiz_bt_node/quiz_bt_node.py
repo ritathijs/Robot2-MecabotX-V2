@@ -2,7 +2,7 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 import socketio
-
+import time
 
 class QuizBTNode(Node):
     def __init__(self):
@@ -36,6 +36,11 @@ class QuizBTNode(Node):
     def publish_quiz_message(self, message):
         msg = String()
         msg.data = message
+
+        for i in range(3):
+            self.quiz_publisher.publish(msg)
+            time.sleep(0.05)  # 50 ms vertraging
+
         self.quiz_publisher.publish(msg)
         self.get_logger().info(f'Published to quiz topic: {msg.data}')
 
@@ -59,21 +64,58 @@ class QuizBTNode(Node):
         self.get_logger().info("Drive to quiz location")
         self.publish_quiz_message("drive_to_quiz_location")
 
+
+    # ZENDDEEL : ONDERSTAANDEN WORDEN DOOR DE BT VERZONDEN RICHTING DE QUIZ
+
     def rpi_callback(self, msg):
         self.get_logger().info(f'Received from RPi: {msg.data}')
-
+        
+	# BEHAVIOR TREE NODE : RobotExplore
         if msg.data == "RobotExplore":
             self.get_logger().info("Robot is exploring")
             self.sio.emit("robot-explore")
+
+	# BEHAVIOR TREE NODE : StartDrivingToPeople
         elif msg.data == "RobotGoToVisitors":
             self.get_logger().info("Robot will drive to visitors")
             self.sio.emit("robot-go-to-visitors")
+
+	# BEHAVIOR TREE NODE : ArrivedAtVisitors
         elif msg.data == "RobotArrivedAtVisitors":
             self.get_logger().info("Robot arrived at visitors")
             self.sio.emit("robot-arrived-at-visitors")
+
+	# BEHAVIOR TREE NODE : RobotAtQuiz
         elif msg.data == "robot-arrived-at-quiz-location":
             self.get_logger().info("Robot is at quiz location")
             self.sio.emit("robot-arrived-at-quiz-location")
+
+	# BEHAVIOR TREE NODE : DriveToChargingStation
+        elif msg.data == "RobotGoCharge":
+            self.get_logger().info("Robot going to charge")
+            self.sio.emit("robot-go-charge")
+
+
+	# BEHAVIOR TREE NODE : IsBatteryFull
+        elif msg.data == "RobotCharging":
+            self.get_logger().info("Robot is charging")
+            self.sio.emit("robot-charging")
+
+
+        elif msg.data == "RobotManualDrive":
+            self.get_logger().info("Robot manual drive enabled")
+            self.sio.emit("robot-manual-drive")
+
+        elif msg.data == "RobotStopManualDrive":
+            self.get_logger().info("Robot manual drive stopped")
+            self.sio.emit("robot-stop-manual-drive")
+
+        #onderstaande nog af te stemmen met Quinten
+       	# BEHAVIOR TREE NODE : BatteryCharged
+        elif msg.data == "RobotStarting":
+            self.get_logger().info("Robot awaking from charging")
+            self.sio.emit("robot-starting")
+
 
 
 def main():
