@@ -103,9 +103,9 @@ class DriveToCoord(Node):
 		# Aangeroepen vanuit de control_loop, de lock is al actief.
 		
 		if self.last_BehaviorTreeNode in ["DriveToChargingStation","StatusDriveToChargingDock","IsRobotCharging","IsBatteryFull","BatteryCharged", "RobotWaitInChargingStation", "StopRobotCharging"]:
-			self.keepout_filter(True)
-		else:
 			self.keepout_filter(False)
+		else:
+			self.keepout_filter(True)
 
 		if self.last_BehaviorTreeNode in ["IsRobotAtQuiz", "IsRobotAtWorkArea"]:
 			self.send_goal("behaviortree", self.last_btDriveCoord)

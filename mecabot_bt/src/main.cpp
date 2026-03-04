@@ -226,7 +226,11 @@ public:
 
                 std_msgs::msg::String msg;
                 msg.data = "START";
-                force_charge_pub_->publish(msg);
+
+                for (int i = 0; i < 3; ++i)
+                {
+                    force_charge_pub_->publish(msg);
+                }
 
                 return BT::NodeStatus::FAILURE;
             }
@@ -256,7 +260,10 @@ public:
             {
                 std_msgs::msg::String msg;
                 msg.data = "START";
-                force_charge_pub_->publish(msg);
+                for (int i = 0; i < 3; ++i)
+                {
+                    force_charge_pub_->publish(msg);
+                }
 
                 return BT::NodeStatus::FAILURE;
             }
@@ -507,7 +514,7 @@ public:
 
         // SENDING TO QUIZ (verander scherm wanneer er geladen moet worden naar robotexplore (kan later nog een 'ik ga laden scherm worden'))
         std_msgs::msg::String quiz_msg;
-        quiz_msg.data = "RobotExplore";
+        quiz_msg.data = "RobotGoCharge";
         pub_quiz_->publish(quiz_msg);
 
         std::cout << "[DriveToChargingStation] START waiting for DRIVING-TO-DOCK" << std::endl;
@@ -957,51 +964,81 @@ public:
         : BT::StatefulActionNode(name, config)
     {
         node_ = rclcpp::Node::make_shared("btBatteryFull");
+
+        // Subscriber
         sub_ = node_->create_subscription<std_msgs::msg::String>(
             "/auto_recharge_event", 10,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
                 last_event_ = msg->data;
             });
+
+        // Publisher naar rpitopic
+        pub_quiz_ = node_->create_publisher<std_msgs::msg::String>("/rpitopic", 10);
+
+        pub_bt_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
+
     }
 
-        static BT::PortsList providedPorts()
+    static BT::PortsList providedPorts()
     {
         return { BT::OutputPort<std::string>("robotLocation") };
     }
 
-
     BT::NodeStatus onStart() override
     {
         setOutput("robotLocation", "CHARGING");
+
+        // Stuur bericht naar rpitopic
+        std_msgs::msg::String msg;
+        msg.data = "RobotCharging";
+        pub_quiz_->publish(msg);
+
+        std_msgs::msg::String bt_msg;
+        bt_msg.data = "IsBatteryFull";
+        pub_bt_->publish(bt_msg);
+
         return BT::NodeStatus::SUCCESS;
+
+        std::cout << "[IsBatteryFull] RobotCharging bericht verzonden" << std::endl;
+
         rclcpp::spin_some(node_);
+
         if (last_event_ == "BATTERY-FULL")
         {
             std::cout << "[IsBatteryFull] CHARGING COMPLETED -> SUCCESS" << std::endl;
             return BT::NodeStatus::SUCCESS;
         }
+
         return BT::NodeStatus::RUNNING;
     }
 
     BT::NodeStatus onRunning() override
     {
         rclcpp::spin_some(node_);
+
         if (last_event_ == "BATTERY-FULL")
+        {
+            std::cout << "[IsBatteryFull] CHARGING COMPLETED -> SUCCESS" << std::endl;
             return BT::NodeStatus::SUCCESS;
+        }
+
         return BT::NodeStatus::RUNNING;
     }
-    void onHalted() override {
+
+    void onHalted() override
+    {
         std::cout << "[IsBatteryFull] HALTED" << std::endl;
     }
-
 
 private:
     std::string last_event_;
     rclcpp::Node::SharedPtr node_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
-};
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
 
+};
 
 class CheckingNearbyVisitors : public BT::StatefulActionNode
 {
@@ -1046,17 +1083,7 @@ public:
         rclcpp::spin_some(node_);
         std::cout << "[CheckingNearbyVisitors] Measured distance: " << latest_value_ << std::endl;
 
-        if (latest_value_ < 2)
-        {
-            success_count_ = 3;
-
-        }
-        else
-        {
-            success_count_ = 0;
-        }
-
-        if (success_count_ >= 2)
+        if (latest_value_ <= 2.5)
         {
             std::cout << "[CheckingNearbyVisitors] STOP BIJ PERSOON -> SUCCESS" << std::endl;
             return BT::NodeStatus::SUCCESS;
@@ -1556,7 +1583,11 @@ public:
         // Publish STOP command
         std_msgs::msg::String cmd_msg;
         cmd_msg.data = "STOP";
-        force_charge_pub_->publish(cmd_msg);
+
+        for (int i = 0; i < 3; ++i)
+        {
+            force_charge_pub_->publish(cmd_msg);
+        }
 
         std::cout << "[StopRobotCharging] Published STOP to /force_charge" << std::endl;
 
@@ -1625,6 +1656,94 @@ private:
 };
 
 
+
+// class MDForceCharging : public BT::SyncActionNode
+// {
+// public:
+//     MDForceCharging(const std::string& name, const BT::NodeConfiguration& config)
+//         : BT::SyncActionNode(name, config)
+//     {
+//         node_ = rclcpp::Node::make_shared("btMDForceCharging");
+
+//         pub_bt_ = node_->create_publisher<std_msgs::msg::String>(
+//             "/BehaviorTreeNode", 10);
+
+//         pub_pose_ = node_->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
+//             "/initialpose", 10);
+//     }
+
+//     static BT::PortsList providedPorts()
+//     {
+//         return {
+//             BT::InputPort<double>("x"),
+//             BT::InputPort<double>("y"),
+//             BT::InputPort<double>("z"),
+//             BT::InputPort<double>("qx"),
+//             BT::InputPort<double>("qy"),
+//             BT::InputPort<double>("qz"),
+//             BT::InputPort<double>("qw"),
+
+//             BT::OutputPort<std::string>("robotLocationBAT")
+//         };
+//     }
+
+//     BT::NodeStatus tick() override
+//     {
+//         std_msgs::msg::String bt_msg;
+//         bt_msg.data = "MDForceCharging";
+//         pub_bt_->publish(bt_msg);
+
+//         setOutput("robotLocationBAT", "FORCE-CHARGING");
+
+//         std::cout << "[MDForceCharging] Setting robotLocation=FORCE-CHARGING" << std::endl;
+
+//         double x, y, z, qx, qy, qz, qw;
+
+//         if (!getInput("x", x) ||
+//             !getInput("y", y) ||
+//             !getInput("z", z) ||
+//             !getInput("qx", qx) ||
+//             !getInput("qy", qy) ||
+//             !getInput("qz", qz) ||
+//             !getInput("qw", qw))
+//         {
+//             std::cerr << "[MDForceCharging] Missing coordinate input!" << std::endl;
+//             return BT::NodeStatus::FAILURE;
+//         }
+
+//         geometry_msgs::msg::PoseWithCovarianceStamped pose_msg;
+
+//         pose_msg.header.stamp = node_->get_clock()->now();
+//         pose_msg.header.frame_id = "map";
+
+//         pose_msg.pose.pose.position.x = x;
+//         pose_msg.pose.pose.position.y = y;
+//         pose_msg.pose.pose.position.z = z;
+
+//         pose_msg.pose.pose.orientation.x = qx;
+//         pose_msg.pose.pose.orientation.y = qy;
+//         pose_msg.pose.pose.orientation.z = qz;
+//         pose_msg.pose.pose.orientation.w = qw;
+
+
+//         for (int i = 0; i < 3; ++i)
+//         {
+//             pub_pose_->publish(pose_msg);
+//             rclcpp::sleep_for(std::chrono::milliseconds(100));
+//         }
+
+//         std::cout << "[MDForceCharging] Published /initialpose 3 times" << std::endl;
+
+//         return BT::NodeStatus::SUCCESS;
+//     }
+
+// private:
+//     rclcpp::Node::SharedPtr node_;
+//     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
+//     rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pub_pose_;
+// };
+
+
 class BatteryCharged : public BT::StatefulActionNode
 {
 public:
@@ -1636,6 +1755,9 @@ public:
 
         pub_ = node_->create_publisher<std_msgs::msg::String>(
             "/BehaviorTreeNode", 10);
+
+        pub_quiz_ = node_->create_publisher<std_msgs::msg::String>(
+            "/rpitopic", 10);
     }
 
     static BT::PortsList providedPorts()
@@ -1655,6 +1777,11 @@ public:
         std_msgs::msg::String msg;
         msg.data = "BatteryCharged";
         pub_->publish(msg);
+
+        std_msgs::msg::String quiz_msg;
+        quiz_msg.data = "RobotStarting";
+        pub_quiz_->publish(quiz_msg);
+
 
         std::cout << "[BatteryCharged] START (timeout="
                   << timeout_ << "s)" << std::endl;
@@ -1691,6 +1818,8 @@ private:
 
     rclcpp::Node::SharedPtr node_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;
+
 };
 
 
@@ -2072,6 +2201,133 @@ public:
 };
 
 
+class CheckManualDriving : public BT::StatefulActionNode
+{
+public:
+    CheckManualDriving(const std::string &name, const BT::NodeConfiguration &config)
+        : BT::StatefulActionNode(name, config),
+          manual_drive_detected_(false)
+    {
+        node_ = rclcpp::Node::make_shared("btCheckManualDriving");
+
+        // Subscriber naar quiz topic
+        sub_ = node_->create_subscription<std_msgs::msg::String>(
+            "/quiz", 10,
+            [this](std_msgs::msg::String::SharedPtr msg)
+            {
+                if (msg->data == "RobotManualDrive")
+                {
+                    std::cout << "[CheckManualDriving] RobotManualDrive ontvangen!" << std::endl;
+                    manual_drive_detected_ = true;
+                }
+            });
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {};
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        manual_drive_detected_ = false;
+        return BT::NodeStatus::RUNNING;
+    }
+
+    BT::NodeStatus onRunning() override
+    {
+        rclcpp::spin_some(node_);
+
+        if (manual_drive_detected_)
+        {
+            std::cout << "[CheckManualDriving] Manual drive actief -> FAILURE" << std::endl;
+            return BT::NodeStatus::FAILURE;
+        }
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override
+    {
+        std::cout << "[CheckManualDriving] HALTED" << std::endl;
+    }
+
+private:
+    rclcpp::Node::SharedPtr node_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
+    bool manual_drive_detected_;
+};
+
+
+// class ManualDriving : public BT::StatefulActionNode
+// {
+// public:
+//     ManualDriving(const std::string &name, const BT::NodeConfiguration &config)
+//         : BT::StatefulActionNode(name, config),
+//           stop_received_(false)
+//     {
+//         node_ = rclcpp::Node::make_shared("btManualDriving");
+
+//         // Subscriber naar quiz topic
+//         sub_ = node_->create_subscription<std_msgs::msg::String>(
+//             "/quiz", 10,
+//             [this](std_msgs::msg::String::SharedPtr msg)
+//             {
+//                 if (msg->data == "RobotStopManualDrive")
+//                 {
+//                     std::cout << "[ManualDriving] RobotStopManualDrive ontvangen!" << std::endl;
+//                     stop_received_ = true;
+//                 }
+//             });
+
+//         // Publisher voor BehaviorTreeNode
+//         pub_bt_ = node_->create_publisher<std_msgs::msg::String>(
+//             "/BehaviorTreeNode", 10);
+//     }
+
+//     static BT::PortsList providedPorts()
+//     {
+//         return {};
+//     }
+
+//     BT::NodeStatus onStart() override
+//     {
+//         stop_received_ = false;
+
+//         std_msgs::msg::String msg;
+//         msg.data = "ManualDriving";
+//         pub_bt_->publish(msg);
+
+//         std::cout << "[ManualDriving] START" << std::endl;
+
+//         return BT::NodeStatus::RUNNING;
+//     }
+
+//     BT::NodeStatus onRunning() override
+//     {
+//         rclcpp::spin_some(node_);
+
+//         if (stop_received_)
+//         {
+//             std::cout << "[ManualDriving] Stop ontvangen -> SUCCESS" << std::endl;
+//             return BT::NodeStatus::SUCCESS;
+//         }
+
+//         return BT::NodeStatus::RUNNING;
+//     }
+
+//     void onHalted() override
+//     {
+//         std::cout << "[ManualDriving] HALTED" << std::endl;
+//     }
+
+// private:
+//     rclcpp::Node::SharedPtr node_;
+//     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
+//     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
+//     bool stop_received_;
+// };
+
 // -------------------------
 // MAIN
 // -------------------------
@@ -2112,6 +2368,13 @@ int main(int argc, char **argv)
     factory.registerNodeType<StopRobotCharging>("StopRobotCharging");
     factory.registerNodeType<MainBTStopDrive>("MainBTStopDrive");
     factory.registerNodeType<ForceSuccess>("MainFallbackForceSuccess");
+    factory.registerNodeType<ForceSuccess>("BatteryForceSuccess");
+
+    //factory.registerNodeType<MDForceCharging>("MDForceCharging");
+    factory.registerNodeType<CheckManualDriving>("CheckManualDriving");
+   // factory.registerNodeType<ManualDriving>("ManualDriving");
+
+
     factory.registerNodeType<CheckMainBTErrorState>("CheckMainBTErrorState");
     factory.registerNodeType<LoopSequence>("LoopSequence");
 
