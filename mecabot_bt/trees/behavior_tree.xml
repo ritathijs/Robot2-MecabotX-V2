@@ -38,10 +38,10 @@
 
 												<CheckInWorkingZone
 													robotLocation="{robotLocation}"
-													start_hour="9"
-													start_minute="00"
-													end_hour="16"
-													end_minute="50"
+													start_hour="14"
+													start_minute="25"
+													end_hour="14"
+													end_minute="27"
 													robotLocationBAT="{robotLocationBAT}"
 												/>
 
@@ -49,13 +49,13 @@
 
 													<DriveWorkArea 
 														timeout="5.0"
-														x="1.9707672595977783"
-														y="0.4888995885848999"
-														z="0.0"
-														qx="0.0"
-														qy="0.0"
-														qz="0.9599275506038583"
-														qw="0.28024827848120143"
+												x="-2.2921230792999268" 
+												y="2.3765931129455566" 
+												z="0.0033969879150390625"
+												qx="0.0"
+												qy="0.0"
+												qz="0.7071068"
+												qw="0.7071068"
 														workarea_timestamp="{workarea_timestamp}" 
 													/>
 
@@ -80,13 +80,13 @@
 
 											<DriveQuizLocation 
 												timeout="5.0" 
-												x="-2.2921230792999268" 
-												y="2.3765931129455566" 
-												z="0.0033969879150390625"
-												qx="0.0"
-												qy="0.0"
-												qz="0.7071068"
-												qw="0.7071068"
+														x="1.9707672595977783"
+														y="0.4888995885848999"
+														z="0.0"
+														qx="0.0"
+														qy="0.0"
+														qz="0.9599275506038583"
+														qw="0.28024827848120143"
 												sent_timestamp="{quiz_timestamp}" 
 											/>
 
@@ -119,10 +119,10 @@
 									<IsBatteryFull robotLocation="{robotLocation}"/>
 
 									<RobotWaitInChargingStation
-										start_hour="9"
-										start_minute="00"
-										end_hour="16"
-										end_minute="50"
+										start_hour="14"
+										start_minute="25"
+										end_hour="14"
+										end_minute="27"
 									/>
 									<StopRobotCharging/>
 									<BatteryCharged timeout="5" robotLocationBAT="{robotLocationBAT}"/>

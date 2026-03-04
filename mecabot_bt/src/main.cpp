@@ -489,6 +489,10 @@ public:
             {
                 if (msg->data == "DRIVING-TO-DOCK")
                     success_received_ = true;
+                else{
+                    success_received_ = false;
+
+                }
             });
 
         pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
@@ -840,7 +844,10 @@ public:
     }
 
     BT::NodeStatus onStart() override
-    {
+    {                
+        
+        status_ = "";
+
         getInput("timeout", timeout_);
         start_time_ = std::chrono::steady_clock::now();
         std_msgs::msg::String msg;
@@ -914,6 +921,7 @@ public:
 
     BT::NodeStatus onStart() override
     {
+        event_ = "";
         getInput("timeout", timeout_);
         start_time_ = std::chrono::steady_clock::now();
         std_msgs::msg::String msg;

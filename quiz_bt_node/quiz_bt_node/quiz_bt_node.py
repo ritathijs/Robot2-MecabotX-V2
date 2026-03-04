@@ -3,6 +3,9 @@ from rclpy.node import Node
 from std_msgs.msg import String
 import socketio
 import time
+from std_msgs.msg import Float32
+from datetime import datetime
+
 
 class QuizBTNode(Node):
     def __init__(self):
@@ -19,6 +22,13 @@ class QuizBTNode(Node):
             10
         )
 
+        self.battery_subscription = self.create_subscription(
+            Float32,
+            '/battery_percentage',
+            self.battery_callback,
+            10
+        )
+
         # Socket.IO client
         self.sio = socketio.Client()
         self.sio.on('connect', self.on_connect)
@@ -26,11 +36,39 @@ class QuizBTNode(Node):
         self.sio.on('quiz-finished', self.on_quiz_finished)
         self.sio.on('quiz_inactive', self.on_quiz_inactive)
         self.sio.on('drive_to_quiz_location', self.on_drive_to_quiz_location)
+        self.sio.on('robot-manual-drive', self.robot_manual_drive)
+        self.sio.on('robot-stop-manual-drive', self.robot_stop_manual_drive)
 
         # Connect to server
         server_ip = 'http://192.168.137.100:80'
         self.sio.connect(server_ip, retry=True)
         self.get_logger().info(f"Connected to server at {server_ip}")
+
+
+
+    def battery_callback(self, msg):
+        percentage = msg.data
+        self.get_logger().info(f'Battery percentage: {percentage}%')
+
+        # Stuur naar webapp via socket.io
+        self.sio.emit("battery-percentage", {"percentage": percentage})
+
+
+
+    def handle_set_hour(self, hour_value):
+        self.get_logger().info(f"[PLACEHOLDER] Zet systeemtijd naar: {hour_value}")
+        print(f"Zet systeemtijd naar {hour_value} (nog niet geïmplementeerd)")
+        # TODO: echte systeemtijd aanpassen indien nodig
+
+    def handle_start_work_hour(self, hour_value):
+        self.get_logger().info(f"[PLACEHOLDER] Werkuren starten om: {hour_value}")
+        print(f"Werkuren starten om {hour_value} (placeholder)")
+        # TODO: logica toevoegen voor start werkmodus
+
+    def handle_stop_work_hour(self, hour_value):
+        self.get_logger().info(f"[PLACEHOLDER] Werkuren stoppen om: {hour_value}")
+        print(f"Werkuren stoppen om {hour_value} (placeholder)")
+        # TODO: logica toevoegen voor stop werkmodus
 
 
     def publish_quiz_message(self, message):
@@ -63,6 +101,16 @@ class QuizBTNode(Node):
     def on_drive_to_quiz_location(self):
         self.get_logger().info("Drive to quiz location")
         self.publish_quiz_message("drive_to_quiz_location")
+
+
+    def robot_manual_drive(self):
+        self.get_logger().info("Starting robot manual drive")
+        self.publish_quiz_message("RobotManualDrive")
+    
+
+    def robot_stop_manual_drive(self):
+        self.get_logger().info("Stopping robot manual drive")
+        self.publish_quiz_message("RobotStopManualDrive")
 
 
     # ZENDDEEL : ONDERSTAANDEN WORDEN DOOR DE BT VERZONDEN RICHTING DE QUIZ
@@ -102,19 +150,29 @@ class QuizBTNode(Node):
             self.sio.emit("robot-charging")
 
 
-        elif msg.data == "RobotManualDrive":
-            self.get_logger().info("Robot manual drive enabled")
-            self.sio.emit("robot-manual-drive")
 
-        elif msg.data == "RobotStopManualDrive":
-            self.get_logger().info("Robot manual drive stopped")
-            self.sio.emit("robot-stop-manual-drive")
 
         #onderstaande nog af te stemmen met Quinten
        	# BEHAVIOR TREE NODE : BatteryCharged
-        elif msg.data == "RobotStarting":
+        elif msg.data == "RobotStartup":
             self.get_logger().info("Robot awaking from charging")
-            self.sio.emit("robot-starting")
+            self.sio.emit("robot-startup")
+
+    
+        elif msg.data.startswith("SETHOUR:"):
+            hour_value = msg.data.split("SETHOUR:")[1].strip()
+            self.handle_set_hour(hour_value)
+            return
+
+        elif msg.data.startswith("STARTWORKHOUR:"):
+            hour_value = msg.data.split("STARTWORKHOUR:")[1].strip()
+            self.handle_start_work_hour(hour_value)
+            return
+
+        elif msg.data.startswith("STOPWORKHOUR:"):
+            hour_value = msg.data.split("STOPWORKHOUR:")[1].strip()
+            self.handle_stop_work_hour(hour_value)
+            return
 
 
 

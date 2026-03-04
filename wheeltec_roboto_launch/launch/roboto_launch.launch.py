@@ -30,15 +30,15 @@ def generate_launch_description():
         )
     )
 
-    apriltag_sync_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            PathJoinSubstitution([
-                FindPackageShare('apriltag_sync'),
-                'launch',
-                'apriltag_sync.launch.py'
-            ])
-        )
-    )
+    # apriltag_sync_launch = IncludeLaunchDescription(
+    #     PythonLaunchDescriptionSource(
+    #         PathJoinSubstitution([
+    #             FindPackageShare('apriltag_sync'),
+    #             'launch',
+    #             'apriltag_sync.launch.py'
+    #         ])
+    #     )
+    # )
 
     keepout_filter_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -95,6 +95,24 @@ def generate_launch_description():
         executable='bt_node',
         output='screen'
     )
+    
+    auto_recharge_ros2_node = Node(
+	package='auto_recharge_ros2',
+	executable='auto_recharge',
+	output='screen'
+    )
+    
+    amcl_pose_saver_node = Node(
+    	package='pose_persistence',
+    	executable='amcl_pose_saver',
+    	output='screen'
+    )
+    
+    initial_pose_restorer_node = Node(
+    	package='pose_persistence',
+    	executable='initial_pose_restorer',
+    	output='screen'
+    )
 
     # ---- Sequencing ----
     # 1) ros2 launch wheeltec_nav2 wheeltec_nav2.launch.py
@@ -105,18 +123,25 @@ def generate_launch_description():
     # 6) ros2 launch apriltag_sync apriltag_sync.launch.py
     # 7) ros2 launch wheeltec_nav2 keepout_filter.launch.py
     # 8) ros2 run people_follower_ros2 visualtracker
+    # 10) ros2 run auto_recharge_ros2 auto_recharge
+    # 12) ros2 run pose_persistence initial_pose_restorer
     # 9) ros2 run mecabot_bt bt_node
+    # 11) ros2 run pose_persistence amcl_pose_saver
+
 
    
     t1 = 0.0
-    t2 = 2.0
-    t3 = 3.0
-    t4 = 4.0
-    t5 = 6.0
-    t6 = 7.0
-    t7 = 8.0
-    t8 = 9.0
-    t9 = 10.0
+    t2 = 10.0
+    t3 = 13.0
+    t4 = 14.0
+    t5 = 16.0
+    t6 = 17.0
+    t7 = 18.0
+    t8 = 19.0
+    t10 =20.0
+    t12 = 21.0
+    t9 = 23.0
+    t11 = 25.0
 
     return LaunchDescription([
         TimerAction(period=t1, actions=[wheeltec_nav2_launch]),
@@ -124,8 +149,11 @@ def generate_launch_description():
         TimerAction(period=t3, actions=[bumper_node]),
         TimerAction(period=t4, actions=[wheeltec_camera_launch]),
         TimerAction(period=t5, actions=[pointcloud_to_laserscan_node]),
-        TimerAction(period=t6, actions=[apriltag_sync_launch]),
+        # TimerAction(period=t6, actions=[apriltag_sync_launch]),
         TimerAction(period=t7, actions=[keepout_filter_launch]),
         TimerAction(period=t8, actions=[visualtracker_node]),
+        TimerAction(period=t10, actions=[auto_recharge_ros2_node]),
+        TimerAction(period=t12, actions=[initial_pose_restorer_node]),
         TimerAction(period=t9, actions=[bt_node]),
+        TimerAction(period=t11, actions=[amcl_pose_saver_node]),
     ])

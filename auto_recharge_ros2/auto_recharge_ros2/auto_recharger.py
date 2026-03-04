@@ -571,25 +571,30 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
         self.lost_power_once=1
         
+        print_and_fixRetract(
+                YELLOW + "Tijd voor naar voor te rijden om terug te starten aan normale gedrag" + RESET
+            )
+        move = Twist()
+        move.linear.x = 0.20
+        self.Cmd_vel_pub.publish(move)
+        time.sleep(3.0)
+
+        self.start_turn = 0
+        self.find_redsignal = 0
+        self.nav_end_z = 0
+        self.power_lost_count = 0
+
+        move.linear.x = 0.0
+        self.Cmd_vel_pub.publish(move)
+        
         #切换为停止回充模式
         self.chargeflag=0
         self.Pub_Recharger_Flag()
         #发布速度为0的话题停止机器人运动
-        topic=Twist()
-        self.Cmd_vel_pub.publish(topic)
-        #如果机器人在充电，控制机器人离开充电桩
-        if self.robot['Charging']==1:
-            topic=Twist()
-            topic.linear.x = 0.1
-            self.Cmd_vel_pub.publish(topic)
 
-            # 不同小车电机速度响应时间不同
-            if 'mini' in self.robot['car_mode'] or 'akm' in self.robot['car_mode']: 
-                time.sleep(3)
-            else:
-                time.sleep(1)
-            topic.linear.x = 0.0
-            self.Cmd_vel_pub.publish(topic)
+
+
+
 
     def retry_docking_if_not_charging(self):
         # kleine wachttijd na hard stop
