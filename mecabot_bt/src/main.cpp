@@ -1061,7 +1061,7 @@ public:
 
         // Subscriber naar FollowMeTopic
         sub_ = node_->create_subscription<std_msgs::msg::Float32>(
-            "/target_distance", 10,
+            "/target_distance", 1,
             [this](std_msgs::msg::Float32::SharedPtr msg)
             {
                 latest_value_ = msg->data;
@@ -1787,7 +1787,7 @@ public:
         pub_->publish(msg);
 
         std_msgs::msg::String quiz_msg;
-        quiz_msg.data = "RobotStarting";
+        quiz_msg.data = "RobotStartup";
         pub_quiz_->publish(quiz_msg);
 
 
@@ -2390,11 +2390,63 @@ int main(int argc, char **argv)
     // laad boom uit XML
     auto tree = factory.createTreeFromFile("src/mecabot_bt/trees/behavior_tree.xml");
 
+
+
+    auto settings_node = rclcpp::Node::make_shared("bt_settings_handler");
+
+    // Default waarden instellen op het blackboard
+    auto blackboard = tree.rootBlackboard();
+    blackboard->set("start_h", 8);
+    blackboard->set("start_m", 55);
+    blackboard->set("end_h", 18);
+    blackboard->set("end_m", 0);
+
+auto sub_settings = settings_node->create_subscription<std_msgs::msg::String>(
+    "/robot_settings", 10,
+    [&blackboard](const std_msgs::msg::String::SharedPtr msg) {
+        std::string data = msg->data;
+        std::cout << "[DEBUG] Bericht ontvangen op /robot_settings: " << data << std::endl; // EXTRA PRINT
+
+        try {
+            size_t first_colon = data.find(":");
+            if (first_colon == std::string::npos) {
+                std::cout << "[WARN] Formaat onjuist, geen ':' gevonden" << std::endl;
+                return;
+            }
+
+            std::string type = data.substr(0, first_colon);
+            std::string time_part = data.substr(first_colon + 1);
+            
+            size_t second_colon = time_part.find(":");
+            if (second_colon == std::string::npos) {
+                std::cout << "[WARN] Tijdformaat onjuist, geen tweede ':' gevonden" << std::endl;
+                return;
+            }
+
+            int h = std::stoi(time_part.substr(0, second_colon));
+            int m = std::stoi(time_part.substr(second_colon + 1));
+
+            if (type == "START") {
+                blackboard->set("start_h", h);
+                blackboard->set("start_m", m);
+                std::cout << ">>> [BT Config] Starttijd aangepast naar " << h << ":" << m << std::endl;
+            } else if (type == "STOP") {
+                blackboard->set("end_h", h);
+                blackboard->set("end_m", m);
+                std::cout << ">>> [BT Config] Stoptijd aangepast naar " << h << ":" << m << std::endl;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "[ERROR] Crash tijdens parsen: " << e.what() << std::endl;
+        }
+    });
     std::cout << "--- Starting BT in continuous mode ---" << std::endl;
     rclcpp::Rate loop_rate(2.0); 
 
+
+    
     while (rclcpp::ok())
     {
+        rclcpp::spin_some(settings_node); // Check voor nieuwe uren
         BT::NodeStatus status = tree.tickRoot();
 
         if (status == BT::NodeStatus::SUCCESS) {

@@ -10,7 +10,9 @@ from datetime import datetime
 class QuizBTNode(Node):
     def __init__(self):
         super().__init__('quiz_bt_node')
-
+        
+        
+        self.settings_publisher = self.create_publisher(String, '/robot_settings', 10)
         # ROS 2 Publisher voor quiz status
         self.quiz_publisher = self.create_publisher(String, 'quiz', 10)
 
@@ -61,14 +63,15 @@ class QuizBTNode(Node):
         # TODO: echte systeemtijd aanpassen indien nodig
 
     def handle_start_work_hour(self, hour_value):
-        self.get_logger().info(f"[PLACEHOLDER] Werkuren starten om: {hour_value}")
-        print(f"Werkuren starten om {hour_value} (placeholder)")
-        # TODO: logica toevoegen voor start werkmodus
+        self.get_logger().info(f"Nieuwe starttijd: {hour_value}")
+        msg = String()
+        msg.data = f"START:{hour_value}"
+        self.settings_publisher.publish(msg)
 
     def handle_stop_work_hour(self, hour_value):
-        self.get_logger().info(f"[PLACEHOLDER] Werkuren stoppen om: {hour_value}")
-        print(f"Werkuren stoppen om {hour_value} (placeholder)")
-        # TODO: logica toevoegen voor stop werkmodus
+        msg = String()
+        msg.data = f"STOP:{hour_value}"
+        self.settings_publisher.publish(msg)
 
 
     def publish_quiz_message(self, message):

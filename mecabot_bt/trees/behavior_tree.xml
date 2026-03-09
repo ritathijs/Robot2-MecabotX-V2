@@ -38,10 +38,11 @@
 
 												<CheckInWorkingZone
 													robotLocation="{robotLocation}"
-													start_hour="14"
-													start_minute="25"
-													end_hour="14"
-													end_minute="27"
+                          start_hour="{start_h}"
+                          start_minute="{start_m}"
+                          end_hour="{end_h}"
+                          end_minute="{end_m}"
+
 													robotLocationBAT="{robotLocationBAT}"
 												/>
 
@@ -119,10 +120,10 @@
 									<IsBatteryFull robotLocation="{robotLocation}"/>
 
 									<RobotWaitInChargingStation
-										start_hour="14"
-										start_minute="25"
-										end_hour="14"
-										end_minute="27"
+                      start_hour="{start_h}"
+                      start_minute="{start_m}"
+                      end_hour="{end_h}"
+                      end_minute="{end_m}"
 									/>
 									<StopRobotCharging/>
 									<BatteryCharged timeout="5" robotLocationBAT="{robotLocationBAT}"/>
