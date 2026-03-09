@@ -1635,7 +1635,6 @@ private:
 };
 
 
-
 class RobotWaitInChargingStation : public BT::StatefulActionNode
 {
 public:
@@ -1643,19 +1642,13 @@ public:
         : BT::StatefulActionNode(name, config)
     {
         node_ = rclcpp::Node::make_shared("btRobotWaitInChargingStation");
-
-        pub_ = node_->create_publisher<std_msgs::msg::String>(
-            "/BehaviorTreeNode", 10);
+        pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
     }
 
     static BT::PortsList providedPorts()
     {
-        return {
-            BT::InputPort<int>("start_hour"),
-            BT::InputPort<int>("start_minute"),
-            BT::InputPort<int>("end_hour"),
-            BT::InputPort<int>("end_minute")
-        };
+        // Geen start/end uren meer nodig via poorten, alles komt uit de file
+        return {};
     }
 
     BT::NodeStatus onStart() override
@@ -1678,41 +1671,45 @@ public:
     }
 
 private:
-
     BT::NodeStatus checkTime()
     {
-        int start_h, start_m, end_h, end_m;
-
-        // Haal waarden uit blackboard / XML
-        if (!getInput("start_hour", start_h)) start_h = 9;
-        if (!getInput("start_minute", start_m)) start_m = 0;
-        if (!getInput("end_hour", end_h)) end_h = 17;
-        if (!getInput("end_minute", end_m)) end_m = 0;
-
-   
+        // 1. Huidige tijd en dag bepalen
         std::time_t now = std::time(nullptr);
         std::tm *local = std::localtime(&now);
 
-        int current_minutes = local->tm_hour * 60 + local->tm_min;
-        int start_minutes = start_h * 60 + start_m;
-        int end_minutes = end_h * 60 + end_m;
+        char day_codes[] = {'U', 'M', 'D', 'W', 'T', 'F', 'S'};
+        char current_day_code = day_codes[local->tm_wday];
+        int current_time_val = (local->tm_hour * 100) + local->tm_min;
 
-        std::cout << "[RobotWaitInChargingStation] Current time: "
-                  << local->tm_hour << ":" << local->tm_min << std::endl;
+        // 2. Schema ophalen
+        auto schedule = ScheduleParser::getFullSchedule();
+        
+        bool is_working_time = false;
+        for (const auto& day : schedule) {
+            if (day.dayCode == current_day_code) {
+                // Check of de dag actief is en of we binnen de uren vallen
+                if (day.isActive && current_time_val >= day.startTime && current_time_val < day.endTime) {
+                    is_working_time = true;
+                }
+                break;
+            }
+        }
 
-        if (current_minutes >= start_minutes && current_minutes < end_minutes)
+        // 3. Logica voor de State
+        if (is_working_time)
         {
-            std::cout << "[RobotWaitInChargingStation] Within time window -> SUCCESS" << std::endl;
+            std::cout << "[RobotWaitInChargingStation] Werktijd begonnen (" << current_time_val << ") -> SUCCESS" << std::endl;
             return BT::NodeStatus::SUCCESS;
         }
 
-        std::cout << "[RobotWaitInChargingStation] Outside time window -> RUNNING" << std::endl;
+        // Zolang het geen werktijd is, blijven we in de oplaad-wachtstand
+        // We printen dit niet elke tick om de console clean te houden
         return BT::NodeStatus::RUNNING;
     }
 
     rclcpp::Node::SharedPtr node_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
-}; 
+};
 
 class StopRobotCharging : public BT::StatefulActionNode
 {
