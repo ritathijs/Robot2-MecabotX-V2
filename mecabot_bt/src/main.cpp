@@ -8,8 +8,8 @@
 #include <std_msgs/msg/float32.hpp> 
 #include <std_msgs/msg/bool.hpp>  
 #include <geometry_msgs/msg/twist.hpp>
-
-
+#include <fstream>
+#include <vector>
 using namespace std::chrono_literals;
 
 
@@ -205,9 +205,36 @@ public:
     static BT::PortsList providedPorts()
     {
         return {
-            BT::InputPort<std::string>("robotLocationBAT")
+            BT::InputPort<std::string>("robotLocationBAT"),
+            BT::InputPort<int>("chargingInteger"),
+            BT::OutputPort<int>("chargingInteger")
         };
     }
+
+    int updateChargingCounter()
+        {
+            int counter = 0;
+
+            if (!getInput("chargingInteger", counter))
+            {
+                counter = 0;
+            }
+            else
+            {
+                if (counter == 9){
+                    counter = 0;
+                }
+                
+                else{
+                    counter += 1;
+                }
+            }
+
+            setOutput("chargingInteger", counter);
+
+            return counter;
+        }
+
 
     BT::NodeStatus onStart() override
     {
@@ -224,8 +251,10 @@ public:
             {
                 std::cout << "[BatteryOk] FORCE-CHARGING detected -> sending START" << std::endl;
 
+                int counter = updateChargingCounter();
+
                 std_msgs::msg::String msg;
-                msg.data = "START";
+                msg.data = std::to_string(counter) + "START";
 
                 for (int i = 0; i < 3; ++i)
                 {
@@ -256,14 +285,16 @@ public:
 
         if (getInput("robotLocationBAT", bat_state))
         {
-            if (bat_state == "FORCE-CHARGING")
-            {
+            if (bat_state == "FORCE-CHARGING"){
+                int counter = updateChargingCounter();
+
                 std_msgs::msg::String msg;
-                msg.data = "START";
+                msg.data = std::to_string(counter) + "START";
+
                 for (int i = 0; i < 3; ++i)
-                {
-                    force_charge_pub_->publish(msg);
-                }
+                    {
+                        force_charge_pub_->publish(msg);
+                    }
 
                 return BT::NodeStatus::FAILURE;
             }
@@ -343,6 +374,53 @@ protected:
 };
 
 
+struct DaySchedule {
+    char dayCode;      // M, D, W, T, F, S, U
+    bool isActive;     // True als er tijden zijn, False bij 'XXXXXXXX'
+    int startTime;     // bijv. 0900
+    int endTime;       // bijv. 1700
+}; 
+
+
+
+class ScheduleParser {
+public:
+    static std::vector<DaySchedule> getFullSchedule() {
+        std::vector<DaySchedule> scheduleList;
+        // Zorg dat dit pad exact overeenkomt met waar je Python script schrijft
+        std::string filePath = "/home/wheeltec/wheeltec_ros2/src/quiz_bt_node/schedule.txt";  
+        std::ifstream file(filePath);
+        std::string line;
+
+        if (!file.is_open()) {
+            // Log eventueel een error als het bestand niet gevonden wordt
+            return scheduleList; 
+        }
+
+        while (std::getline(file, line)) {
+            if (line.length() < 9) continue; // Beveiliging tegen lege regels
+
+            DaySchedule ds;
+            ds.dayCode = line[0];
+            
+            if (line.substr(1, 8) == "XXXXXXXX") {
+                ds.isActive = false;
+                ds.startTime = 0;
+                ds.endTime = 0;
+            } else {
+                ds.isActive = true;
+                ds.startTime = std::stoi(line.substr(1, 4));
+                ds.endTime = std::stoi(line.substr(5, 4));
+            }
+            scheduleList.push_back(ds);
+        }
+        
+        file.close();
+        return scheduleList;
+    }
+};
+
+
 class CheckInWorkingZone : public BT::SyncActionNode
 {
 public:
@@ -350,72 +428,87 @@ public:
         : BT::SyncActionNode(name, config)
     {
         node_ = rclcpp::Node::make_shared("btInWorkingZone");
-
-        pub_ = node_->create_publisher<std_msgs::msg::String>(
-            "/BehaviorTreeNode", 10);
+        pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
     }
 
     static BT::PortsList providedPorts()
     {
         return {
             BT::InputPort<std::string>("robotLocation"),
-            BT::InputPort<int>("start_hour"),
-            BT::InputPort<int>("start_minute"),
-            BT::InputPort<int>("end_hour"),
-            BT::InputPort<int>("end_minute"),
-
-            // Blackboard outputs
+            // Blackboard output voor andere nodes
             BT::OutputPort<std::string>("robotLocationBAT")
         };
     }
 
     BT::NodeStatus tick() override
     {
- 
-        //return BT::NodeStatus::SUCCESS;
-        int start_h, start_m, end_h, end_m;
-
-        if (!getInput("start_hour", start_h)) start_h = 9;
-        if (!getInput("start_minute", start_m)) start_m = 0;
-        if (!getInput("end_hour", end_h)) end_h = 17;
-        if (!getInput("end_minute", end_m)) end_m = 0;
-
+        // 1. Haal de huidige tijd en dag op
         std::time_t now = std::time(nullptr);
         std::tm *local = std::localtime(&now);
 
-        int current_minutes = local->tm_hour * 60 + local->tm_min;
-        int start_minutes = start_h * 60 + start_m;
-        int end_minutes = end_h * 60 + end_m;
+        // tm_wday: 0 = Sun, 1 = Mon, 2 = Tue, 3 = Wed, 4 = Thu, 5 = Fri, 6 = Sat
+        // We mappen dit naar jouw dag-codes uit het Python script
+        char day_codes[] = {'U', 'M', 'D', 'W', 'T', 'F', 'S'};
+        char current_day_code = day_codes[local->tm_wday];
+        
+        // Huidige tijd in HHMM format (bijv. 14:30 -> 1430)
+        int current_time_val = (local->tm_hour * 100) + local->tm_min;
+
+        // 2. Haal het schema op via de static helper
+        auto schedule = ScheduleParser::getFullSchedule();
+        // --- DEBUG PRINTS START ---
+        std::cout << "\n--- Ingelezen Schema ---" << std::endl;
+        if (schedule.empty()) {
+            std::cout << "[WAARSCHUWING] Schema is leeg! Kan bestand niet lezen." << std::endl;
+        } else {
+            for (const auto& day : schedule) {
+                std::cout << "Dag: " << day.dayCode;
+                if (day.isActive) {
+                    std::cout << " | Status: ACTIEF | Tijd: " << day.startTime << " tot " << day.endTime << std::endl;
+                } else {
+                    std::cout << " | Status: INACTIEF" << std::endl;
+                }
+            }
+        }
+        bool is_working_time = false;
+        for (const auto& day : schedule) {
+            if (day.dayCode == current_day_code) {
+                if (day.isActive && current_time_val >= day.startTime && current_time_val < day.endTime) {
+                    is_working_time = true;
+                }
+                break; // Dag gevonden, stop met zoeken
+            }
+        }
 
         std_msgs::msg::String bt_msg;
 
-        if (!(current_minutes >= start_minutes && current_minutes < end_minutes))
+        // 3. Afhandeling op basis van schema
+        if (!is_working_time)
         {
-            std::cout << "[CheckInWorkingZone] Buiten werkuren -> FORCE-CHARGING" << std::endl;
+            std::cout << "[CheckInWorkingZone] Buiten werkuren (Schedule) -> FORCE-CHARGING" << std::endl;
 
             setOutput("robotLocationBAT", std::string("FORCE-CHARGING"));
 
             bt_msg.data = "FORCE-CHARGING";
             pub_->publish(bt_msg);
 
+            // We geven SUCCESS terug omdat de conditie "afgehandeld" is (robot moet gaan laden)
             return BT::NodeStatus::SUCCESS;
         }
 
-
+        // Als we hier komen, is het werktijd
         setOutput("robotLocationBAT", std::string("WORKING"));
 
         bt_msg.data = "CheckInWorkingZone-WORKING";
         pub_->publish(bt_msg);
 
-
+        // 4. Check of de fysieke locatie ook klopt
         std::string location;
         if (!getInput("robotLocation", location))
         {
-            std::cerr << "[CheckInWorkingZone] Geen robotLocation gevonden!\n";
+            std::cerr << "[CheckInWorkingZone] Geen robotLocation gevonden op blackboard!\n";
             return BT::NodeStatus::FAILURE;
         }
-
-        std::cout << "[CheckInWorkingZone] robotLocation = " << location << std::endl;
 
         if (location == "WORKING")
         {
@@ -487,7 +580,26 @@ public:
             "/auto_recharge_event", 10,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
-                if (msg->data == "DRIVING-TO-DOCK")
+
+                // Bericht moet sowieso langer zijn dan 2 karakters
+                if(msg->data.size() < 2) return;
+
+                // Haal integer er uit die weergeeft in welke laadsequentie we zitten  
+                int msg_id = msg->data[0] - '0';
+                std::string event = msg->data.substr(1);
+
+                int bt_id = 0;
+
+                // haal huidige integer van blackboard
+                getInput("chargingInteger", bt_id);
+
+                // vergelijk verkregen integer met verwachte, enkel wanneer ze overeenkomen was het bericht relevant voor deze node
+                if(msg_id != bt_id){
+                        return;   // ander charge process -> negeren
+                    }
+
+
+                if (event == "DRIVING-TO-DOCK")
                     success_received_ = true;
                 else{
                     success_received_ = false;
@@ -502,7 +614,9 @@ public:
 
     static BT::PortsList providedPorts()
     {
-        return { BT::InputPort<double>("timeout") };
+        return { BT::InputPort<double>("timeout"),
+                BT::InputPort<int>("chargingInteger")
+                };
     }
 
     BT::NodeStatus onStart() override
@@ -560,7 +674,7 @@ private:
     rclcpp::Node::SharedPtr node_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;  // ➕ toegevoegd
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_; 
 };
 
 class BatteryStopDrive : public BT::StatefulActionNode
@@ -828,19 +942,32 @@ public:
           status_(""), timeout_(5.0)
     {
         node_ = rclcpp::Node::make_shared("btStatusDriveToChargingDock");
+
         sub_ = node_->create_subscription<std_msgs::msg::String>(
             "/auto_recharge_event", 10,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
-                status_ = msg->data;
-            });
+                if(msg->data.size() < 2) return;
 
+                int msg_id = msg->data[0] - '0';
+                std::string event = msg->data.substr(1);
+
+                int bt_id = 0;
+                getInput("chargingInteger", bt_id);
+
+                if(msg_id != bt_id)
+                    return;
+
+                status_ = event;
+            });
         pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
     }
 
     static BT::PortsList providedPorts()
     {
-        return { BT::InputPort<double>("timeout") };
+        return { BT::InputPort<double>("timeout"),
+                BT::InputPort<int>("chargingInteger")
+};
     }
 
     BT::NodeStatus onStart() override
@@ -905,18 +1032,33 @@ public:
           event_(""), timeout_(200.0)
     {
         node_ = rclcpp::Node::make_shared("btIsRobotCharging");
+
+
         sub_ = node_->create_subscription<std_msgs::msg::String>(
             "/auto_recharge_event", 10,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
-                event_ = msg->data;
+                int msg_id = msg->data[0] - '0';
+                std::string event = msg->data.substr(1);
+
+                int bt_id = 0;
+                getInput("chargingInteger", bt_id);
+
+                if(msg_id != bt_id)
+                    return;
+
+                event_ = event;
             });
+
+
         pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
     }
 
     static BT::PortsList providedPorts()
     {
-        return { BT::InputPort<double>("timeout") };
+        return { BT::InputPort<double>("timeout"),
+                BT::InputPort<int>("chargingInteger")
+ };
     }
 
     BT::NodeStatus onStart() override
@@ -978,7 +1120,16 @@ public:
             "/auto_recharge_event", 10,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
-                last_event_ = msg->data;
+                int msg_id = msg->data[0] - '0';
+                std::string event = msg->data.substr(1);
+
+                int bt_id = 0;
+                getInput("chargingInteger", bt_id);
+
+                if(msg_id != bt_id)
+                    return;
+
+                last_event_ = event;
             });
 
         // Publisher naar rpitopic
@@ -990,7 +1141,9 @@ public:
 
     static BT::PortsList providedPorts()
     {
-        return { BT::OutputPort<std::string>("robotLocation") };
+        return { BT::OutputPort<std::string>("robotLocation"),
+                BT::InputPort<int>("chargingInteger")
+ };
     }
 
     BT::NodeStatus onStart() override
@@ -1091,7 +1244,7 @@ public:
         rclcpp::spin_some(node_);
         std::cout << "[CheckingNearbyVisitors] Measured distance: " << latest_value_ << std::endl;
 
-        if (latest_value_ <= 2.5)
+        if (latest_value_ <= 3.5)
         {
             std::cout << "[CheckingNearbyVisitors] STOP BIJ PERSOON -> SUCCESS" << std::endl;
             return BT::NodeStatus::SUCCESS;
@@ -1578,7 +1731,8 @@ public:
 
     static BT::PortsList providedPorts()
     {
-        return {};
+        return { BT::InputPort<int>("chargingInteger") };
+
     }
 
     BT::NodeStatus onStart() override
@@ -1589,8 +1743,11 @@ public:
         pub_bt_->publish(bt_msg);
 
         // Publish STOP command
+        int charge_id = 0;
+        getInput("chargingInteger", charge_id);
+
         std_msgs::msg::String cmd_msg;
-        cmd_msg.data = "STOP";
+        cmd_msg.data = std::to_string(charge_id) + "STOP";
 
         for (int i = 0; i < 3; ++i)
         {
@@ -1787,7 +1944,7 @@ public:
         pub_->publish(msg);
 
         std_msgs::msg::String quiz_msg;
-        quiz_msg.data = "RobotStartup";
+        quiz_msg.data = "RobotStarting";
         pub_quiz_->publish(quiz_msg);
 
 
@@ -2267,6 +2424,7 @@ private:
 };
 
 
+
 // class ManualDriving : public BT::StatefulActionNode
 // {
 // public:
@@ -2390,63 +2548,11 @@ int main(int argc, char **argv)
     // laad boom uit XML
     auto tree = factory.createTreeFromFile("src/mecabot_bt/trees/behavior_tree.xml");
 
-
-
-    auto settings_node = rclcpp::Node::make_shared("bt_settings_handler");
-
-    // Default waarden instellen op het blackboard
-    auto blackboard = tree.rootBlackboard();
-    blackboard->set("start_h", 8);
-    blackboard->set("start_m", 55);
-    blackboard->set("end_h", 18);
-    blackboard->set("end_m", 0);
-
-auto sub_settings = settings_node->create_subscription<std_msgs::msg::String>(
-    "/robot_settings", 10,
-    [&blackboard](const std_msgs::msg::String::SharedPtr msg) {
-        std::string data = msg->data;
-        std::cout << "[DEBUG] Bericht ontvangen op /robot_settings: " << data << std::endl; // EXTRA PRINT
-
-        try {
-            size_t first_colon = data.find(":");
-            if (first_colon == std::string::npos) {
-                std::cout << "[WARN] Formaat onjuist, geen ':' gevonden" << std::endl;
-                return;
-            }
-
-            std::string type = data.substr(0, first_colon);
-            std::string time_part = data.substr(first_colon + 1);
-            
-            size_t second_colon = time_part.find(":");
-            if (second_colon == std::string::npos) {
-                std::cout << "[WARN] Tijdformaat onjuist, geen tweede ':' gevonden" << std::endl;
-                return;
-            }
-
-            int h = std::stoi(time_part.substr(0, second_colon));
-            int m = std::stoi(time_part.substr(second_colon + 1));
-
-            if (type == "START") {
-                blackboard->set("start_h", h);
-                blackboard->set("start_m", m);
-                std::cout << ">>> [BT Config] Starttijd aangepast naar " << h << ":" << m << std::endl;
-            } else if (type == "STOP") {
-                blackboard->set("end_h", h);
-                blackboard->set("end_m", m);
-                std::cout << ">>> [BT Config] Stoptijd aangepast naar " << h << ":" << m << std::endl;
-            }
-        } catch (const std::exception& e) {
-            std::cerr << "[ERROR] Crash tijdens parsen: " << e.what() << std::endl;
-        }
-    });
     std::cout << "--- Starting BT in continuous mode ---" << std::endl;
-    rclcpp::Rate loop_rate(2.0); 
+    rclcpp::Rate loop_rate(1.0); 
 
-
-    
     while (rclcpp::ok())
     {
-        rclcpp::spin_some(settings_node); // Check voor nieuwe uren
         BT::NodeStatus status = tree.tickRoot();
 
         if (status == BT::NodeStatus::SUCCESS) {

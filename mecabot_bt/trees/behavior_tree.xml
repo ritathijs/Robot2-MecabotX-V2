@@ -25,7 +25,8 @@
 							<Parallel name="RootParallel" success_threshold="1" failure_threshold="1">
 
 								<!-- Linkerkid: BatteryOk -->
-								<BatteryOk robotLocationBAT="{robotLocationBAT}"/>
+								<BatteryOk robotLocationBAT="{robotLocationBAT}"
+										   chargingInteger="{chargingInteger}"/>
 
 								<!-- Rechterkind: ForceSuccess op de Fallback MainFallback -->
 								<ForceSuccess name="MainFallbackForceSuccess">
@@ -37,12 +38,7 @@
 											<Fallback name="CheckWorkingZone">
 
 												<CheckInWorkingZone
-													robotLocation="{robotLocation}"
-                          start_hour="{start_h}"
-                          start_minute="{start_m}"
-                          end_hour="{end_h}"
-                          end_minute="{end_m}"
-
+				
 													robotLocationBAT="{robotLocationBAT}"
 												/>
 
@@ -114,18 +110,28 @@
 
 								<Sequence name="ChargingSequence">
 									<CheckMainBTErrorState stop_flag="{stop_flag}"/>
-									<DriveToChargingStation timeout="5.0"/>
-									<StatusDriveToChargingDock timeout="200.0"/>
-									<IsRobotCharging timeout="200"/>
-									<IsBatteryFull robotLocation="{robotLocation}"/>
+									<DriveToChargingStation timeout="5.0"
+									    					chargingInteger="{chargingInteger}" />
+
+									<StatusDriveToChargingDock timeout="200.0"
+									    chargingInteger="{chargingInteger}" 
+										/>
+									<IsRobotCharging timeout="200"
+									    chargingInteger="{chargingInteger}" 
+									/>
+									<IsBatteryFull robotLocation="{robotLocation}"    
+									chargingInteger="{chargingInteger}"
+									/>
 
 									<RobotWaitInChargingStation
-                      start_hour="{start_h}"
-                      start_minute="{start_m}"
-                      end_hour="{end_h}"
-                      end_minute="{end_m}"
+										start_hour="14"
+										start_minute="25"
+										end_hour="14"
+										end_minute="27"
 									/>
-									<StopRobotCharging/>
+									<StopRobotCharging
+									    chargingInteger="{chargingInteger}"
+										/>
 									<BatteryCharged timeout="5" robotLocationBAT="{robotLocationBAT}"/>
 								</Sequence>
 

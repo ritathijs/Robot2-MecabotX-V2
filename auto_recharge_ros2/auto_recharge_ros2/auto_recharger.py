@@ -113,6 +113,8 @@ class AutoRecharger(Node):
         'car_mode':'mini_mec'
         }
 
+        self.charge_session_id = None # ID VOOR BERICHTEN VAN EN NAAR BT
+
         self.Event_pub = self.create_publisher(String, '/auto_recharge_event', 10)
 
         # Code hieronder 
@@ -210,14 +212,18 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
     def publish_event(self, msg):
         """Publish an auto recharge event to /auto_recharge_event"""
+
+        if self.charge_session_id is not None:
+            msg = f"{self.charge_session_id}{msg}"
+
         event_msg = String()
         event_msg.data = msg
 
         for i in range(3):
             self.Event_pub.publish(event_msg)
-            time.sleep(0.05)  # 50ms vertraging tussen berichten
+            time.sleep(0.05)
 
-        print_and_fixRetract(msg)  
+        print_and_fixRetract(msg)
 
 
     # 设置自动回充的状态
@@ -277,18 +283,22 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
     def force_charge_callback(self, msg):
         command = msg.data.strip().upper()
 
+        # eerste karakter = sessie nummer
+        if len(command) > 1 and command[0].isdigit():
+            self.charge_session_id = command[0]
+            command = command[1:]
+
         if command == "START":
             print_and_fixRetract(
-                YELLOW + "Force charge command ontvangen via topic." + RESET
+                YELLOW + f"Force charge START ontvangen (sessie {self.charge_session_id})." + RESET
             )
             self.start_forced_charging()
 
         elif command == "STOP":
             print_and_fixRetract(
-                YELLOW + "Force charge STOP ontvangen via topic." + RESET
+                YELLOW + f"Force charge STOP ontvangen (sessie {self.charge_session_id})." + RESET
             )
             self.Stop_Charge()
-
 
     def Pub_Charger_Position(self):
         '''使用最新充电桩位置发布导航目标点话题'''

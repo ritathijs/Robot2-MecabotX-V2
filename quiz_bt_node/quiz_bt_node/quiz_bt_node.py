@@ -1,22 +1,30 @@
+import requests
+import json
+import time
+import threading
+
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
-import socketio
-import time
 from std_msgs.msg import Float32
+
+import socketio
 from datetime import datetime
 
 
+URL = "http://192.168.137.100/cms/getSettings"
+INTERVAL = 300  # seconden (5 minuten)
+
+
 class QuizBTNode(Node):
+
     def __init__(self):
         super().__init__('quiz_bt_node')
-        
-        
-        self.settings_publisher = self.create_publisher(String, '/robot_settings', 10)
-        # ROS 2 Publisher voor quiz status
+
+        # ROS2 publisher
         self.quiz_publisher = self.create_publisher(String, 'quiz', 10)
 
-        # ROS 2 Subscriber voor RPi commands
+        # ROS2 subscriber
         self.subscription = self.create_subscription(
             String,
             'rpitopic',
@@ -46,44 +54,102 @@ class QuizBTNode(Node):
         self.sio.connect(server_ip, retry=True)
         self.get_logger().info(f"Connected to server at {server_ip}")
 
+        # Start thread die schedule blijft ophalen
+        self.schedule_thread = threading.Thread(target=self.schedule_updater, daemon=True)
+        self.schedule_thread.start()
 
+
+    # ---------------- SETTINGS OPHALEN ----------------
+
+    def schedule_updater(self):
+
+        day_map = {
+            "Mon": "M",
+            "Tue": "D",
+            "Wed": "W",
+            "Thu": "T",
+            "Fri": "F",
+            "Sat": "S",
+            "Sun": "U"
+        }
+
+        while True:
+
+            try:
+                response = requests.get(URL)
+
+                if response.status_code == 200:
+
+                    data = response.json()
+                    settings = data[0]
+
+                    schedule = settings["schedule"]
+
+                    # Bestand pad
+                    file_path = "/home/wheeltec_ros2/src/quiz_bt_node/schedule.txt"
+
+                    # Open file in write-mode
+                    with open(file_path, "w") as f:
+
+                        for day_name, info in schedule.items():
+                            prefix = day_map.get(day_name, "?")
+
+                            if info["active"]:
+                                # Verwijder ":" uit start/end en combineer
+                                start = info["start"].replace(":", "")
+                                end = info["end"].replace(":", "")
+                                line = f"{prefix}{start}{end}"
+                            else:
+                                line = f"{prefix}{'X'*8}"  # 8 X'en voor inactive dag
+
+                            f.write(line + "\n")
+
+                    self.get_logger().info("Schedule geupdate (plain text)")
+
+                else:
+                    self.get_logger().error(f"Server fout: {response.status_code}")
+
+            except Exception as e:
+                self.get_logger().error(f"Schedule update error: {e}")
+
+            time.sleep(INTERVAL)
+
+
+    # ---------------- BATTERY ----------------
 
     def battery_callback(self, msg):
+
         percentage = msg.data
         self.get_logger().info(f'Battery percentage: {percentage}%')
 
-        # Stuur naar webapp via socket.io
         self.sio.emit("battery-percentage", {"percentage": percentage})
 
 
+    # ---------------- TIME HANDLER ----------------
 
     def handle_set_hour(self, hour_value):
+
         self.get_logger().info(f"[PLACEHOLDER] Zet systeemtijd naar: {hour_value}")
         print(f"Zet systeemtijd naar {hour_value} (nog niet geïmplementeerd)")
-        # TODO: echte systeemtijd aanpassen indien nodig
 
-    def handle_start_work_hour(self, hour_value):
-        self.get_logger().info(f"Nieuwe starttijd: {hour_value}")
-        msg = String()
-        msg.data = f"START:{hour_value}"
-        self.settings_publisher.publish(msg)
 
-    def handle_stop_work_hour(self, hour_value):
-        msg = String()
-        msg.data = f"STOP:{hour_value}"
-        self.settings_publisher.publish(msg)
-
+    # ---------------- QUIZ PUBLISHER ----------------
 
     def publish_quiz_message(self, message):
+
         msg = String()
         msg.data = message
 
         for i in range(3):
             self.quiz_publisher.publish(msg)
-            time.sleep(0.05)  # 50 ms vertraging
+            time.sleep(0.05)
 
         self.quiz_publisher.publish(msg)
+
         self.get_logger().info(f'Published to quiz topic: {msg.data}')
+
+
+    # ---------------- SOCKET EVENTS ----------------
 
     def on_connect(self):
         self.get_logger().info('Connected to server')
@@ -105,89 +171,78 @@ class QuizBTNode(Node):
         self.get_logger().info("Drive to quiz location")
         self.publish_quiz_message("drive_to_quiz_location")
 
-
     def robot_manual_drive(self):
         self.get_logger().info("Starting robot manual drive")
         self.publish_quiz_message("RobotManualDrive")
-    
 
     def robot_stop_manual_drive(self):
         self.get_logger().info("Stopping robot manual drive")
         self.publish_quiz_message("RobotStopManualDrive")
 
 
-    # ZENDDEEL : ONDERSTAANDEN WORDEN DOOR DE BT VERZONDEN RICHTING DE QUIZ
+    # ---------------- ROS MESSAGES ----------------
 
     def rpi_callback(self, msg):
+
         self.get_logger().info(f'Received from RPi: {msg.data}')
-        
-	# BEHAVIOR TREE NODE : RobotExplore
+
         if msg.data == "RobotExplore":
+
             self.get_logger().info("Robot is exploring")
             self.sio.emit("robot-explore")
 
-	# BEHAVIOR TREE NODE : StartDrivingToPeople
         elif msg.data == "RobotGoToVisitors":
+
             self.get_logger().info("Robot will drive to visitors")
             self.sio.emit("robot-go-to-visitors")
 
-	# BEHAVIOR TREE NODE : ArrivedAtVisitors
         elif msg.data == "RobotArrivedAtVisitors":
+
             self.get_logger().info("Robot arrived at visitors")
             self.sio.emit("robot-arrived-at-visitors")
 
-	# BEHAVIOR TREE NODE : RobotAtQuiz
         elif msg.data == "robot-arrived-at-quiz-location":
+
             self.get_logger().info("Robot is at quiz location")
             self.sio.emit("robot-arrived-at-quiz-location")
 
-	# BEHAVIOR TREE NODE : DriveToChargingStation
         elif msg.data == "RobotGoCharge":
+
             self.get_logger().info("Robot going to charge")
             self.sio.emit("robot-go-charge")
 
-
-	# BEHAVIOR TREE NODE : IsBatteryFull
         elif msg.data == "RobotCharging":
+
             self.get_logger().info("Robot is charging")
             self.sio.emit("robot-charging")
 
-
-
-
-        #onderstaande nog af te stemmen met Quinten
-       	# BEHAVIOR TREE NODE : BatteryCharged
         elif msg.data == "RobotStartup":
+
             self.get_logger().info("Robot awaking from charging")
             self.sio.emit("robot-startup")
 
-    
         elif msg.data.startswith("SETHOUR:"):
+
             hour_value = msg.data.split("SETHOUR:")[1].strip()
             self.handle_set_hour(hour_value)
-            return
-
-        elif msg.data.startswith("STARTWORKHOUR:"):
-            hour_value = msg.data.split("STARTWORKHOUR:")[1].strip()
-            self.handle_start_work_hour(hour_value)
-            return
-
-        elif msg.data.startswith("STOPWORKHOUR:"):
-            hour_value = msg.data.split("STOPWORKHOUR:")[1].strip()
-            self.handle_stop_work_hour(hour_value)
-            return
 
 
+# ---------------- MAIN ----------------
 
 def main():
+
     rclpy.init()
+
     node = QuizBTNode()
 
     try:
         rclpy.spin(node)
+
     except KeyboardInterrupt:
         pass
+
     finally:
+
         node.sio.disconnect()
         node.destroy_node()
         rclpy.shutdown()
@@ -195,4 +250,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
