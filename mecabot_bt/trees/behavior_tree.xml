@@ -26,7 +26,8 @@
 
 								<!-- Linkerkid: BatteryOk -->
 								<BatteryOk robotLocationBAT="{robotLocationBAT}"
-										   chargingInteger="{chargingInteger}"/>
+										   chargingInteger="{chargingInteger}"
+										   chargingInteger_nextCycle="{chargingInteger_nextCycle}"/>
 
 								<!-- Rechterkind: ForceSuccess op de Fallback MainFallback -->
 								<ForceSuccess name="MainFallbackForceSuccess">
@@ -51,8 +52,8 @@
 												z="0.0033969879150390625"
 												qx="0.0"
 												qy="0.0"
-												qz="0"
-												qw="1.0"
+												qz="0.7071068"
+												qw="0.7071068"
 														workarea_timestamp="{workarea_timestamp}" 
 													/>
 
@@ -110,11 +111,12 @@
 
 								<Sequence name="ChargingSequence">
 									<CheckMainBTErrorState stop_flag="{stop_flag}"/>
-									<DriveToChargingStation timeout="5.0"
+									<DriveToChargingStation timeout="15.0"
 									    					chargingInteger="{chargingInteger}" />
 
 									<StatusDriveToChargingDock timeout="200.0"
-									    chargingInteger="{chargingInteger}" 
+									    chargingInteger="{chargingInteger}"
+										chargingInteger_nextCycle="{chargingInteger_nextCycle}" 
 										/>
 									<IsRobotCharging timeout="200"
 									    chargingInteger="{chargingInteger}" 

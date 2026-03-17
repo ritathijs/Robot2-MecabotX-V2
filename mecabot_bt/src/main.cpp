@@ -206,34 +206,25 @@ public:
     {
         return {
             BT::InputPort<std::string>("robotLocationBAT"),
-            BT::InputPort<int>("chargingInteger"),
+            BT::InputPort<int>("chargingInteger_nextCycle"),
             BT::OutputPort<int>("chargingInteger")
         };
     }
 
     int updateChargingCounter()
+    {
+        int counter = 0;
+
+        if (!getInput("chargingInteger_nextCycle", counter))
         {
-            int counter = 0;
-
-            if (!getInput("chargingInteger", counter))
-            {
-                counter = 0;
-            }
-            else
-            {
-                if (counter == 9){
-                    counter = 0;
-                }
-                
-                else{
-                    counter += 1;
-                }
-            }
-
-            setOutput("chargingInteger", counter);
-
-            return counter;
+            std::cout << "[BatteryOk] FOUT BIJ OPHALEN VAN NIEUWE INTEGER UIT BLACKBOARD " << std::endl;
+            counter = 0;
         }
+
+        setOutput("chargingInteger", counter);
+
+        return counter;
+    }
 
 
     BT::NodeStatus onStart() override
@@ -970,7 +961,7 @@ public:
         node_ = rclcpp::Node::make_shared("btStatusDriveToChargingDock");
 
         sub_ = node_->create_subscription<std_msgs::msg::String>(
-            "/auto_recharge_event", 1,
+            "/auto_recharge_event", 10,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
                 if(msg->data.size() < 2) return;
@@ -992,22 +983,53 @@ public:
     static BT::PortsList providedPorts()
     {
         return { BT::InputPort<double>("timeout"),
-                BT::InputPort<int>("chargingInteger")
-};
+                BT::InputPort<int>("chargingInteger"),
+                BT::OutputPort<int>("chargingInteger_nextCycle")   
+
+        };
     }
+
+    int incrementChargingCounter() {
+        int counter = 0;
+
+        if (!getInput("chargingInteger", counter))
+        {
+            throw BT::RuntimeError("chargingInteger ontbreekt");
+        }
+
+        if (counter == 9){
+            counter = 0;
+        }
+        else{
+            counter += 1;
+        }
+
+        setOutput("chargingInteger_nextCycle", counter);
+
+        return counter;
+    }
+
 
     BT::NodeStatus onStart() override
     {                
-        
         status_ = "";
 
         getInput("timeout", timeout_);
         start_time_ = std::chrono::steady_clock::now();
+
+        int new_counter = incrementChargingCounter();
+
+        std::cout << "[StatusDriveToChargingDock] Counter -> " 
+                << new_counter << std::endl;
+
         std_msgs::msg::String msg;
         msg.data = "StatusDriveToChargingDock";
         pub_->publish(msg);
+
         return BT::NodeStatus::RUNNING;
     }
+
+
 
     BT::NodeStatus onRunning() override
     {
@@ -1185,7 +1207,7 @@ public:
         bt_msg.data = "IsBatteryFull";
         pub_bt_->publish(bt_msg);
 
-        return BT::NodeStatus::SUCCESS;
+        return BT::NodeStatus::SUCCESS; // altijd succes geven op dit moment voor testing 
 
         std::cout << "[IsBatteryFull] RobotCharging bericht verzonden" << std::endl;
 
@@ -1618,6 +1640,8 @@ public:
 
     BT::NodeStatus onRunning() override
     {
+        // 17 maart
+        return BT::NodeStatus::SUCCESS;
 
         rclcpp::spin_some(node_);
         auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start_time_).count();
@@ -2094,6 +2118,9 @@ public:
 
     BT::NodeStatus onRunning() override
     {
+        // 17 maart
+        return BT::NodeStatus::SUCCESS;
+
         rclcpp::spin_some(node_);
 
         auto elapsed = std::chrono::duration<double>(
@@ -2361,7 +2388,7 @@ public:
 
         while (true)
         {
-
+            return BT::NodeStatus::SUCCESS; // 17 maart
             const BT::NodeStatus child_state = child_node_->executeTick();
 
             if (child_state == BT::NodeStatus::RUNNING)
