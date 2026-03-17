@@ -10,6 +10,8 @@
 #include <geometry_msgs/msg/twist.hpp>
 #include <fstream>
 #include <vector>
+
+#include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 using namespace std::chrono_literals;
 
 
@@ -1868,91 +1870,81 @@ private:
 
 
 
-// class MDForceCharging : public BT::SyncActionNode
-// {
-// public:
-//     MDForceCharging(const std::string& name, const BT::NodeConfiguration& config)
-//         : BT::SyncActionNode(name, config)
-//     {
-//         node_ = rclcpp::Node::make_shared("btMDForceCharging");
+class MDForceCharging : public BT::SyncActionNode
+{
+public:
+    MDForceCharging(const std::string& name, const BT::NodeConfiguration& config)
+        : BT::SyncActionNode(name, config)
+    {
+        node_ = rclcpp::Node::make_shared("btMDForceCharging");
 
-//         pub_bt_ = node_->create_publisher<std_msgs::msg::String>(
-//             "/BehaviorTreeNode", 10);
+        pub_bt_ = node_->create_publisher<std_msgs::msg::String>(
+            "/BehaviorTreeNode", 10);
 
-//         pub_pose_ = node_->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
-//             "/initialpose", 10);
-//     }
+        pub_pose_ = node_->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
+            "/initialpose", 10);
+    }
 
-//     static BT::PortsList providedPorts()
-//     {
-//         return {
-//             BT::InputPort<double>("x"),
-//             BT::InputPort<double>("y"),
-//             BT::InputPort<double>("z"),
-//             BT::InputPort<double>("qx"),
-//             BT::InputPort<double>("qy"),
-//             BT::InputPort<double>("qz"),
-//             BT::InputPort<double>("qw"),
+    static BT::PortsList providedPorts()
+    {
+        return {
+            BT::InputPort<double>("x"),
+            BT::InputPort<double>("y"),
+            BT::InputPort<double>("z"),
+            BT::InputPort<double>("qx"),
+            BT::InputPort<double>("qy"),
+            BT::InputPort<double>("qz"),
+            BT::InputPort<double>("qw"),
 
-//             BT::OutputPort<std::string>("robotLocationBAT")
-//         };
-//     }
+            BT::OutputPort<std::string>("robotLocationBAT")
+        };
+    }
 
-//     BT::NodeStatus tick() override
-//     {
-//         std_msgs::msg::String bt_msg;
-//         bt_msg.data = "MDForceCharging";
-//         pub_bt_->publish(bt_msg);
+    BT::NodeStatus tick() override
+    {
+        // ... je bestaande logica (bt_msg publish, etc.) ...
 
-//         setOutput("robotLocationBAT", "FORCE-CHARGING");
+        double x, y, z, qx, qy, qz, qw;
+        if (!getInput("x", x) || !getInput("y", y) || !getInput("z", z) ||
+            !getInput("qx", qx) || !getInput("qy", qy) || !getInput("qz", qz) || !getInput("qw", qw))
+        {
+            return BT::NodeStatus::FAILURE;
+        }
 
-//         std::cout << "[MDForceCharging] Setting robotLocation=FORCE-CHARGING" << std::endl;
+        geometry_msgs::msg::PoseWithCovarianceStamped pose_msg;
 
-//         double x, y, z, qx, qy, qz, qw;
+        pose_msg.header.stamp = node_->get_clock()->now();
+        pose_msg.header.frame_id = "map";
 
-//         if (!getInput("x", x) ||
-//             !getInput("y", y) ||
-//             !getInput("z", z) ||
-//             !getInput("qx", qx) ||
-//             !getInput("qy", qy) ||
-//             !getInput("qz", qz) ||
-//             !getInput("qw", qw))
-//         {
-//             std::cerr << "[MDForceCharging] Missing coordinate input!" << std::endl;
-//             return BT::NodeStatus::FAILURE;
-//         }
+        // Positie en Orientatie
+        pose_msg.pose.pose.position.x = x;
+        pose_msg.pose.pose.position.y = y;
+        pose_msg.pose.pose.position.z = z;
+        pose_msg.pose.pose.orientation.x = qx;
+        pose_msg.pose.pose.orientation.y = qy;
+        pose_msg.pose.pose.orientation.z = qz;
+        pose_msg.pose.pose.orientation.w = qw;
 
-//         geometry_msgs::msg::PoseWithCovarianceStamped pose_msg;
+        // Covariance instellen (36 elementen array)
+        // We zetten alle waarden op 0.0
+        std::fill(pose_msg.pose.covariance.begin(), pose_msg.pose.covariance.end(), 0.0);
 
-//         pose_msg.header.stamp = node_->get_clock()->now();
-//         pose_msg.header.frame_id = "map";
+        // En we geven een hoge zekerheid (kleine getallen) op de belangrijke assen:
+        pose_msg.pose.covariance[0] = 0.01;  // X zekerheid
+        pose_msg.pose.covariance[7] = 0.01;  // Y zekerheid
+        pose_msg.pose.covariance[35] = 0.01; // Yaw (Z-rotatie) zekerheid
 
-//         pose_msg.pose.pose.position.x = x;
-//         pose_msg.pose.pose.position.y = y;
-//         pose_msg.pose.pose.position.z = z;
+        // Publish de pose (1 keer is meestal genoeg, maar 3 kan als je netwerk hapert)
+        pub_pose_->publish(pose_msg);
 
-//         pose_msg.pose.pose.orientation.x = qx;
-//         pose_msg.pose.pose.orientation.y = qy;
-//         pose_msg.pose.pose.orientation.z = qz;
-//         pose_msg.pose.pose.orientation.w = qw;
-
-
-//         for (int i = 0; i < 3; ++i)
-//         {
-//             pub_pose_->publish(pose_msg);
-//             rclcpp::sleep_for(std::chrono::milliseconds(100));
-//         }
-
-//         std::cout << "[MDForceCharging] Published /initialpose 3 times" << std::endl;
-
-//         return BT::NodeStatus::SUCCESS;
-//     }
-
-// private:
-//     rclcpp::Node::SharedPtr node_;
-//     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
-//     rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pub_pose_;
-// };
+        std::cout << "[MDForceCharging] Pose published naar /initialpose" << std::endl;
+        return BT::NodeStatus::SUCCESS;
+    }
+private:
+    rclcpp::Node::SharedPtr node_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pub_pose_;
+};
 
 
 class BatteryCharged : public BT::StatefulActionNode
@@ -2473,74 +2465,74 @@ private:
 
 
 
-// class ManualDriving : public BT::StatefulActionNode
-// {
-// public:
-//     ManualDriving(const std::string &name, const BT::NodeConfiguration &config)
-//         : BT::StatefulActionNode(name, config),
-//           stop_received_(false)
-//     {
-//         node_ = rclcpp::Node::make_shared("btManualDriving");
+class ManualDriving : public BT::StatefulActionNode
+{
+public:
+    ManualDriving(const std::string &name, const BT::NodeConfiguration &config)
+        : BT::StatefulActionNode(name, config),
+          stop_received_(false)
+    {
+        node_ = rclcpp::Node::make_shared("btManualDriving");
 
-//         // Subscriber naar quiz topic
-//         sub_ = node_->create_subscription<std_msgs::msg::String>(
-//             "/quiz", 10,
-//             [this](std_msgs::msg::String::SharedPtr msg)
-//             {
-//                 if (msg->data == "RobotStopManualDrive")
-//                 {
-//                     std::cout << "[ManualDriving] RobotStopManualDrive ontvangen!" << std::endl;
-//                     stop_received_ = true;
-//                 }
-//             });
+        // Subscriber naar quiz topic
+        sub_ = node_->create_subscription<std_msgs::msg::String>(
+            "/quiz", 10,
+            [this](std_msgs::msg::String::SharedPtr msg)
+            {
+                if (msg->data == "RobotStopManualDrive")
+                {
+                    std::cout << "[ManualDriving] RobotStopManualDrive ontvangen!" << std::endl;
+                    stop_received_ = true;
+                }
+            });
 
-//         // Publisher voor BehaviorTreeNode
-//         pub_bt_ = node_->create_publisher<std_msgs::msg::String>(
-//             "/BehaviorTreeNode", 10);
-//     }
+        // Publisher voor BehaviorTreeNode
+        pub_bt_ = node_->create_publisher<std_msgs::msg::String>(
+            "/BehaviorTreeNode", 10);
+    }
 
-//     static BT::PortsList providedPorts()
-//     {
-//         return {};
-//     }
+    static BT::PortsList providedPorts()
+    {
+        return {};
+    }
 
-//     BT::NodeStatus onStart() override
-//     {
-//         stop_received_ = false;
+    BT::NodeStatus onStart() override
+    {
+        stop_received_ = false;
 
-//         std_msgs::msg::String msg;
-//         msg.data = "ManualDriving";
-//         pub_bt_->publish(msg);
+        std_msgs::msg::String msg;
+        msg.data = "ManualDriving";
+        pub_bt_->publish(msg);
 
-//         std::cout << "[ManualDriving] START" << std::endl;
+        std::cout << "[ManualDriving] START" << std::endl;
 
-//         return BT::NodeStatus::RUNNING;
-//     }
+        return BT::NodeStatus::RUNNING;
+    }
 
-//     BT::NodeStatus onRunning() override
-//     {
-//         rclcpp::spin_some(node_);
+    BT::NodeStatus onRunning() override
+    {
+        rclcpp::spin_some(node_);
 
-//         if (stop_received_)
-//         {
-//             std::cout << "[ManualDriving] Stop ontvangen -> SUCCESS" << std::endl;
-//             return BT::NodeStatus::SUCCESS;
-//         }
+        if (stop_received_)
+        {
+            std::cout << "[ManualDriving] Stop ontvangen -> SUCCESS" << std::endl;
+            return BT::NodeStatus::SUCCESS;
+        }
 
-//         return BT::NodeStatus::RUNNING;
-//     }
+        return BT::NodeStatus::RUNNING;
+    }
 
-//     void onHalted() override
-//     {
-//         std::cout << "[ManualDriving] HALTED" << std::endl;
-//     }
+    void onHalted() override
+    {
+        std::cout << "[ManualDriving] HALTED" << std::endl;
+    }
 
-// private:
-//     rclcpp::Node::SharedPtr node_;
-//     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
-//     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
-//     bool stop_received_;
-// };
+private:
+    rclcpp::Node::SharedPtr node_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
+    bool stop_received_;
+};
 
 // -------------------------
 // MAIN
@@ -2584,9 +2576,9 @@ int main(int argc, char **argv)
     factory.registerNodeType<ForceSuccess>("MainFallbackForceSuccess");
     factory.registerNodeType<ForceSuccess>("BatteryForceSuccess");
 
-    //factory.registerNodeType<MDForceCharging>("MDForceCharging");
+    factory.registerNodeType<MDForceCharging>("MDForceCharging");
     factory.registerNodeType<CheckManualDriving>("CheckManualDriving");
-   // factory.registerNodeType<ManualDriving>("ManualDriving");
+    factory.registerNodeType<ManualDriving>("ManualDriving");
 
 
     factory.registerNodeType<CheckMainBTErrorState>("CheckMainBTErrorState");

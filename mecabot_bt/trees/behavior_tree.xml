@@ -1,158 +1,136 @@
 <root main_tree_to_execute="MainTree">
-	<BehaviorTree ID="MainTree">
+    <BehaviorTree ID="MainTree">
 
-		<!-- Top Fallback -->
-		<Fallback name="TopFallback">
+        <Fallback name="TopFallback">
 
-			<!-- Linkerkid: Parallel met network error en fallback -->
-			<Parallel name="NetworkAndMainParallel" success_threshold="1" failure_threshold="1">
+            <Parallel name="NetworkAndMainParallel" success_threshold="1" failure_threshold="1">
 
-				<!-- Linkerkid: CheckNetworkError -->
-				<CheckNetworkError/>
+                <CheckNetworkError/>
 
-				<!-- Rechterkid: Fallback -->
-				<Fallback name="InnerFallback">
+                <Fallback name="InnerFallback">
 
-					<!-- Linkerkid: Parallel met CheckCollision en bestaande MainFallback -->
-					<Parallel name="CollisionAndMainParallel" success_threshold="1" failure_threshold="1">
+                    <Parallel name="CollisionAndMainParallel" success_threshold="1" failure_threshold="1">
 
-						<!-- Linkerkid: CheckCollision -->
-						<CheckCollision/>
+                        <CheckCollision/>
 
-						<Fallback name="BatteryLowFallback">
+                        <Fallback name="ManualDrivingFallback">
 
-							<!-- Linkerkid: Parallel RootParallel -->
-							<Parallel name="RootParallel" success_threshold="1" failure_threshold="1">
+                            <Parallel name="ManDriveAndMainParallel" success_threshold="1" failure_threshold="1">
+                                
+                                <CheckManualDriving/>
 
-								<!-- Linkerkid: BatteryOk -->
-								<BatteryOk robotLocationBAT="{robotLocationBAT}"
-										   chargingInteger="{chargingInteger}"
-										   chargingInteger_nextCycle="{chargingInteger_nextCycle}"/>
+                                <Fallback name="BatteryLowFallback">
 
-								<!-- Rechterkind: ForceSuccess op de Fallback MainFallback -->
-								<ForceSuccess name="MainFallbackForceSuccess">
-									<Fallback name="MainFallback">
+                                    <Parallel name="RootParallel" success_threshold="1" failure_threshold="1">
 
-										<!-- Linkerkind: MainSequence -->
-										<Sequence name="MainSequence">
+                                        <BatteryOk robotLocationBAT="{robotLocationBAT}"
+                                                   chargingInteger="{chargingInteger}"
+                                                   chargingInteger_nextCycle="{chargingInteger_nextCycle}"/>
 
-											<Fallback name="CheckWorkingZone">
+                                        <ForceSuccess name="MainFallbackForceSuccess">
+                                            <Fallback name="MainFallback">
 
-												<CheckInWorkingZone
-				
-													robotLocationBAT="{robotLocationBAT}"
-												/>
+                                                <Sequence name="MainSequence">
 
-												<Sequence name="GoToWorkAreaSequence">
+                                                    <Fallback name="CheckWorkingZone">
+                                                        <CheckInWorkingZone robotLocationBAT="{robotLocationBAT}" />
 
-													<DriveWorkArea 
-														timeout="5.0"
-												x="-2.2921230792999268" 
-												y="2.3765931129455566" 
-												z="0.0033969879150390625"
-												qx="0.0"
-												qy="0.0"
-												qz="0.7071068"
-												qw="0.7071068"
-														workarea_timestamp="{workarea_timestamp}" 
-													/>
+                                                        <Sequence name="GoToWorkAreaSequence">
+                                                            <DriveWorkArea 
+                                                                timeout="5.0"
+                                                                x="-2.2921230792999268" 
+                                                                y="2.3765931129455566" 
+                                                                z="0.0033969879150390625"
+                                                                qx="0.0" qy="0.0" qz="0.7071068" qw="0.7071068"
+                                                                workarea_timestamp="{workarea_timestamp}" 
+                                                            />
+                                                            <IsRobotAtWorkArea 
+                                                                timeout="200.0"
+                                                                workarea_timestamp="{workarea_timestamp}" 
+                                                            />
+                                                        </Sequence>
+                                                    </Fallback>
 
-													<IsRobotAtWorkArea 
-														timeout="200.0"
-														workarea_timestamp="{workarea_timestamp}" 
-													/>
+                                                    <RobotExplore robotLocation="{robotLocation}"/>
 
-												</Sequence>
+                                                    <LoopSequence name="LoopSequence">
+                                                        <Sequence name="FollowMeSequence">
+                                                            <StartDrivingToPeople timeout="5.0"/>
+                                                            <CheckingNearbyVisitors/>
+                                                            <ArrivedAtVisitors timeout="20.0"/>
+                                                        </Sequence>
+                                                    </LoopSequence>
 
-											</Fallback>
+                                                    <DriveQuizLocation 
+                                                        timeout="5.0" 
+                                                        x="1.9707672595977783" y="0.4888995885848999" z="0.0"
+                                                        qx="0.0" qy="0.0" qz="0.9599275506038583" qw="0.28024827848120143"
+                                                        sent_timestamp="{quiz_timestamp}" 
+                                                    />
 
-											<RobotExplore robotLocation="{robotLocation}"/>
+                                                    <IsRobotAtQuiz 
+                                                        timeout="200.0" 
+                                                        sent_timestamp="{quiz_timestamp}" 
+                                                    />
 
-											<LoopSequence name="LoopSequence">
-												<Sequence name="FollowMeSequence">
-													<StartDrivingToPeople timeout="5.0"/>
-													<CheckingNearbyVisitors/>
-													<ArrivedAtVisitors timeout="20.0"/>
-												</Sequence>
-											</LoopSequence>
+                                                    <RobotAtQuiz robotLocation="{robotLocation}"/>
+                                                    <WaitQuizToEnd timeout="10.0"/>
 
-											<DriveQuizLocation 
-												timeout="5.0" 
-														x="1.9707672595977783"
-														y="0.4888995885848999"
-														z="0.0"
-														qx="0.0"
-														qy="0.0"
-														qz="0.9599275506038583"
-														qw="0.28024827848120143"
-												sent_timestamp="{quiz_timestamp}" 
-											/>
+                                                </Sequence>
 
-											<IsRobotAtQuiz 
-												timeout="200.0" 
-												sent_timestamp="{quiz_timestamp}" 
-											/>
+                                                <MainBTStopDrive stop_flag="{stop_flag}"/>
 
-											<RobotAtQuiz robotLocation="{robotLocation}"/>
-											<WaitQuizToEnd timeout="10.0"/>
+                                            </Fallback>
+                                        </ForceSuccess>
 
-										</Sequence>
+                                    </Parallel>
 
-										<!-- Rechterkind van MainFallback -->
-										<MainBTStopDrive stop_flag="{stop_flag}"/>
+                                    <Fallback name="GoToChargeFallback">
+                                        <Sequence name="ChargingSequence">
+                                            <CheckMainBTErrorState stop_flag="{stop_flag}"/>
+                                            <DriveToChargingStation timeout="5.0"
+                                                                    chargingInteger="{chargingInteger}" />
 
-									</Fallback>
-								</ForceSuccess>
+                                            <StatusDriveToChargingDock timeout="200.0"
+                                                chargingInteger="{chargingInteger}"
+                                                chargingInteger_nextCycle="{chargingInteger_nextCycle}" 
+                                            />
+                                            <IsRobotCharging timeout="200"
+                                                chargingInteger="{chargingInteger}" 
+                                            />
+                                            <IsBatteryFull robotLocation="{robotLocation}"    
+                                                chargingInteger="{chargingInteger}"
+                                            />
 
-							</Parallel>
+                                            <RobotWaitInChargingStation />
+                                            
+                                            <StopRobotCharging chargingInteger="{chargingInteger}" />
+                                            
+                                            <BatteryCharged timeout="5" robotLocationBAT="{robotLocationBAT}"/>
+                                        </Sequence>
 
-							<!-- Rechterkind: bestaande Battery fallback (GoToChargeFallback) -->
-							<Fallback name="GoToChargeFallback">
+                                        <BatteryStopDrive/>
+                                    </Fallback>
 
-								<Sequence name="ChargingSequence">
-									<CheckMainBTErrorState stop_flag="{stop_flag}"/>
-									<DriveToChargingStation timeout="15.0"
-									    					chargingInteger="{chargingInteger}" />
+                                </Fallback> </Parallel> <Sequence name="ManualDrivingSequence">
+                                <ManualDriving/>
+                                <MDForceCharging 
+                                    x="-2.431073133504586"
+                                    y="2.2872283293439244"
+                                    z="0.0"
+                                    qx="0.0" qy="0.0" qz="0.4284720675699097" qw="0.9035550272741372"
+                                />
+                            </Sequence>
 
-									<StatusDriveToChargingDock timeout="200.0"
-									    chargingInteger="{chargingInteger}"
-										chargingInteger_nextCycle="{chargingInteger_nextCycle}" 
-										/>
-									<IsRobotCharging timeout="200"
-									    chargingInteger="{chargingInteger}" 
-									/>
-									<IsBatteryFull robotLocation="{robotLocation}"    
-									chargingInteger="{chargingInteger}"
-									/>
+                        </Fallback> </Parallel>
 
-									<RobotWaitInChargingStation
-						
-									/>
-									<StopRobotCharging
-									    chargingInteger="{chargingInteger}"
-										/>
-									<BatteryCharged timeout="5" robotLocationBAT="{robotLocationBAT}"/>
-								</Sequence>
+                    <WaitDriving/>
 
-								<BatteryStopDrive/>
+                </Fallback>
+            </Parallel>
 
-							</Fallback>
+            <StopNode/>
 
-						</Fallback>
-
-					</Parallel>
-
-					<!-- Rechterkid van InnerFallback: WaitDriving -->
-					<WaitDriving/>
-
-				</Fallback>
-
-			</Parallel>
-
-			<!-- Rechterkid van TopFallback: StopNode -->
-			<StopNode/>
-
-		</Fallback>
-
-	</BehaviorTree>
+        </Fallback>
+    </BehaviorTree>
 </root>
