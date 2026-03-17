@@ -174,6 +174,11 @@ class AutoRecharger(Node):
         #速度话题用于不开启导航时，向底盘发送开启自动回充任务命令
         self.Cmd_vel_pub = self.create_publisher(Twist,"/cmd_vel",  5)
 
+
+        # Voorzien voor het publiceren van batterijpercentage richting de communicatiecode BT <=> Quiz
+        self.Battery_pub = self.create_publisher(Int8, '/battery_percentage', 10)
+        self.last_battery_percent = -1
+
         #创建机器人电量话题订阅者
         self.Voltage_sub = self.create_subscription(Float32, "PowerVoltage", self.Voltage_callback,10)
 
@@ -437,6 +442,33 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         '''更新机器人充电电流数据'''
         self.robot['Charging_current']=topic.data
         
+
+    def update_battery_percentage(self):
+
+        voltage = self.robot['Voltage']
+
+        # formule voor 25V batterij
+        percent = int(((voltage - 20) / 5) * 100)
+
+        # clamp tussen 0 en 100
+        percent = max(0, min(100, percent))
+
+        # alleen publiceren als het veranderd is
+        if percent != self.last_battery_percent:
+
+            msg = Int8()
+            msg.data = percent
+
+            for _ in range(3):
+                self.Battery_pub.publish(msg)
+                time.sleep(0.02)
+
+            self.last_battery_percent = percent
+
+            print_and_fixRetract(f"Battery percentage: {percent}%")
+
+
+
     def RED_Flag_callback(self, topic):
         self.red_count = topic.data
         '''更新是否寻找到红外信号(充电桩)状态'''
@@ -708,6 +740,11 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
         # #频率1hz的循环任务
         if ((self.get_clock().now()-self.last_time).to_msg()).sec>=1:
+
+            # Publiceer (indien nodig) het nieuwe batterijpercentage
+            self.update_battery_percentage()
+
+
             #发布充电桩位置话题
             self.Pub_Charger_marker(
                 self.json_data['p_x'], 

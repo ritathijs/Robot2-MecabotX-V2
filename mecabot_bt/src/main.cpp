@@ -577,35 +577,50 @@ public:
         node_ = rclcpp::Node::make_shared("btDriveToChargingStation");
 
         sub_ = node_->create_subscription<std_msgs::msg::String>(
-            "/auto_recharge_event", 10,
-            [this](std_msgs::msg::String::SharedPtr msg)
-            {
+    "/auto_recharge_event", 10,
+    [this](std_msgs::msg::String::SharedPtr msg)
+    {
+        std::cout << "\n[CALLBACK] Nieuw bericht ontvangen: " << msg->data << std::endl;
 
-                // Bericht moet sowieso langer zijn dan 2 karakters
-                if(msg->data.size() < 2) return;
+        // Bericht moet sowieso langer zijn dan 2 karakters
+        if(msg->data.size() < 2){
+            std::cout << "[CALLBACK] Bericht te kort -> negeren" << std::endl;
+            return;
+        }
 
-                // Haal integer er uit die weergeeft in welke laadsequentie we zitten  
-                int msg_id = msg->data[0] - '0';
-                std::string event = msg->data.substr(1);
+        // Haal integer er uit
+        int msg_id = msg->data[0] - '0';
+        std::string event = msg->data.substr(1);
 
-                int bt_id = 0;
+        std::cout << "[CALLBACK] Parsed msg_id: " << msg_id 
+                  << " | event: " << event << std::endl;
 
-                // haal huidige integer van blackboard
-                getInput("chargingInteger", bt_id);
+        int bt_id = 0;
 
-                // vergelijk verkregen integer met verwachte, enkel wanneer ze overeenkomen was het bericht relevant voor deze node
-                if(msg_id != bt_id){
-                        return;   // ander charge process -> negeren
-                    }
+        // haal huidige integer van blackboard
+        if(!getInput("chargingInteger", bt_id)){
+            std::cout << "[CALLBACK] FOUT: kon chargingInteger niet uit blackboard halen!" << std::endl;
+        } else {
+            std::cout << "[CALLBACK] Blackboard chargingInteger: " << bt_id << std::endl;
+        }
 
+        // vergelijken
+        if(msg_id != bt_id){
+            std::cout << "[CALLBACK] msg_id != bt_id -> bericht genegeerd" << std::endl;
+            return;
+        }
 
-                if (event == "DRIVING-TO-DOCK")
-                    success_received_ = true;
-                else{
-                    success_received_ = false;
+        std::cout << "[CALLBACK] msg_id komt overeen met bt_id!" << std::endl;
 
-                }
-            });
+        if (event == "DRIVING-TO-DOCK"){
+            std::cout << "[CALLBACK] Event is DRIVING-TO-DOCK -> success_received_ = true" << std::endl;
+            success_received_ = true;
+        }
+        else{
+            std::cout << "[CALLBACK] Event is iets anders -> success_received_ = false" << std::endl;
+            success_received_ = false;
+        }
+    });
 
         pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
 
@@ -625,17 +640,23 @@ public:
         start_time_ = std::chrono::steady_clock::now();
         getInput("timeout", timeout_);
 
-        // ---- Bestaande BT publish ----
+        int bt_id = 0;
+        getInput("chargingInteger", bt_id);
+
+        std::cout << "\n[DriveToChargingStation] === ON START ===" << std::endl;
+        std::cout << "[DriveToChargingStation] timeout: " << timeout_ << std::endl;
+        std::cout << "[DriveToChargingStation] chargingInteger: " << bt_id << std::endl;
+
         std_msgs::msg::String msg;
         msg.data = "DriveToChargingStation";
         pub_->publish(msg);
 
-        // SENDING TO QUIZ (verander scherm wanneer er geladen moet worden naar robotexplore (kan later nog een 'ik ga laden scherm worden'))
         std_msgs::msg::String quiz_msg;
         quiz_msg.data = "RobotGoCharge";
         pub_quiz_->publish(quiz_msg);
 
         std::cout << "[DriveToChargingStation] START waiting for DRIVING-TO-DOCK" << std::endl;
+
         return BT::NodeStatus::RUNNING;
     }
 
@@ -643,30 +664,35 @@ public:
     {
         rclcpp::spin_some(node_);
 
+        std::cout << "[DriveToChargingStation] success_received_: " 
+                << (success_received_ ? "TRUE" : "FALSE") << std::endl;
+
         if (success_received_)
         {
-            std::cout << "[DriveToChargingStation] Received DRIVING-TO-DOCK -> SUCCESS" << std::endl;
+            std::cout << "[DriveToChargingStation] -> SUCCESS" << std::endl;
             return BT::NodeStatus::SUCCESS;
         }
 
         auto elapsed = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - start_time_).count();
 
+        std::cout << "[DriveToChargingStation] elapsed: " << elapsed 
+                << " / timeout: " << timeout_ << std::endl;
+
         if (elapsed >= timeout_)
         {
-            std::cout << "[DriveToChargingStation] Timeout reached -> FAILURE" << std::endl;
+            std::cout << "[DriveToChargingStation] -> TIMEOUT FAILURE" << std::endl;
             return BT::NodeStatus::FAILURE;
         }
 
-        std::cout << "[DriveToChargingStation] Waiting... elapsed=" << elapsed << "s" << std::endl;
         return BT::NodeStatus::RUNNING;
     }
 
+    
     void onHalted() override
-    {
-        std::cout << "[DriveToChargingStation] HALTED" << std::endl;
-    }
-
+{
+    std::cout << "[DriveToChargingStation] HALTED" << std::endl;
+}
 private:
     bool success_received_;
     double timeout_;
@@ -944,7 +970,7 @@ public:
         node_ = rclcpp::Node::make_shared("btStatusDriveToChargingDock");
 
         sub_ = node_->create_subscription<std_msgs::msg::String>(
-            "/auto_recharge_event", 10,
+            "/auto_recharge_event", 1,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
                 if(msg->data.size() < 2) return;
@@ -1035,7 +1061,7 @@ public:
 
 
         sub_ = node_->create_subscription<std_msgs::msg::String>(
-            "/auto_recharge_event", 10,
+            "/auto_recharge_event", 1,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
                 int msg_id = msg->data[0] - '0';
@@ -1117,7 +1143,7 @@ public:
 
         // Subscriber
         sub_ = node_->create_subscription<std_msgs::msg::String>(
-            "/auto_recharge_event", 10,
+            "/auto_recharge_event", 1,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
                 int msg_id = msg->data[0] - '0';
