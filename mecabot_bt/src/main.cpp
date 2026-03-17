@@ -1640,8 +1640,7 @@ public:
 
     BT::NodeStatus onRunning() override
     {
-        // 17 maart
-        return BT::NodeStatus::SUCCESS;
+
 
         rclcpp::spin_some(node_);
         auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start_time_).count();
@@ -2118,8 +2117,7 @@ public:
 
     BT::NodeStatus onRunning() override
     {
-        // 17 maart
-        return BT::NodeStatus::SUCCESS;
+
 
         rclcpp::spin_some(node_);
 
@@ -2388,7 +2386,7 @@ public:
 
         while (true)
         {
-            return BT::NodeStatus::SUCCESS; // 17 maart
+
             const BT::NodeStatus child_state = child_node_->executeTick();
 
             if (child_state == BT::NodeStatus::RUNNING)
