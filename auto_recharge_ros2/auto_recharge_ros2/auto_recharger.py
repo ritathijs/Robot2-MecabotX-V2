@@ -231,6 +231,23 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         print_and_fixRetract(msg)
 
 
+    def set_charge_mode_stop(self, value):
+        """Non-blocking set charge mode voor Stop_Charge"""
+        try:
+            if not self.set_charge.wait_for_service(timeout_sec=2.0):
+                print_and_fixRetract(RED+'底盘服务未就绪，无法关闭自动回充'+RESET)
+                return
+        except Exception as e:
+            print_and_fixRetract(RED+f'等待服务超时: {e}'+RESET)
+            return
+
+        req = Spawn.Request()
+        req.x = float(value)
+        # async call, niet wachten
+        self.set_charge.call_async(req).add_done_callback(self.wait_server_callback)
+        print_and_fixRetract(f'正在关闭自动回充功能, 请求已发送...')
+
+
     # 设置自动回充的状态
     def set_charge_mode(self,value,max_callcount=10):
         # 注:不可在回调函数调用服务,否则卡死
@@ -409,6 +426,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
     def Pub_Recharger_Flag(self,set_velflag=0):
         '''发布自动回充任务是否开启标志位话题'''
+        print_and_fixRetract(GREEN+"PUB RECHARGER BEREIKT"+RESET)
 
         # 先开回充，再开导航的情况
         if set_velflag==1:
@@ -417,7 +435,15 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             for i in range(10):
                 self.Recharger_Flag_pub.publish(topic)
         
-        self.set_charge_mode(self.chargeflag)
+        print_and_fixRetract(GREEN+"PUB RECHARGER NET VOOR BLOCKER"+RESET)
+
+        if self.chargeflag == 0:
+            self.set_charge_mode_stop(self.chargeflag)
+        else:
+            self.set_charge_mode(self.chargeflag)
+
+
+        print_and_fixRetract(GREEN+"PUB RECHARGER NA BLOCKER"+RESET)
 
     def Voltage_callback(self, topic):
         '''更新机器人电池电量'''
@@ -579,9 +605,6 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
     #               self.start_turn = 1
     #               self.nav_end_z = self.robot['Rotation_Z']
 
-    
-
-
     def Odom_callback(self, topic):
         '''更新的机器人实时位姿'''
         self.robot['Rotation_Z']=topic.pose.pose.position.z  
@@ -602,7 +625,6 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         for _ in range(25):
             self.Cmd_vel_pub.publish(stop)
             time.sleep(0.05)
-
 
     def Stop_Charge(self):
         #如果在导航回充模式下，关闭导航
@@ -633,9 +655,6 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         self.chargeflag=0
         self.Pub_Recharger_Flag()
         #发布速度为0的话题停止机器人运动
-
-
-
 
 
     def retry_docking_if_not_charging(self):

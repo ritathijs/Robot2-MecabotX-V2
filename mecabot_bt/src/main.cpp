@@ -1902,7 +1902,15 @@ public:
 
     BT::NodeStatus tick() override
     {
-        // ... je bestaande logica (bt_msg publish, etc.) ...
+        std_msgs::msg::String bt_msg;
+        bt_msg.data = "MDForceCharging";
+        pub_bt_->publish(bt_msg);
+
+        setOutput("robotLocationBAT", "FORCE-CHARGING");
+
+        std::cout << "[MDForceCharging] Setting robotLocation=FORCE-CHARGING" << std::endl;
+
+
 
         double x, y, z, qx, qy, qz, qw;
         if (!getInput("x", x) || !getInput("y", y) || !getInput("z", z) ||
