@@ -113,17 +113,18 @@ class AutoRecharger(Node):
         'car_mode':'mini_mec'
         }
 
-        self.charge_session_id = None # ID VOOR BERICHTEN VAN EN NAAR BT
+        self.charge_session_id = 0 # ID VOOR BERICHTEN VAN EN NAAR BT
 
         self.Event_pub = self.create_publisher(String, '/auto_recharge_event', 10)
 
-        # Code hieronder 
+        # Verbinding met BT
         self.force_charge_sub = self.create_subscription(
             String,
             '/force_charge',
             self.force_charge_callback,
             10
         )
+
 
         #用于记录导航结束是的机器人Z轴姿态
         self.nav_end_z=0
@@ -306,8 +307,12 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         command = msg.data.strip().upper()
 
         # eerste karakter = sessie nummer
-        if len(command) > 1 and command[0].isdigit():
-            self.charge_session_id = command[0]
+        if len(command) > 1 and command[:1].isdigit():
+            session_id = int(command[0])
+            if session_id != self.next_charge_session_id:
+                print_and_fixRetract(YELLOW + f"Ontvangen session {session_id}, verwacht {self.next_charge_session_id}. Ignored." + RESET)
+                return
+            self.charge_session_id = session_id
             command = command[1:]
 
         if command == "START":
@@ -320,6 +325,9 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             print_and_fixRetract(
                 YELLOW + f"Force charge STOP ontvangen (sessie {self.charge_session_id})." + RESET
             )
+            self.charge_session_id += 1
+            if self.charge_session_id > 9:
+               self.charge_session_id = 0
             self.Stop_Charge()
 
     def Pub_Charger_Position(self):
@@ -816,7 +824,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                     nav_feedback = self.nav_controller.getFeedback()
                     huidige_afstand = nav_feedback.distance_remaining
                     if nav_feedback!=None:
-                        if (((huidige_afstand < 0.2) and Duration.from_msg(nav_feedback.navigation_time) > Duration(seconds=120.0))):
+                        if (((huidige_afstand < 0.2) and Duration.from_msg(nav_feedback.navigation_time) > Duration(seconds=500.0))):
                             print_and_fixRetract('长时间无法到达目标点,导航已取消')
 
                     # Maak een gedetailleerd bericht voor het topic
@@ -830,16 +838,13 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                                 # We zien niets, dus we moeten gaan zoeken!
                                 print_and_fixRetract(YELLOW + 'Nog geen infrarood gevonden, start zwenken om te zoeken...' + RESET)
                                 
-                                #self.nav_end_z = self.robot['Rotation_Z']
-                                #self.start_turn = 1 # Activeer de zoek-modus
+                                self.nav_end_z = self.robot['Rotation_Z']
+                                self.start_turn = 1 # Activeer de zoek-modus
             
-                                #topic = Twist()
-                                #topic.angular.z = 0.2
-                                #self.Cmd_vel_pub.publish(topic)
-
-                                topic=Twist()
-                                topic.linear.x = 0.1
+                                topic = Twist()
+                                topic.angular.z = 0.2
                                 self.Cmd_vel_pub.publish(topic)
+
                         else:
                             pass
 

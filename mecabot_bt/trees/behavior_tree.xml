@@ -9,10 +9,9 @@
 
                 <Fallback name="InnerFallback">
 
-                    <Parallel name="CollisionAndMainParallel" success_threshold="1" failure_threshold="1">
+                    <Parallel name="CheckButtonAndMainParallel" success_threshold="1" failure_threshold="1">
 
-                        <CheckCollision/>
-
+                        <CheckStopButtonQuiz robotLocationBAT = "{robotLocationBAT}" buttonStop = "{buttonStop}"/>
                         <Fallback name="ManualDrivingFallback">
 
                             <Parallel name="ManDriveAndMainParallel" success_threshold="1" failure_threshold="1">
@@ -102,7 +101,7 @@
                                                 chargingInteger="{chargingInteger}"
                                             />
 
-                                            <RobotWaitInChargingStation />
+                                            <RobotWaitInChargingStation buttonStop = "{buttonStop}" />
                                             
                                             <StopRobotCharging chargingInteger="{chargingInteger}" />
                                             

@@ -131,57 +131,77 @@ private:
     double level_;
 };
 
-class CheckCollision : public BT::StatefulActionNode
+
+class CheckStopButtonQuiz : public BT::StatefulActionNode
 {
 public:
-    CheckCollision(const std::string &name, const BT::NodeConfiguration &config)
-        : BT::StatefulActionNode(name, config), level_(100.0)
-    {}
+    CheckStopButtonQuiz(const std::string &name, const BT::NodeConfiguration &config)
+        : BT::StatefulActionNode(name, config)
+    {
+        node_ = rclcpp::Node::make_shared("btCheckStopButtonQuiz");
 
-    static BT::PortsList providedPorts() { return {}; }
+        sub_ = node_->create_subscription<std_msgs::msg::String>(
+            "/quiz", 10,
+            [this](std_msgs::msg::String::SharedPtr msg)
+            {
+                if (msg->data == "STOPBUTTON")
+                {
+                    stop_pressed_ = true;
+                }
+                else if (msg->data == "STARTBUTTON")
+                {
+                    // BlackBoard variabele buttonStop op false zetten
+                    setOutput("buttonStop", false);
+                    std::cout << "[CheckStopButtonQuiz] STARTBUTTON received -> buttonStop = false" << std::endl;
+                }
+            });
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {
+            BT::OutputPort<std::string>("robotLocationBAT"),
+            BT::OutputPort<bool>("buttonStop") 
+        };
+    }
 
     BT::NodeStatus onStart() override
     {
-       
-
-        // Als batterij al te laag is, meteen FAILURE
-        if (level_ < 30.0)
-        {
-        //    std::cout << "[CheckCollision] COLLSION!!!" << std::endl;
-            level_ += 0;
-            return BT::NodeStatus::FAILURE;
-        }
-
-        // Anders RUNNING totdat de volgende tick komt
-        //std::cout << "[CheckCollision] noCollisionDetected" << std::endl;
+        stop_pressed_ = false;
         return BT::NodeStatus::RUNNING;
     }
 
     BT::NodeStatus onRunning() override
     {
-        
-        level_ -= 0;
+        rclcpp::spin_some(node_);
 
-        if (level_ < 30.0)
+        // STOPBUTTON ontvangen
+        if (stop_pressed_)
         {
-          //std::cout << "[CheckCollision] COLLSION!!!" << std::endl;
-            level_ += 0;
-            return BT::NodeStatus::FAILURE;
+            std::cout << "[CheckStopButtonQuiz] STOPBUTTON received -> FORCE CHARGING" << std::endl;
+
+            setOutput("robotLocationBAT", std::string("FORCE-CHARGING"));
+
+            // BlackBoard variabele buttonStop op true zetten
+            setOutput("buttonStop", true);
+
+            stop_pressed_ = false;
         }
-        //std::cout << "[CheckCollision] noCollisionDetected" << std::endl;
+
         return BT::NodeStatus::RUNNING;
     }
 
     void onHalted() override
     {
-        //std::cout << "[CheckCollision] HALTED" << std::endl;
+        std::cout << "[CheckStopButtonQuiz] HALTED" << std::endl;
     }
 
 private:
-    double level_;
+    rclcpp::Node::SharedPtr node_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
+
+    bool stop_pressed_ = false;
 };
-
-
 
 
 class BatteryOk : public BT::StatefulActionNode
@@ -196,7 +216,36 @@ public:
             "/auto_recharge_event", 10,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
-                last_event_ = msg->data;
+                // Bericht moet sowieso langer zijn dan 2 karakters
+                if(msg->data.size() < 2){
+                    std::cout << "[CALLBACK] Bericht te kort -> negeren" << std::endl;
+                    return;
+                }
+
+                // Haal integer er uit (eerste karakter)
+                int msg_id = msg->data[0] - '0';
+                std::string event = msg->data.substr(1);
+
+                std::cout << "[CALLBACK] Parsed msg_id: " << msg_id 
+                          << " | event: " << event << std::endl;
+
+                int bt_id = 0;
+
+                // haal huidige integer van blackboard
+                if(!getInput("chargingInteger_nextCycle", bt_id)){
+                    std::cout << "[CALLBACK] FOUT: kon chargingInteger_nextCycle niet uit blackboard halen!" << std::endl;
+                    return;
+                } else {
+                    std::cout << "[CALLBACK] Blackboard chargingInteger_nextCycle: " << bt_id << std::endl;
+                }
+
+                // Check of integer overeenkomt
+                if(msg_id == bt_id){
+                    last_event_ = event; // enkel updaten als integer klopt
+                    std::cout << "[CALLBACK] Event geaccepteerd: " << last_event_ << std::endl;
+                } else {
+                    std::cout << "[CALLBACK] Event genegeerd, integer mismatch!" << std::endl;
+                }
             });
 
         // Nieuwe publisher voor force charge
@@ -228,41 +277,35 @@ public:
         return counter;
     }
 
-
     BT::NodeStatus onStart() override
     {
         rclcpp::spin_some(node_);
 
         // ----------------------------
-        // Blackboard policy check eerst
+        // FORCE-CHARGING policy check
         // ----------------------------
         std::string bat_state;
-
-        if (getInput("robotLocationBAT", bat_state))
+        if (getInput("robotLocationBAT", bat_state) && bat_state == "FORCE-CHARGING")
         {
-            if (bat_state == "FORCE-CHARGING")
-            {
-                std::cout << "[BatteryOk] FORCE-CHARGING detected -> sending START" << std::endl;
+            std::cout << "[BatteryOk] FORCE-CHARGING detected -> sending START" << std::endl;
 
-                int counter = updateChargingCounter();
+            int counter = updateChargingCounter();
 
-                std_msgs::msg::String msg;
-                msg.data = std::to_string(counter) + "START";
+            std_msgs::msg::String msg;
+            msg.data = std::to_string(counter) + "START";
 
-                for (int i = 0; i < 3; ++i)
-                {
-                    force_charge_pub_->publish(msg);
-                }
+            for (int i = 0; i < 3; ++i)
+                force_charge_pub_->publish(msg);
 
-                return BT::NodeStatus::FAILURE;
-            }
+            return BT::NodeStatus::FAILURE;
         }
 
         // ----------------------------
-        // Bestaande logica
+        // BATTERY-LOW check
         // ----------------------------
         if (last_event_ == "BATTERY-LOW")
         {
+            int getal = updateChargingCounter();
             return BT::NodeStatus::FAILURE;
         }
 
@@ -273,28 +316,25 @@ public:
     {
         rclcpp::spin_some(node_);
 
-        // Policy check opnieuw tijdens running
+        // FORCE-CHARGING policy check
         std::string bat_state;
-
-        if (getInput("robotLocationBAT", bat_state))
+        if (getInput("robotLocationBAT", bat_state) && bat_state == "FORCE-CHARGING")
         {
-            if (bat_state == "FORCE-CHARGING"){
-                int counter = updateChargingCounter();
+            int counter = updateChargingCounter();
 
-                std_msgs::msg::String msg;
-                msg.data = std::to_string(counter) + "START";
+            std_msgs::msg::String msg;
+            msg.data = std::to_string(counter) + "START";
 
-                for (int i = 0; i < 3; ++i)
-                    {
-                        force_charge_pub_->publish(msg);
-                    }
+            for (int i = 0; i < 3; ++i)
+                force_charge_pub_->publish(msg);
 
-                return BT::NodeStatus::FAILURE;
-            }
+            return BT::NodeStatus::FAILURE;
         }
 
+        // BATTERY-LOW check
         if (last_event_ == "BATTERY-LOW")
         {
+            int getal = updateChargingCounter();
             return BT::NodeStatus::FAILURE;
         }
 
@@ -310,6 +350,7 @@ private:
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr force_charge_pub_;
 };
+
 
 
 // Op termijn zal dit verwijdert worden wegens redundante info 
@@ -1698,8 +1739,9 @@ public:
 
     static BT::PortsList providedPorts()
     {
-        // Geen start/end uren meer nodig via poorten, alles komt uit de file
-        return {};
+        return {
+            BT::InputPort<bool>("buttonStop")  // Voeg blackboard input toe
+        };
     }
 
     BT::NodeStatus onStart() override
@@ -1708,12 +1750,12 @@ public:
         msg.data = "RobotWaitInChargingStation";
         pub_->publish(msg);
 
-        return checkTime();
+        return checkConditions();
     }
 
     BT::NodeStatus onRunning() override
     {
-        return checkTime();
+        return checkConditions();
     }
 
     void onHalted() override
@@ -1722,6 +1764,24 @@ public:
     }
 
 private:
+    BT::NodeStatus checkConditions()
+    {
+        bool buttonStop = false;
+        if (!getInput("buttonStop", buttonStop))
+        {
+            std::cerr << "[RobotWaitInChargingStation] Kan buttonStop niet lezen, default false" << std::endl;
+        }
+
+        if (buttonStop)
+        {
+
+            return BT::NodeStatus::RUNNING;
+        }
+
+        // Check tijdschema alleen als buttonStop false is
+        return checkTime();
+    }
+
     BT::NodeStatus checkTime()
     {
         // 1. Huidige tijd en dag bepalen
@@ -1738,7 +1798,6 @@ private:
         bool is_working_time = false;
         for (const auto& day : schedule) {
             if (day.dayCode == current_day_code) {
-                // Check of de dag actief is en of we binnen de uren vallen
                 if (day.isActive && current_time_val >= day.startTime && current_time_val < day.endTime) {
                     is_working_time = true;
                 }
@@ -1753,14 +1812,15 @@ private:
             return BT::NodeStatus::SUCCESS;
         }
 
-        // Zolang het geen werktijd is, blijven we in de oplaad-wachtstand
-        // We printen dit niet elke tick om de console clean te houden
+        // Nog geen werktijd, blijf RUNNING
         return BT::NodeStatus::RUNNING;
     }
 
     rclcpp::Node::SharedPtr node_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
 };
+
+
 
 class StopRobotCharging : public BT::StatefulActionNode
 {
@@ -2575,7 +2635,7 @@ int main(int argc, char **argv)
     factory.registerNodeType<BatteryCharged>("BatteryCharged");
     factory.registerNodeType<RobotWaitInChargingStation>("RobotWaitInChargingStation");
     factory.registerNodeType<BatteryStopDrive>("BatteryStopDrive");
-    factory.registerNodeType<CheckCollision>("CheckCollision");
+    factory.registerNodeType<CheckStopButtonQuiz>("CheckStopButtonQuiz");    
     factory.registerNodeType<CheckNetworkError>("CheckNetworkError");
     factory.registerNodeType<StopNode>("StopNode");
     factory.registerNodeType<WaitDriving>("WaitDriving");

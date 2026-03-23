@@ -1,7 +1,5 @@
 import requests
-import json
 import time
-import threading
 import signal
 import sys
 
@@ -13,7 +11,6 @@ from std_msgs.msg import Int8
 import socketio
 
 URL = "http://192.168.137.100/cms/getSettings"
-INTERVAL = 300  # seconden (5 minuten)
 
 
 class QuizBTNode(Node):
@@ -48,73 +45,56 @@ class QuizBTNode(Node):
         self.sio.on('drive_to_quiz_location', self.on_drive_to_quiz_location)
         self.sio.on('manual-drive-start', self.robot_manual_drive)
         self.sio.on('manual-drive-stop', self.robot_stop_manual_drive)
-
+        self.sio.on('schedule-updated', self.on_schedule_updated)
+        self.sio.on('start-button', self.on_start_button)
+        self.sio.on('stop-button', self.on_stop_button)
+        
         # Connect to server
         server_ip = 'http://192.168.137.100:80'
         self.sio.connect(server_ip, retry=True)
         self.get_logger().info(f"Connected to server at {server_ip}")
 
-        # Flag om thread te stoppen
-        self._running = True
-
-        # Start thread die schedule blijft ophalen
-        self.schedule_thread = threading.Thread(target=self.schedule_updater, daemon=True)
-        self.schedule_thread.start()
-
     # ---------------- SETTINGS OPHALEN ----------------
-    def schedule_updater(self):
+    def fetch_schedule(self):
         day_map = {
             "Mon": "M", "Tue": "D", "Wed": "W", "Thu": "T",
             "Fri": "F", "Sat": "S", "Sun": "U"
         }
 
-        while self._running:
-            try:
-                self.get_logger().info("Fetching schedule from server...")
-                response = requests.get(URL)
+        try:
+            self.get_logger().info("Fetching schedule from server...")
+            response = requests.get(URL)
 
-                if response.status_code == 200:
-                    data = response.json()
-                    
-                    # VERANDERING: 'data' is al de dictionary, dus we hebben data[0] niet nodig
-                    # Als de server soms een lijst stuurt en soms een dict, gebruik dan:
-                    settings = data[0] if isinstance(data, list) else data
+            if response.status_code == 200:
+                data = response.json()
+                settings = data[0] if isinstance(data, list) else data
 
-                    schedule = settings.get("schedule", {})
-                    file_path = "/home/wheeltec/wheeltec_ros2/src/quiz_bt_node/schedule.txt"
+                schedule = settings.get("schedule", {})
+                file_path = "/home/wheeltec/wheeltec_ros2/src/quiz_bt_node/schedule.txt"
 
-                    with open(file_path, "w") as f:
-                        for day_name, info in schedule.items():
-                            prefix = day_map.get(day_name, "?")
-                            
-                            # Check of de dag actief is
-                            if info.get("active", False):
-                                # Haal ":" weg en zorg voor fallback naar "0000"
-                                start = (info.get("start") or "0000").replace(":", "")
-                                end = (info.get("end") or "0000").replace(":", "")
-                                
-                                # Opvullen tot 4 cijfers mocht de string leeg zijn
-                                start = start.ljust(4, '0')[:4]
-                                end = end.ljust(4, '0')[:4]
-                                
-                                line = f"{prefix}{start}{end}"
-                            else:
-                                # Inactieve dag: prefix + 8 X'en (bijv. FXXXXXXXX)
-                                line = f"{prefix}{'X'*8}"
+                with open(file_path, "w") as f:
+                    for day_name, info in schedule.items():
+                        prefix = day_map.get(day_name, "?")
 
-                            f.write(line + "\n")
-                    
-                    self.get_logger().info("Schedule succesvol geupdate.")
-                else:
-                    self.get_logger().error(f"Server fout: {response.status_code}")
+                        if info.get("active", False):
+                            start = (info.get("start") or "0000").replace(":", "")
+                            end = (info.get("end") or "0000").replace(":", "")
 
-            except Exception as e:
-                self.get_logger().error(f"Schedule update error: {e}")
+                            start = start.ljust(4, '0')[:4]
+                            end = end.ljust(4, '0')[:4]
 
-            # Wacht voor de volgende interval
-            for _ in range(INTERVAL):
-                if not self._running: break
-                time.sleep(1)
+                            line = f"{prefix}{start}{end}"
+                        else:
+                            line = f"{prefix}{'X'*8}"
+
+                        f.write(line + "\n")
+
+                self.get_logger().info("Schedule succesvol geupdate.")
+            else:
+                self.get_logger().error(f"Server fout: {response.status_code}")
+
+        except Exception as e:
+            self.get_logger().error(f"Schedule update error: {e}")
 
     # ---------------- BATTERY ----------------
     def battery_callback(self, msg):
@@ -141,6 +121,7 @@ class QuizBTNode(Node):
     def on_connect(self):
         self.get_logger().info('Connected to server')
         self.publish_quiz_message("Connected to web app")
+        self.fetch_schedule()  # <-- update bij connect
 
     def on_disconnect(self):
         self.get_logger().info('Disconnected from server')
@@ -166,30 +147,35 @@ class QuizBTNode(Node):
         self.get_logger().info("Stopping robot manual drive")
         self.publish_quiz_message("RobotStopManualDrive")
 
+    def on_schedule_updated(self):
+        self.get_logger().info("Schedule update event ontvangen")
+        self.fetch_schedule()
+
+    def on_start_button(self):
+        self.get_logger().info("STARTBUTTON ontvangen van quizserver")
+        self.publish_quiz_message("STARTBUTTON")
+
+    def on_stop_button(self):
+        self.get_logger().info("STOPBUTTON ontvangen van quizserver")
+        self.publish_quiz_message("STOPBUTTON")
+
     # ---------------- ROS MESSAGES ----------------
     def rpi_callback(self, msg):
         self.get_logger().info(f'Received from RPi: {msg.data}')
 
         if msg.data == "RobotExplore":
-            self.get_logger().info("Robot is exploring")
             self.sio.emit("robot-explore")
         elif msg.data == "RobotGoToVisitors":
-            self.get_logger().info("Robot will drive to visitors")
             self.sio.emit("robot-go-to-visitors")
         elif msg.data == "RobotArrivedAtVisitors":
-            self.get_logger().info("Robot arrived at visitors")
             self.sio.emit("robot-arrived-at-visitors")
         elif msg.data == "robot-arrived-at-quiz-location":
-            self.get_logger().info("Robot is at quiz location")
             self.sio.emit("robot-arrived-at-quiz-location")
         elif msg.data == "RobotGoCharge":
-            self.get_logger().info("Robot going to charge")
             self.sio.emit("robot-go-charge")
         elif msg.data == "RobotCharging":
-            self.get_logger().info("Robot is charging")
             self.sio.emit("robot-charging")
         elif msg.data == "RobotStartup":
-            self.get_logger().info("Robot awaking from charging")
             self.sio.emit("robot-startup")
         elif msg.data.startswith("SETHOUR:"):
             hour_value = msg.data.split("SETHOUR:")[1].strip()
@@ -198,9 +184,6 @@ class QuizBTNode(Node):
     # ---------------- CLEANUP ----------------
     def shutdown(self):
         self.get_logger().info("Shutting down node...")
-        self._running = False
-        if self.schedule_thread.is_alive():
-            self.schedule_thread.join()
         if self.sio.connected:
             self.sio.disconnect()
         self.destroy_node()
@@ -212,7 +195,6 @@ def main():
     rclpy.init()
     node = QuizBTNode()
 
-    # Zorg dat Ctrl+C netjes wordt afgehandeld
     def signal_handler(sig, frame):
         node.shutdown()
         sys.exit(0)
