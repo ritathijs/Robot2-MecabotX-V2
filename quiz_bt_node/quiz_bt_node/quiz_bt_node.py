@@ -10,6 +10,8 @@ from std_msgs.msg import Int8
 
 import socketio
 
+from geometry_msgs.msg import Twist
+
 URL = "http://192.168.137.100/cms/getSettings"
 
 
@@ -20,6 +22,12 @@ class QuizBTNode(Node):
 
         # ROS2 publisher
         self.quiz_publisher = self.create_publisher(String, 'quiz', 10)
+
+        # Manual drive 
+        self.gui_cmd_vel_publisher = self.create_publisher(Twist, '/gui_cmd_vel', 1)
+        self.last_drive_cmd_time = time.time()
+        self.is_moving = False
+        self.check_drive_timer = self.create_timer(0.05, self.check_drive)
 
         # ROS2 subscriber
         self.subscription = self.create_subscription(
@@ -48,6 +56,14 @@ class QuizBTNode(Node):
         self.sio.on('schedule-updated', self.on_schedule_updated)
         self.sio.on('start-button', self.on_start_button)
         self.sio.on('stop-button', self.on_stop_button)
+
+        self.sio.on('drive-forward', lambda data=None: self.on_drive('forward'))
+        self.sio.on('drive-backward', lambda data=None: self.on_drive('backward'))
+        self.sio.on('drive-left', lambda data=None: self.on_drive('left'))
+        self.sio.on('drive-right', lambda data=None: self.on_drive('right'))
+        self.sio.on('drive-cw', lambda data=None: self.on_drive('cw'))
+        self.sio.on('drive-ccw', lambda data=None: self.on_drive('ccw'))
+        self.sio.on('drive-stop', lambda data=None: self.on_drive('stop'))
         
         # Connect to server
         server_ip = 'http://192.168.137.100:80'
@@ -116,6 +132,46 @@ class QuizBTNode(Node):
             time.sleep(0.05)
         self.quiz_publisher.publish(msg)
         self.get_logger().info(f'Published to quiz topic: {msg.data}')
+
+    # ---------------- MANUAL DRIVE ----------------
+    def on_drive(self, direction):
+        self.get_logger().info(f'Direction received: {direction}')
+        self.last_drive_cmd_time = time.time()
+        self.is_moving = True
+
+        msg = Twist()
+
+        if direction == 'forward':
+            msg.linear.x = 0.5
+        elif direction == 'backward':
+            msg.linear.x = -0.5
+        elif direction == 'left':
+            msg.linear.y = -0.5
+        elif direction == 'right':
+            msg.linear.y = 0.5
+        elif direction == 'cw':
+            msg.angular.z = -0.5
+        elif direction == 'ccw':
+            msg.angular.z = 0.5
+        else: # stop
+            msg.linear.x = 0.0
+            msg.linear.y = 0.0
+            msg.angular.z = 0.0
+
+        self.gui_cmd_vel_publisher.publish(msg)
+
+    def check_drive(self):
+        if self.is_moving and (time.time() - self.last_drive_cmd_time > 0.3):
+            self.get_logger().info("Manual drive stopped")
+            
+            msg = Twist()
+            msg.linear.x = 0.0
+            msg.linear.y = 0.0
+            msg.angular.z = 0.0
+            
+            self.gui_cmd_vel_publisher.publish(msg)
+
+            self.is_moving = False
 
     # ---------------- SOCKET EVENTS ----------------
     def on_connect(self):

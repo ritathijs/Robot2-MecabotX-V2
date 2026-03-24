@@ -309,8 +309,8 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         # eerste karakter = sessie nummer
         if len(command) > 1 and command[:1].isdigit():
             session_id = int(command[0])
-            if session_id != self.next_charge_session_id:
-                print_and_fixRetract(YELLOW + f"Ontvangen session {session_id}, verwacht {self.next_charge_session_id}. Ignored." + RESET)
+            if session_id != self.charge_session_id:
+                print_and_fixRetract(YELLOW + f"Ontvangen session {session_id}, verwacht {self.charge_session_id}. Ignored." + RESET)
                 return
             self.charge_session_id = session_id
             command = command[1:]
@@ -504,6 +504,12 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
 
     def RED_Flag_callback(self, topic):
+
+ 
+        print_and_fixRetract(
+            CYAN + f"[DEBUG] RED callback | topic={topic.data} | prev_RED={self.robot['RED']} | start_turn={self.start_turn} | find_red={self.find_redsignal}" + RESET
+        )
+
         self.red_count = topic.data
         '''更新是否寻找到红外信号(充电桩)状态'''
         if self.robot['Charging']==0:
@@ -524,6 +530,13 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
         # 自转寻找红外时处理逻辑
         if self.start_turn==1:
+
+      
+            print_and_fixRetract(
+                CYAN + f"[DEBUG] TURNING | RED={self.robot['RED']} | find_red={self.find_redsignal}" + RESET
+            )
+
+
             if self.robot['RED']==1:
                 self.find_redsignal = self.find_redsignal + 1 
                 # print(self.find_redsignal)
@@ -636,6 +649,11 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
     def Stop_Charge(self):
         #如果在导航回充模式下，关闭导航
+
+        print_and_fixRetract(
+            CYAN + f"[DEBUG] STOP CHARGE BEFORE RESET | start_turn={self.start_turn} | find_red={self.find_redsignal} | RED={self.robot['RED']}" + RESET
+        )
+            
         self.Pub_NavGoal_Cancel() 
 
         # 停止监听导航结果
@@ -663,9 +681,19 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         self.chargeflag=0
         self.Pub_Recharger_Flag()
         #发布速度为0的话题停止机器人运动
+        print_and_fixRetract(
+            CYAN + f"[DEBUG] STOP CHARGE AFTER RESET | start_turn={self.start_turn} | find_red={self.find_redsignal} | RED={self.robot['RED']}" + RESET
+        )
+
+        
+
 
 
     def retry_docking_if_not_charging(self):
+
+        print_and_fixRetract(
+            CYAN + f"[DEBUG] RETRY DOCK | RED={self.robot['RED']} | start_turn={self.start_turn}" + RESET
+        )
         # kleine wachttijd na hard stop
         print_and_fixRetract(
                 YELLOW + "Time delay voor retry docking ingezet (verwacht stilstaan)" + RESET
@@ -697,6 +725,12 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
     def start_forced_charging(self):
         """Start charging logic (same as pressing Q)"""
+
+
+
+        print_and_fixRetract(
+            CYAN + f"[DEBUG] start_forced_charging | red_count={self.red_count} | chargeflag={self.chargeflag}" + RESET
+        )
         if self.red_count >= 3:
             self.Pub_NavGoal_Cancel()
             self.chargeflag = 1
@@ -790,6 +824,10 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                     self.star_getNav_Feedback_Flag = 0 # 导航任务结束,结束监听
                     res = self.nav_controller.getResult()
                     if res==TaskResult.SUCCEEDED:
+
+                        print_and_fixRetract(
+                            CYAN + f"[DEBUG] NAV SUCCEEDED | RED={self.robot['RED']} | start_turn={self.start_turn}" + RESET
+                        )
                         # BT rijden naar dock succesvol => nu nog docken zelf
                         self.publish_event("DRIVE-TO-DOCK-SUCCESS")
                         print("已到达目标点.")
@@ -882,6 +920,10 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
          # 自转寻找红外执行判断
         if self.find_redsignal>=3:
+
+            print_and_fixRetract(
+                GREEN + f"[DEBUG] DOCKING TRIGGERED | find_red={self.find_redsignal}" + RESET
+            )
             self.find_redsignal = 0 
             self.start_turn=0
             print_and_fixRetract(GREEN+'已通过自转发现红外信号,开始对接充电.(Infrared signals have been detected by rotation. Docking and charging has begun.)'+RESET)
