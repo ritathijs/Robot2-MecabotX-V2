@@ -125,6 +125,7 @@ class AutoRecharger(Node):
             10
         )
 
+        self.force_charge_active = False  # voorkomt dubbele START zonder STOP
 
         #用于记录导航结束是的机器人Z轴姿态
         self.nav_end_z=0
@@ -301,8 +302,6 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             time.sleep(0.5)
 
 
-
-    # Functie geimplementeerd waarmee in BT gaan laden kan geforceerd worden           
     def force_charge_callback(self, msg):
         command = msg.data.strip().upper()
 
@@ -312,23 +311,50 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             if session_id != self.charge_session_id:
                 print_and_fixRetract(YELLOW + f"Ontvangen session {session_id}, verwacht {self.charge_session_id}. Ignored." + RESET)
                 return
-            self.charge_session_id = session_id
             command = command[1:]
 
+        # ========================
+        # START command
+        # ========================
         if command == "START":
+
+            if self.force_charge_active:
+                print_and_fixRetract(
+                    YELLOW + f"START genegeerd: laden al actief (sessie {self.charge_session_id})." + RESET
+                )
+                return
+
             print_and_fixRetract(
                 YELLOW + f"Force charge START ontvangen (sessie {self.charge_session_id})." + RESET
             )
+
+            self.force_charge_active = True
             self.start_forced_charging()
 
+        # ========================
+        # STOP command
+        # ========================
         elif command == "STOP":
+
+            if not self.force_charge_active:
+                print_and_fixRetract(
+                    YELLOW + f"STOP genegeerd: geen actieve laadsessie (sessie {self.charge_session_id})." + RESET
+                )
+                return
+
             print_and_fixRetract(
                 YELLOW + f"Force charge STOP ontvangen (sessie {self.charge_session_id})." + RESET
             )
+
+            self.force_charge_active = False
+
+            # verhoog sessie ID NA geldige STOP
             self.charge_session_id += 1
             if self.charge_session_id > 9:
-               self.charge_session_id = 0
+                self.charge_session_id = 0
+
             self.Stop_Charge()
+
 
     def Pub_Charger_Position(self):
         '''使用最新充电桩位置发布导航目标点话题'''

@@ -204,7 +204,7 @@ public:
     void updateSkipDrive()
     {
         std::string admin_status;
-        if(getInput("bat_admin_status", admin_status) && admin_status == "STOP")
+        if(getInput("bat_admin_status", admin_status) && admin_status == "START")
         {
             setOutput("skip_drive2charging", true);
         }
@@ -1079,20 +1079,43 @@ public:
     static BT::PortsList providedPorts()
     {
         return { BT::InputPort<double>("timeout"),
-                BT::InputPort<int>("chargingInteger")
+                BT::InputPort<int>("chargingInteger"),
+                BT::InputPort<bool>("skip_drive2charging")  // <--- nieuw
+
   
  };
     }
 
     BT::NodeStatus onStart() override
     {
+
+
         event_ = "";
         getInput("timeout", timeout_);
         start_time_ = std::chrono::steady_clock::now();
         std_msgs::msg::String msg;
         msg.data = "IsRobotCharging";
         pub_->publish(msg);
+
+
+                bool skip = false;
+        if (getInput("skip_drive2charging", skip))
+        {
+            if (skip)
+            {
+                std::cout << "[IsRobotCharging] skip_drive2charging = TRUE -> direct SUCCESS" << std::endl;
+                return BT::NodeStatus::SUCCESS;
+            }
+            else
+            {
+                std::cout << "[IsRobotCharging] skip_drive2charging = FALSE -> " << std::endl;
+            }
+        }
+
+
         return BT::NodeStatus::RUNNING;
+
+
     }
 
     BT::NodeStatus onRunning() override
@@ -1720,10 +1743,15 @@ public:
 
         if (last_line.find("ROBOTACTIVE:true") != std::string::npos)
         {
+
+            std::cout << "[RobotActiveTrue] Laatste lijn TRUE: " << std::endl;
+
             robot_active = true;
         }
         else if (last_line.find("ROBOTACTIVE:false") != std::string::npos)
         {
+            std::cout << "[RobotActiveTrue] Laatste lijn FALSE: " << std::endl;
+
             robot_active = false;
         }
         else
@@ -1737,7 +1765,7 @@ public:
         {
             // === STARTBUTTON gedrag ===
             std::cout << "[CheckButtonState] START toestand (robot actief)" << std::endl;
-
+            
             setOutput("buttonStop", false);
             setOutput("admin_done", true);
         }
@@ -1783,6 +1811,7 @@ public:
         std_msgs::msg::String msg;
         msg.data = "RobotWaitInChargingStation";
         pub_->publish(msg);
+        std::cout << "[RobotWaitInChargingStation] ONSTART" << std::endl;
 
         return checkConditions();
     }
@@ -1808,6 +1837,7 @@ private:
 
         if (buttonStop)
         {
+            std::cout << "[RobotWaitInChargingStation] buttonStop true " << std::endl;
 
             return BT::NodeStatus::RUNNING;
         }
@@ -1845,6 +1875,7 @@ private:
             std::cout << "[RobotWaitInChargingStation] Werktijd begonnen (" << current_time_val << ") -> SUCCESS" << std::endl;
             return BT::NodeStatus::SUCCESS;
         }
+        std::cout << "[RobotWaitInChargingStation] Nog geen werktijd "<< std::endl;
 
         // Nog geen werktijd, blijf RUNNING
         return BT::NodeStatus::RUNNING;
@@ -1892,6 +1923,8 @@ public:
         else{
             counter += 1;
         }
+        
+        std::cout << "[StopRobotCharging] regel voor setoutput chargingintegernextcycle" << std::endl;
 
         setOutput("chargingInteger_nextCycle", counter);
 
@@ -2084,7 +2117,9 @@ public:
     static BT::PortsList providedPorts()
     {
         return { BT::InputPort<double>("timeout"), 
-                BT::OutputPort<std::string>("robotLocationBAT")};
+                BT::OutputPort<std::string>("robotLocationBAT"),
+                BT::OutputPort<std::string>("bat_admin_status")
+            };
     }
 
     BT::NodeStatus onStart() override
@@ -2092,6 +2127,9 @@ public:
         // timeout uit XML of default
         if (!getInput<double>("timeout", timeout_))
             timeout_ = 10.0;
+
+
+        setOutput("bat_admin_status", "STOP");
 
         start_time_ = std::chrono::steady_clock::now();
 

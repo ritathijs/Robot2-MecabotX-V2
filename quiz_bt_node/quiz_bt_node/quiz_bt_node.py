@@ -46,7 +46,7 @@ class QuizBTNode(Node):
         self.sio.on('manual-drive-start', self.robot_manual_drive)
         self.sio.on('manual-drive-stop', self.robot_stop_manual_drive)
         
-        self.sio.on('admin-panel-open', self.admin_panel_open)
+        self.sio.on('admin-panel-open', self.on_admin_panel_open)
 
 
         self.sio.on('manual-drive-stop', self.robot_stop_manual_drive)
@@ -93,8 +93,10 @@ class QuizBTNode(Node):
                             line = f"{prefix}{'X'*8}"
 
                         f.write(line + "\n")
-                        robot_active = settings.get("robotActive", False)
-                        f.write(f"ROBOTACTIVE:{str(robot_active).lower()}\n")
+
+                    # Schrijf ROBOTACTIVE pas **na** alle dagen
+                    robot_active = settings.get("robotActive", False)
+                    f.write(f"ROBOTACTIVE:{str(robot_active).lower()}\n")
 
                 self.get_logger().info("Schedule succesvol geupdate.")
             else:

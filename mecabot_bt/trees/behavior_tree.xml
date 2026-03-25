@@ -50,13 +50,13 @@
                             <Fallback name="GoToChargeFallback">
                                 <Sequence name="ChargingSequence">
                                     <CheckMainBTErrorState stop_flag="{stop_flag}"/>
-                                    <DriveToChargingStation timeout="5.0" chargingInteger="{chargingInteger}"   skip_drive2charging="{skip_drive2charging}"  bat_admin_status="{bat_admin_status}" />
+                                    <DriveToChargingStation timeout="20.0" chargingInteger="{chargingInteger}"   skip_drive2charging="{skip_drive2charging}"  bat_admin_status="{bat_admin_status}" />
                                     <StatusDriveToChargingDock timeout="200.0" chargingInteger="{chargingInteger}"  skip_drive2charging="{skip_drive2charging}" />
                                     <IsRobotCharging timeout="200" chargingInteger="{chargingInteger}" />
                                     <IsBatteryFull robotLocation="{robotLocation}" chargingInteger="{chargingInteger}" bat_admin_status="{bat_admin_status}" />
                                     <RobotWaitInChargingStation buttonStop = "{buttonStop}" />
-                                    <StopRobotCharging chargingInteger="{chargingInteger}" />
-                                    <BatteryCharged timeout="5" robotLocationBAT="{robotLocationBAT}"/>
+                                    <StopRobotCharging chargingInteger="{chargingInteger}" chargingInteger_nextCycle="{chargingInteger_nextCycle}" />
+                                    <BatteryCharged timeout="5" robotLocationBAT="{robotLocationBAT}" bat_admin_status ="{bat_admin_status}" />
                                 </Sequence>
                                 <BatteryStopDrive/>
                             </Fallback>
@@ -68,8 +68,6 @@
                             <Sequence name="AdminSequence">
                                 <CheckAdminCondition admin_done="{admin_done}" bat_admin_status="{bat_admin_status}" 
                                 chargingInteger="{chargingInteger}" chargingInteger_nextCycle="{chargingInteger_nextCycle}"/>
-
-
                                 <CheckButtonState admin_done="{admin_done}"  buttonStop="{buttonStop}"  robotLocationBAT="{robotLocationBAT}" />
                             </Sequence>
                             <Sequence name="ManualDrivingSequence">
