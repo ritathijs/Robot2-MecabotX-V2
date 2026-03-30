@@ -1,4 +1,5 @@
 #include "rclcpp/rclcpp.hpp"
+#include "rclcpp/qos.hpp"
 #include "behaviortree_cpp_v3/bt_factory.h"
 #include "behaviortree_cpp_v3/decorator_node.h"
 #include <chrono>
@@ -2710,7 +2711,7 @@ public:
     }
 };
 
-
+#include <chrono>
 
 class CheckAdminCondition : public BT::StatefulActionNode
 {
@@ -2718,27 +2719,32 @@ public:
     CheckAdminCondition(const std::string &name, const BT::NodeConfiguration &config)
         : BT::StatefulActionNode(name, config),
           admin_closed_(false),
-          manual_drive_(false)
+          manual_drive_(false),
+          timer_started_(false)
     {
         node_ = rclcpp::Node::make_shared("btCheckAdminCondition");
 
-        // Publisher voor BehaviorTreeNode
         pub_ = node_->create_publisher<std_msgs::msg::String>(
             "/BehaviorTreeNode", 10);
 
-        // Publisher voor force_charge
         force_charge_pub_ = node_->create_publisher<std_msgs::msg::String>(
             "/force_charge", 10);
 
-        // Subscriber naar /quiz topic
+        rclcpp::QoS qos(1);
+        qos.reliable();
+
         sub_ = node_->create_subscription<std_msgs::msg::String>(
-            "/quiz", 10,
+            "/admin", qos,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
                 if (msg->data == "ADMINPANELCLOSED")
                 {
                     std::cout << "[CheckAdminCondition] ADMINPANELCLOSED ontvangen!" << std::endl;
                     admin_closed_ = true;
+
+                    // start timer
+                    timer_started_ = true;
+                    start_time_ = std::chrono::steady_clock::now();
                 }
                 else if (msg->data == "RobotManualDrive")
                 {
@@ -2804,8 +2810,8 @@ public:
     {
         admin_closed_ = false;
         manual_drive_ = false;
+        timer_started_ = false;
 
-        // Publiceer node naam
         std_msgs::msg::String msg;
         msg.data = "CheckAdminCondition";
         pub_->publish(msg);
@@ -2819,13 +2825,11 @@ public:
 
         setOutput("admin_done", false);
 
-        // 🔹 Check manual drive
         if (manual_drive_)
         {
             std::cout << "[CheckAdminCondition] Manual drive -> FAILURE" << std::endl;
             return BT::NodeStatus::FAILURE;
         }
-
 
         std::string bat_status;
         if (getInput("bat_admin_status", bat_status))
@@ -2834,20 +2838,30 @@ public:
             {
                 std::cout << "[CheckAdminCondition] bat_admin_status = STOP" << std::endl;
 
-                // increment counter
                 incrementChargingCounter();
-
-                // publish STOP zoals andere node
                 publishStopCommand();
             }
         }
 
-        // 🔹 bestaande admin check
+        // 🔹 Admin closed + 3 sec delay
         if (admin_closed_)
         {
-            std::cout << "[CheckAdminCondition] Admin panel closed -> SUCCESS" << std::endl;
-            setOutput("admin_done", false);
-            return BT::NodeStatus::SUCCESS;
+            if (timer_started_)
+            {
+                auto now = std::chrono::steady_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time_).count();
+
+                if (elapsed >= 3)
+                {
+                    std::cout << "[CheckAdminCondition] Admin panel closed + delay -> SUCCESS" << std::endl;
+                    setOutput("admin_done", false);
+                    return BT::NodeStatus::SUCCESS;
+                }
+                else
+                {
+                    return BT::NodeStatus::RUNNING;
+                }
+            }
         }
 
         return BT::NodeStatus::RUNNING;
@@ -2866,65 +2880,12 @@ private:
 
     bool admin_closed_;
     bool manual_drive_;
+
+    // 🔹 Timer vars
+    bool timer_started_;
+    std::chrono::steady_clock::time_point start_time_;
 };
 
-
-class CheckManualDriving : public BT::StatefulActionNode
-{
-public:
-    CheckManualDriving(const std::string &name, const BT::NodeConfiguration &config)
-        : BT::StatefulActionNode(name, config),
-          manual_drive_detected_(false)
-    {
-        node_ = rclcpp::Node::make_shared("btCheckManualDriving");
-
-        // Subscriber naar quiz topic
-        sub_ = node_->create_subscription<std_msgs::msg::String>(
-            "/quiz", 10,
-            [this](std_msgs::msg::String::SharedPtr msg)
-            {
-                if (msg->data == "RobotManualDrive")
-                {
-                    std::cout << "[CheckManualDriving] RobotManualDrive ontvangen!" << std::endl;
-                    manual_drive_detected_ = true;
-                }
-            });
-    }
-
-    static BT::PortsList providedPorts()
-    {
-        return {};
-    }
-
-    BT::NodeStatus onStart() override
-    {
-        manual_drive_detected_ = false;
-        return BT::NodeStatus::RUNNING;
-    }
-
-    BT::NodeStatus onRunning() override
-    {
-        rclcpp::spin_some(node_);
-
-        if (manual_drive_detected_)
-        {
-            std::cout << "[CheckManualDriving] Manual drive actief -> FAILURE" << std::endl;
-            return BT::NodeStatus::FAILURE;
-        }
-
-        return BT::NodeStatus::RUNNING;
-    }
-
-    void onHalted() override
-    {
-        std::cout << "[CheckManualDriving] HALTED" << std::endl;
-    }
-
-private:
-    rclcpp::Node::SharedPtr node_;
-    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
-    bool manual_drive_detected_;
-};
 
 
 
@@ -2938,8 +2899,10 @@ public:
         node_ = rclcpp::Node::make_shared("btManualDriving");
 
         // Subscriber naar quiz topic
+        rclcpp::QoS qos(1);
+        qos.reliable(); 
         sub_ = node_->create_subscription<std_msgs::msg::String>(
-            "/quiz", 10,
+            "/admin", qos,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
                 if (msg->data == "RobotStopManualDrive")
@@ -3007,9 +2970,11 @@ public:
     {
         node_ = rclcpp::Node::make_shared("btCheckAdminPanel");
 
-        // Subscriber naar /quiz topic
+        // Subscriber naar /admin topic
+        rclcpp::QoS qos(1);
+        qos.reliable(); 
         sub_ = node_->create_subscription<std_msgs::msg::String>(
-            "/quiz", 10,
+            "/admin", qos,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
                 if (msg->data == "ADMINPANELOPEN")
@@ -3103,18 +3068,13 @@ int main(int argc, char **argv)
     factory.registerNodeType<MDChargeLocation>("MDChargeLocation");
     factory.registerNodeType<MDChargeLocation>("MDTurnAround");
 
-
-
     factory.registerNodeType<StopNode>("StopNode");
-
-
 
     factory.registerNodeType<StopRobotCharging>("StopRobotCharging");
     factory.registerNodeType<MainBTStopDrive>("MainBTStopDrive");
 
     factory.registerNodeType<ForceSuccess>("MainFallbackForceSuccess");
     factory.registerNodeType<ForceSuccess>("BatteryForceSuccess");
-
 
     factory.registerNodeType<ManualDriving>("ManualDriving");
 

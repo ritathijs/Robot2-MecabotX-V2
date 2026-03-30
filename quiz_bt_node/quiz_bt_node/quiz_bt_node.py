@@ -10,6 +10,9 @@ from std_msgs.msg import Int8
 
 import socketio
 
+from rclpy.qos import QoSProfile, ReliabilityPolicy
+
+
 URL = "http://192.168.137.100/cms/getSettings"
 
 
@@ -20,6 +23,12 @@ class QuizBTNode(Node):
 
         # ROS2 publisher
         self.quiz_publisher = self.create_publisher(String, 'quiz', 10)
+
+
+        qos = QoSProfile(depth=1)
+        qos.reliability = ReliabilityPolicy.RELIABLE
+        self.admin_publisher = self.create_publisher(String, 'admin', qos)
+
 
         # ROS2 subscriber
         self.subscription = self.create_subscription(
@@ -47,6 +56,8 @@ class QuizBTNode(Node):
         self.sio.on('manual-drive-stop', self.robot_stop_manual_drive)
         
         self.sio.on('admin-panel-open', self.on_admin_panel_open)
+
+        self.sio.on('admin-panel-closed', self.on_admin_panel_closed)
 
 
         self.sio.on('manual-drive-stop', self.robot_stop_manual_drive)
@@ -111,10 +122,7 @@ class QuizBTNode(Node):
         self.get_logger().info(f'Battery percentage: {percentage}%')
         self.sio.emit("battery-update", {"percentage": percentage})
 
-    # ---------------- TIME HANDLER ----------------
-    def handle_set_hour(self, hour_value):
-        self.get_logger().info(f"[PLACEHOLDER] Zet systeemtijd naar: {hour_value}")
-        print(f"Zet systeemtijd naar {hour_value} (nog niet geïmplementeerd)")
+
 
     # ---------------- QUIZ PUBLISHER ----------------
     def publish_quiz_message(self, message):
@@ -125,6 +133,15 @@ class QuizBTNode(Node):
             time.sleep(0.05)
         self.quiz_publisher.publish(msg)
         self.get_logger().info(f'Published to quiz topic: {msg.data}')
+
+
+    # ---------------- ADMIN PUBLISHER ----------------
+    def publish_admin_message(self, message):
+        msg = String()
+        msg.data = message
+        self.admin_publisher.publish(msg)
+        self.get_logger().info(f'Published to admin topic: {msg.data}')
+
 
     # ---------------- SOCKET EVENTS ----------------
     def on_connect(self):
@@ -150,11 +167,11 @@ class QuizBTNode(Node):
 
     def robot_manual_drive(self):
         self.get_logger().info("Starting robot manual drive")
-        self.publish_quiz_message("RobotManualDrive")
+        self.publish_admin_message("RobotManualDrive")
 
     def robot_stop_manual_drive(self):
         self.get_logger().info("Stopping robot manual drive")
-        self.publish_quiz_message("RobotStopManualDrive")
+        self.publish_admin_message("RobotStopManualDrive")
 
     def on_schedule_updated(self):
         self.get_logger().info("Schedule update event ontvangen")
@@ -170,11 +187,11 @@ class QuizBTNode(Node):
 
     def on_admin_panel_open(self):
         self.get_logger().info("Admin Panel geopend")
-        self.publish_quiz_message("ADMINPANELOPEN")
+        self.publish_admin_message("ADMINPANELOPEN")
 
     def on_admin_panel_closed(self):
         self.get_logger().info("Admin Panel gesloten")
-        self.publish_quiz_message("ADMINPANELCLOSED")
+        self.publish_admin_message("ADMINPANELCLOSED")
         self.fetch_schedule()
 
 
@@ -196,9 +213,6 @@ class QuizBTNode(Node):
             self.sio.emit("robot-charging")
         elif msg.data == "RobotStartup":
             self.sio.emit("robot-startup")
-        elif msg.data.startswith("SETHOUR:"):
-            hour_value = msg.data.split("SETHOUR:")[1].strip()
-            self.handle_set_hour(hour_value)
 
     # ---------------- CLEANUP ----------------
     def shutdown(self):
