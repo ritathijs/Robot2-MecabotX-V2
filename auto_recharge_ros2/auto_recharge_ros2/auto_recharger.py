@@ -101,6 +101,11 @@ class AutoRecharger(Node):
 
         print_and_fixRetract('Automatic charging node start!')
 
+
+        self.must_reset = False  # Nieuwe vlag voor herstart
+
+        
+
         #机器人状态变量：类型、电池容量、电池电压、充电状态、充电电流、红外信号状态、记录机器人姿态
         self.robot = {
         'Type':'Plus', 
@@ -258,13 +263,14 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                 raise TimeoutError("Service call time out")
     
         except TimeoutError as e:
-            print_and_fixRetract(RED+'自动回充状态设置失败.原因:等待服务超时,请确认底盘节点是否被开启.'+RESET)
+            print_and_fixRetract(RED+'Het instellen van de automatische herlaadstatus is mislukt. Wachttijd verstreken.'+RESET)
             return
 
         state = None  # 调用结果
         call_time = 0 # 调用失败后尝试调用的次数记录
         if round(value)==1 or round(value)==2:
             print("正在开启自动回充功能,等待响应,请确保底盘节点已开启...")
+            print("De functie voor automatisch bijvullen wordt geactiveerd. Wacht op een reactie. Zorg ervoor dat de chassis-node is ingeschakeld...")
         else:
             print("正在关闭自动回充功能,等待响应,请确保底盘节点已开启...")
         while True:
@@ -289,6 +295,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             if state=="true":
                 self.server_set_state = None
                 print("回充状态设置成功.")
+                print("De instelling voor het opladen is geslaagd")
                 # 调用成功,跳出循环
                 break
             else:
@@ -305,61 +312,53 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
     def force_charge_callback(self, msg):
         command = msg.data.strip().upper()
 
-        # eerste karakter = sessie nummer
-        if len(command) > 1 and command[:1].isdigit():
+        # Controleer of het eerste karakter een cijfer is (sessie-ID)
+        if len(command) > 1 and command[0].isdigit():
             session_id = int(command[0])
+            command_body = command[1:]
+
+            # Eerste START: als nog geen force_charge actief, accepteer het sessienummer
+            if command_body == "START" and not self.force_charge_active:
+                print_and_fixRetract(YELLOW + f"Eerste START ontvangen, sessie {session_id} wordt actief." + RESET)
+                self.charge_session_id = session_id
+                self.force_charge_active = True
+                self.start_forced_charging()
+                return
+
+            # Volgende berichten controleren tegen de actieve sessie
             if session_id != self.charge_session_id:
                 print_and_fixRetract(YELLOW + f"Ontvangen session {session_id}, verwacht {self.charge_session_id}. Ignored." + RESET)
                 return
-            command = command[1:]
 
-        # ========================
-        # START command
-        # ========================
+            command = command_body  # strip sessie-nummer voor verdere checks
+
+        # START
         if command == "START":
-
             if self.force_charge_active:
-                print_and_fixRetract(
-                    YELLOW + f"START genegeerd: laden al actief (sessie {self.charge_session_id})." + RESET
-                )
+                print_and_fixRetract(YELLOW + f"START genegeerd: laden al actief (sessie {self.charge_session_id})." + RESET)
                 return
-
-            print_and_fixRetract(
-                YELLOW + f"Force charge START ontvangen (sessie {self.charge_session_id})." + RESET
-            )
-
+            print_and_fixRetract(YELLOW + f"Force charge START ontvangen (sessie {self.charge_session_id})." + RESET)
             self.force_charge_active = True
             self.start_forced_charging()
 
-        # ========================
-        # STOP command
-        # ========================
+        # STOP
         elif command == "STOP":
-
             if not self.force_charge_active:
-                print_and_fixRetract(
-                    YELLOW + f"STOP genegeerd: geen actieve laadsessie (sessie {self.charge_session_id})." + RESET
-                )
+                print_and_fixRetract(YELLOW + f"STOP genegeerd: geen actieve laadsessie (sessie {self.charge_session_id})." + RESET)
                 return
-
-            print_and_fixRetract(
-                YELLOW + f"Force charge STOP ontvangen (sessie {self.charge_session_id})." + RESET
-            )
-
+            print_and_fixRetract(YELLOW + f"Force charge STOP ontvangen (sessie {self.charge_session_id})." + RESET)
             self.force_charge_active = False
-
-            # verhoog sessie ID NA geldige STOP
+            # sessie-ID resetten of verhogen na STOP
             self.charge_session_id += 1
             if self.charge_session_id > 9:
                 self.charge_session_id = 0
-
             self.Stop_Charge()
 
 
     def Pub_Charger_Position(self):
         '''使用最新充电桩位置发布导航目标点话题'''
         # 开始监听导航结果
-        self.star_getNav_Feedback_Flag=1
+        self.star_getNav_Feedback_Flag=1  # Deze vlag gezet om te kijken naar feedback van navigatie
 
         nav_goal=PoseStamped()
         nav_goal.header.frame_id = 'map'
@@ -475,6 +474,8 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             self.set_charge_mode_stop(self.chargeflag)
         else:
             self.set_charge_mode(self.chargeflag)
+
+
 
 
         print_and_fixRetract(GREEN+"PUB RECHARGER NA BLOCKER"+RESET)
@@ -711,7 +712,10 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             CYAN + f"[DEBUG] STOP CHARGE AFTER RESET | start_turn={self.start_turn} | find_red={self.find_redsignal} | RED={self.robot['RED']}" + RESET
         )
 
-        
+
+        print_and_fixRetract(YELLOW + "Systeem gaat 10 seconden in rust voor herstart..." + RESET)
+        self.must_reset = True
+                
 
 
 
@@ -856,14 +860,17 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                         )
                         # BT rijden naar dock succesvol => nu nog docken zelf
                         self.publish_event("DRIVE-TO-DOCK-SUCCESS")
-                        print("已到达目标点.")
+                        print("已到达目标点.")  # NL: HET EINDPUNT IS BEREIKT
+                        print("HET EINDPUNT IS BEREIKT VAN DE NAVIGATIE.")  # NL: HET EINDPUNT IS BEREIKT
+
                         if self.robot['RED']==1:
                             # 成功到达目标点,开启自动回充
                             print("发现红外信号,开启对接功能.")
+                            print("INFRAROOD GEDETECTEERD, KOPPELINGSFUNCTIE INGESCHAKELD.")
                             self.chargeflag=1
                             self.Pub_Recharger_Flag()
                         else:
-                            print('未发现红外信号,开始自转寻找.')
+                            print('GEEN INFRAROOD GEVONDEN, BEGIN MET RONDDRAAIEN OM TE ZOEKEN')  # NL
                             self.nav_end_z = self.robot['Rotation_Z']
                             self.start_turn=1 # 没有红外信号,让小车自转
                             topic=Twist()
@@ -984,61 +991,81 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 def main():
     rclpy.init()
     try:
-        autorecharger=AutoRecharger() #创建自动回充类
-
-        print_and_fixRetract("请开启导航功能,正在等待导航激活...(Wait for navigation now...)")
-        autorecharger.nav_controller.waitUntilNav2Active()
-        print_and_fixRetract(autorecharger.tips)
-        
-        tmp_sec = Int8()
-        tmp_sec.data = 1
-        tmp_vel = Twist()
-        autorecharger.robot_security_off_pub.publish(tmp_sec)
-        autorecharger.Cmd_vel_pub.publish(tmp_vel)
-        
-        # 初始化参数
-        autorecharger.declare_parameter('robot_BatteryCapacity',5000)
-        autorecharger.declare_parameter('car_mode',"mini_mec")
-        autorecharger.declare_parameter('diff_point',1.2)
-        autorecharger.declare_parameter('diff_angle',-15)
-
-        # 获取参数
-        with open(yaml_file,'r') as file:
-            params = yaml.safe_load(file)
-
-        # 参数赋值
-        autorecharger.robot['BatteryCapacity'] = params['robot_info']['BatteryCapacity']
-        autorecharger.robot['car_mode']        = params['robot_info']['car_mode']
-        autorecharger.diff_point = params['robot_info']['diff_point']
-        autorecharger.diff_angle = params['robot_info']['diff_angle']
-
-        if autorecharger.robot['car_mode'][0:4]!='mini':
-            autorecharger.robot['Type'] = 'Plus'
-        else:
-            autorecharger.robot['Type'] = 'Mini'
-        
+        # De 'Outer Loop': Deze zorgt voor de volledige herstarts
         while rclpy.ok():
-            key = get_key(settings) #获取键值，会导致终端打印自动缩进
-            autorecharger.autoRecharger(key) #开始自动回充功能
-            rclpy.spin_once(autorecharger)
-            if (key == '\x03'):
-                topic=Twist()
-                autorecharger.Cmd_vel_pub.publish(topic) #发布速度0话题
-                autorecharger.chargeflag=0
-                autorecharger.Pub_Recharger_Flag()# 关闭自动回充
-                print_and_fixRetract('自动回充功能已关闭.(Quit AutoRecharger.)')#Auto charging quit
-                break #Ctrl+C退出自动回充功能
-        
+            # 1. Maak een verse instantie van de node
+            autorecharger = AutoRecharger() 
+
+            print_and_fixRetract("Wachten op Nav2 activatie voor deze sessie...")
+            autorecharger.nav_controller.waitUntilNav2Active()
+            print_and_fixRetract(autorecharger.tips)
+            
+            # Initialiseer chassis instellingen
+            tmp_sec = Int8()
+            tmp_sec.data = 1
+            tmp_vel = Twist()
+            autorecharger.robot_security_off_pub.publish(tmp_sec)
+            autorecharger.Cmd_vel_pub.publish(tmp_vel)
+            
+            # 2. Parameters laden (moet elke keer opnieuw voor een schone start)
+            autorecharger.declare_parameter('robot_BatteryCapacity', 5000)
+            autorecharger.declare_parameter('car_mode', "mini_mec")
+            autorecharger.declare_parameter('diff_point', 1.2)
+            autorecharger.declare_parameter('diff_angle', -15)
+
+            with open(yaml_file, 'r') as file:
+                params = yaml.safe_load(file)
+
+            autorecharger.robot['BatteryCapacity'] = params['robot_info']['BatteryCapacity']
+            autorecharger.robot['car_mode']        = params['robot_info']['car_mode']
+            autorecharger.diff_point = params['robot_info']['diff_point']
+            autorecharger.diff_angle = params['robot_info']['diff_angle']
+
+            if autorecharger.robot['car_mode'][0:4] != 'mini':
+                autorecharger.robot['Type'] = 'Plus'
+            else:
+                autorecharger.robot['Type'] = 'Mini'
+            
+            # 3. De 'Inner Loop': De actieve runtime van de robot
+            should_quit_completely = False
+            while rclpy.ok():
+                key = get_key(settings) 
+                autorecharger.autoRecharger(key) 
+                rclpy.spin_once(autorecharger, timeout_sec=0.1)
+
+                # Als Stop_Charge() is aangeroepen, breken we de Inner Loop
+                if autorecharger.must_reset:
+                    print_and_fixRetract(YELLOW + "Reset aangevraagd. Node wordt afgesloten..." + RESET)
+                    break
+
+                # Ctrl+C afhandeling
+                if (key == '\x03'):
+                    should_quit_completely = True
+                    break
+            
+            # 4. Cleanup van de huidige sessie
+            # Stop de motoren voor de zekerheid
+            stop_msg = Twist()
+            autorecharger.Cmd_vel_pub.publish(stop_msg)
+            autorecharger.destroy_node()
+
+            # Als de gebruiker Ctrl+C drukte, stoppen we de Outer Loop ook
+            if should_quit_completely:
+                print_and_fixRetract('Programma volledig afgesloten door gebruiker.')
+                break
+
+            # 5. De 10 seconden "echte" ruststand
+            print_and_fixRetract(BLUE + "Systeem is nu 10 seconden inactief..." + RESET)
+            time.sleep(10)
+            print_and_fixRetract(GREEN + "Herstarten..." + RESET)
+
     except Exception as e:
-        print_and_fixRetract(e)
+        print_and_fixRetract(f"Er is een fout opgetreden: {e}")
     
     finally:
-        topic=Twist()
-        autorecharger.Cmd_vel_pub.publish(topic) #发布速度0话题
-        autorecharger.chargeflag=0
-        autorecharger.Pub_Recharger_Flag()# 关闭自动回充,并传递标志位到cmd_vel的callback函数
-        # 恢复终端属性
-        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, settings)
-    
-    print('over.')
+        # Altijd de terminal herstellen en ROS netjes afsluiten
+        if settings is not None:
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, settings)
+        rclpy.shutdown()
 
+    print('Over and out.')
