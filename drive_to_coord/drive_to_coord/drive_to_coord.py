@@ -42,7 +42,6 @@ class DriveToCoord(Node):
 		self.estop_cmd_vel_pub = self.create_publisher(Twist, '/estop_cmd_vel', 1)
 		self.keepout_filter_pub = self.create_publisher(Bool, '/toggle_keepout', 1)
 
-
 		# --- SUBSCRIBERS ---
 		self.BehaviorTreeNode_sub = self.create_subscription(
 			String, '/BehaviorTreeNode', self.BehaviorTreeNode_callback, 1, 
@@ -96,6 +95,14 @@ class DriveToCoord(Node):
 			if self.needs_action:
 				self.actiondistribute()
 				self.needs_action = False
+			
+			elif self.last_BehaviorTreeNode not in [
+				"IsRobotAtQuiz", "IsRobotAtWorkArea",
+				"CheckingNearbyVisitors", "DriveWorkArea", "DriveQuizLocation",
+				"ManualDriving",
+				None
+			]:
+				self.emergencystop()
 
 	# --- LOGICA & ACTIES ---
 

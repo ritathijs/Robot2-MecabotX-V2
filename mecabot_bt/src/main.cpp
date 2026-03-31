@@ -37,24 +37,67 @@ public:
     }
 };
 
-class StopNode : public BT::SyncActionNode
+class ConnectionLost : public BT::StatefulActionNode
 {
 public:
-    StopNode(const std::string &name) : BT::SyncActionNode(name, {}) {
-        node_ = rclcpp::Node::make_shared("btStopNode");
+    ConnectionLost(const std::string &name, const BT::NodeConfiguration &config)
+        : BT::StatefulActionNode(name, config)
+    {
+        node_ = rclcpp::Node::make_shared("btConnectionLost");
+
+        // Publisher naar BehaviorTreeNode
         pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
+
+        // QoS en subscription naar /connection
+        rclcpp::QoS qos(1);
+        qos.reliable();
+
+        sub_ = node_->create_subscription<std_msgs::msg::String>(
+            "/connection", qos,
+            [this](std_msgs::msg::String::SharedPtr msg)
+            {
+                last_connection_msg_ = msg->data;
+            });
     }
-    BT::NodeStatus tick() override {
-        std::cout << "[StopNode] STOP DRIVING" << std::endl;
-        std::string state = "StopNode";
-    	std_msgs::msg::String msg;
-        msg.data = state;
+
+    static BT::PortsList providedPorts() { return {}; }
+
+    BT::NodeStatus onStart() override
+    {
+        // Publiceer zijn naam
+        std_msgs::msg::String msg;
+        msg.data = name();
         pub_->publish(msg);
-        return BT::NodeStatus::SUCCESS;
+
+        last_connection_msg_ = "";
+        std::cout << "[ConnectionLost] START - waiting for CONNECT" << std::endl;
+
+        return BT::NodeStatus::RUNNING;
     }
-        private:
+
+    BT::NodeStatus onRunning() override
+    {
+        rclcpp::spin_some(node_);
+
+        if (last_connection_msg_ == "CONNECT")
+        {
+            std::cout << "[ConnectionLost] CONNECT received -> SUCCESS" << std::endl;
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override
+    {
+        std::cout << "[ConnectionLost] HALTED" << std::endl;
+    }
+
+private:
     rclcpp::Node::SharedPtr node_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
+    std::string last_connection_msg_;
 };
 
 class WaitDriving : public BT::SyncActionNode
@@ -76,50 +119,52 @@ public:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
 };
 
+
 class CheckNetworkError : public BT::StatefulActionNode
 {
 public:
     CheckNetworkError(const std::string &name, const BT::NodeConfiguration &config)
-        : BT::StatefulActionNode(name, config), level_(100.0)
+        : BT::StatefulActionNode(name, config)
     {
+        node_ = rclcpp::Node::make_shared("btCheckNetworkError");
 
+        rclcpp::QoS qos(1);
+        qos.reliable();
 
+        // Subscriber naar /connection topic
+        sub_ = node_->create_subscription<std_msgs::msg::String>(
+            "/connection", qos,
+            [this](std_msgs::msg::String::SharedPtr msg)
+            {
+                last_connection_msg_ = msg->data;
+            });
     }
 
-    static BT::PortsList providedPorts() { return {}; }
+    static BT::PortsList providedPorts()
+    {
+        return { BT::InputPort<bool>("connection_chargeStatus") };
+    }
 
     BT::NodeStatus onStart() override
     {
-
-
-        // Als batterij al te laag is, meteen FAILURE
-        if (level_ < 30.0)
-        {
-	//std::cout << "[CheckNetworkError] NETWORK ERROR -> FAILURE. Level: " << level_ << std::endl;
-	level_ += 0;
-
-            return BT::NodeStatus::FAILURE;
-        }
-
-        // Anders RUNNING totdat de volgende tick komt
-        level_ -= 0.0;
-        //std::cout << "[CheckNetworkError] NETWORK oke: " << level_ << std::endl;
+        last_connection_msg_ = "";
         return BT::NodeStatus::RUNNING;
     }
 
     BT::NodeStatus onRunning() override
     {
-        // Simuleer dat de batterij afneemt
-        level_ -= 0;
+        rclcpp::spin_some(node_);
 
+        // Lees van het blackboard (default = false)
+        bool charge_connected = false;
+        getInput("connection_chargeStatus", charge_connected);
 
-        if (level_ < 30.0)
+        if (last_connection_msg_ == "DISCONNECTED" && !charge_connected)
         {
-            level_ += 0;
-	//std::cout << "[CheckNetworkError] NETWORK ERROR -> FAILURE. Level: " << level_ << std::endl;
+            std::cout << "[CheckNetworkError] NETWORK ERROR -> FAILURE" << std::endl;
             return BT::NodeStatus::FAILURE;
         }
-        //std::cout << "[CheckNetworkError] NETWORK oke: " << level_ << std::endl;
+
         return BT::NodeStatus::RUNNING;
     }
 
@@ -129,9 +174,10 @@ public:
     }
 
 private:
-    double level_;
+    rclcpp::Node::SharedPtr node_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
+    std::string last_connection_msg_;
 };
-
 
 class BatteryOk : public BT::StatefulActionNode
 {
@@ -592,7 +638,8 @@ public:
             BT::InputPort<double>("timeout"),
             BT::InputPort<int>("chargingInteger"),
             BT::OutputPort<std::string>("bat_admin_status"),
-            BT::InputPort<bool>("skip_drive2charging")  // <--- nieuw
+            BT::OutputPort<bool>("connection_chargeStatus"),  
+            BT::InputPort<bool>("skip_drive2charging")  
         };
     }
 
@@ -601,6 +648,8 @@ public:
         success_received_ = false;
         start_time_ = std::chrono::steady_clock::now();
         getInput("timeout", timeout_);
+
+        setOutput("connection_chargeStatus", true);
 
         // ✅ Check skip_drive2charging
         bool skip = false;
@@ -1340,8 +1389,10 @@ public:
                 follow_value_ = msg->data;
             });
 
+        rclcpp::QoS qos(1);
+        qos.reliable(); 
         sub_quiz_ = node_->create_subscription<std_msgs::msg::String>(
-            "/quiz", 10,
+            "/quiz", qos,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
                 if (msg->data == "drive_to_quiz_location")
@@ -2119,7 +2170,9 @@ public:
     {
         return { BT::InputPort<double>("timeout"), 
                 BT::OutputPort<std::string>("robotLocationBAT"),
-                BT::OutputPort<std::string>("bat_admin_status")
+                BT::OutputPort<std::string>("bat_admin_status"),
+                 BT::OutputPort<bool>("connection_chargeStatus")  
+
             };
     }
 
@@ -2131,6 +2184,7 @@ public:
 
 
         setOutput("bat_admin_status", "STOP");
+        setOutput("connection_chargeStatus", false);
 
         start_time_ = std::chrono::steady_clock::now();
 
@@ -2419,9 +2473,12 @@ public:
         // Publisher voor status (zoals de andere nodes)
         pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
 
+
+        rclcpp::QoS qos(1);
+        qos.reliable(); 
         // Subscriber om te luisteren naar quizstatus
         sub_ = node_->create_subscription<std_msgs::msg::String>(
-            "/quiz", 10,
+            "/quiz", qos,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
                 if (msg->data == "quiz-finished" || msg->data == "quiz-inactive")
@@ -3068,7 +3125,7 @@ int main(int argc, char **argv)
     factory.registerNodeType<MDChargeLocation>("MDChargeLocation");
     factory.registerNodeType<MDChargeLocation>("MDTurnAround");
 
-    factory.registerNodeType<StopNode>("StopNode");
+    factory.registerNodeType<ConnectionLost >("ConnectionLost");
 
     factory.registerNodeType<StopRobotCharging>("StopRobotCharging");
     factory.registerNodeType<MainBTStopDrive>("MainBTStopDrive");

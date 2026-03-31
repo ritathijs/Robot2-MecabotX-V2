@@ -23,7 +23,7 @@ class GPIOReaderNode(Node):
 		self.timer = self.create_timer(0.2, self.detect)
 	
 	def detect(self):
-		states = {pin: GPIO.input(pin) for pin in PINS}
+		states = {pin: not GPIO.input(pin) for pin in PINS}		
 		
 		if 0 in states.values():
 			self.emergency(states)
