@@ -159,17 +159,23 @@ class QuizBTNode(Node):
         msg = Twist()
 
         if direction == 'forward':
-            msg.linear.x = 0.5
+            msg.linear.x = 0.15
+            self.get_logger().info(f'0.15')
         elif direction == 'backward':
-            msg.linear.x = -0.5
+            msg.linear.x = -0.25
+            self.get_logger().info(f'0.25')
         elif direction == 'left':
-            msg.linear.y = -0.5
+            msg.linear.y = -0.1
+            self.get_logger().info(f'0.1')
         elif direction == 'right':
-            msg.linear.y = 0.5
+            msg.linear.y = 0.1
+            self.get_logger().info(f'0.1')
         elif direction == 'cw':
-            msg.angular.z = -0.5
+            msg.angular.z = -0.2
+            self.get_logger().info(f'0.2')
         elif direction == 'ccw':
-            msg.angular.z = 0.5
+            msg.angular.z = 0.2
+            self.get_logger().info(f'0.2')
         else: # stop
             msg.linear.x = 0.0
             msg.linear.y = 0.0

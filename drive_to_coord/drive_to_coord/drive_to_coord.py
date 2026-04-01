@@ -8,6 +8,34 @@ from std_msgs.msg import String, Bool
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
 
+behavior_tree_nodes = {
+	# keepoutfilter_on: "True" / "False" / "none"
+	# drive_action: "estop" / "release" / "behaviortree" / "peoplesearch"
+	# message_frequency: "always" / "once"
+
+	# --- Oplaad statussen ---
+	"DriveToChargingStation":	   {"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
+	"StatusDriveToChargingDock":	{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
+	"IsRobotCharging":			  {"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
+	"IsBatteryFull":				{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
+	"BatteryCharged":			   {"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
+	"RobotWaitInChargingStation":   {"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
+	"StopRobotCharging":			{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
+	"ManualDriving":				{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
+	"MDForceCharging":			  {"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
+
+	# --- Behavior Tree doelen ---
+	"IsRobotAtQuiz":				{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "once"},
+	"IsRobotAtWorkArea":			{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "once"},
+
+	# --- People Search doelen ---
+	"CheckingNearbyVisitors":	   {"keepoutfilter_on": "True",  "drive_action": "peoplesearch", "message_frequency": "always"},
+	"DriveWorkArea":				{"keepoutfilter_on": "True",  "drive_action": "peoplesearch", "message_frequency": "always"},
+	"DriveQuizLocation":			{"keepoutfilter_on": "True",  "drive_action": "peoplesearch", "message_frequency": "always"},
+	
+	# --- Default ---
+	"Default":					  {"keepoutfilter_on": "none",  "drive_action": "estop", "message_frequency": "always"},
+}
 
 class DriveToCoord(Node):
 	def __init__(self):
@@ -24,9 +52,13 @@ class DriveToCoord(Node):
 		self.currentgoal = None
 		self._goal_handle = None
 		self.needs_action = False
+		
+		self.keepoutfilter_state = None
+
+		self.currentgoal_timestamp = None
 
 		# --- CALLBACK GROUPS ---
-		# Twee aparte groepen: één voor inkomende data, één voor de verwerkings-loop
+		# drie aparte groepen: één voor inkomende data, één voor de verwerkings-loop, en één voor de callbacks van de nav
 		self.sub_cb_group = MutuallyExclusiveCallbackGroup()
 		self.timer_cb_group = MutuallyExclusiveCallbackGroup()
 		self.nav_cb_group = MutuallyExclusiveCallbackGroup()
@@ -51,7 +83,7 @@ class DriveToCoord(Node):
 			PoseStamped, '/btDriveCoord', self.btDriveCoord_callback, 1, 
 			callback_group=self.sub_cb_group
 		)
-		self.BTnode_sub = self.create_subscription(
+		self.peoplesearchCoord_sub = self.create_subscription(
 			PoseStamped, '/peoplesearchcoord', self.peoplesearchcoord_callback, 1, 
 			callback_group=self.sub_cb_group
 		)
@@ -59,7 +91,7 @@ class DriveToCoord(Node):
 		# --- ROS TIMER (Vervangt de handmatige thread + sleep) ---
 		# Draait exact 4 keer per seconde (0.25s interval)
 		self.timer = self.create_timer(
-			0.25, self.control_loop, 
+			0.5, self.control_loop, 
 			callback_group=self.timer_cb_group
 		)
 
@@ -85,7 +117,6 @@ class DriveToCoord(Node):
 	def peoplesearchcoord_callback(self, msg):
 		with self.lock:
 			self.last_peoplesearchcoord = msg
-			self.needs_action = True
 
 	# --- 4 HZ CONTROL LOOP (Timer_cb_group) ---
 
@@ -95,41 +126,41 @@ class DriveToCoord(Node):
 			if self.needs_action:
 				self.actiondistribute()
 				self.needs_action = False
-			
-			elif self.last_BehaviorTreeNode not in [
-				"IsRobotAtQuiz", "IsRobotAtWorkArea",
-				"CheckingNearbyVisitors", "DriveWorkArea", "DriveQuizLocation",
-				"ManualDriving",
-				None
-			]:
-				self.emergencystop()
 
 	# --- LOGICA & ACTIES ---
 
 	def actiondistribute(self):
 		# Aangeroepen vanuit de control_loop, de lock is al actief.
 		
-		if self.last_BehaviorTreeNode in ["DriveToChargingStation","StatusDriveToChargingDock","IsRobotCharging","IsBatteryFull","BatteryCharged", "RobotWaitInChargingStation", "StopRobotCharging", "ManualDriving", "MDForceCharging" ]:
-			self.keepout_filter(False)
-		else:
+		currentnode = behavior_tree_nodes.get(self.last_BehaviorTreeNode)
+		if currentnode is None: currentnode = behavior_tree_nodes["Default"]
+		
+		if currentnode["keepoutfilter_on"] == "True": 
 			self.keepout_filter(True)
-
-		if self.last_BehaviorTreeNode in ["IsRobotAtQuiz", "IsRobotAtWorkArea"]:
-			self.send_goal("behaviortree", self.last_btDriveCoord)
-
-		elif self.last_BehaviorTreeNode in ["CheckingNearbyVisitors", "DriveWorkArea", "DriveQuizLocation"]:
-			self.send_goal("peoplesearch", self.last_peoplesearchcoord)
-
-		elif self.last_BehaviorTreeNode in ["DriveToChargingStation","StatusDriveToChargingDock","IsRobotCharging","IsBatteryFull","BatteryCharged", "RobotWaitInChargingStation", "StopRobotCharging", "ManualDriving", "MDForceCharging"]:
-			return
+		elif currentnode["keepoutfilter_on"] == "False": 
+			self.keepout_filter(False)
 			
-		else:
+		if currentnode["drive_action"] == "estop":
 			self.emergencystop()
+			self.cancel_current_goal()
+		elif currentnode["drive_action"] == "release":
+			self.cancel_current_goal()
+		elif currentnode["drive_action"] == "behaviortree":
+			self.send_goal("BehaviorTree", self.last_btDriveCoord)
+		elif currentnode["drive_action"] == "peoplesearch":
+			self.send_goal("PeopleSearch", self.last_peoplesearchcoord)
+			
+		if currentnode["message_frequency"] == "always":
+			self.needs_action = True
+		elif currentnode["message_frequency"] == "once":
+			self.needs_action = False
 
 	def keepout_filter(self, state):
-		msg = Bool()
-		msg.data = state
-		self.keepout_filter_pub.publish(msg)
+		if self.keepoutfilter_state is not state:
+			self.keepoutfilter_state = state
+			msg = Bool()
+			msg.data = state
+			self.keepout_filter_pub.publish(msg)
 	
 	def emergencystop(self):
 		# Robot laten stoppen door 0 te sturen op /estop_cmd_vel
@@ -137,6 +168,7 @@ class DriveToCoord(Node):
 		stop_msg = Twist()
 		self.estop_cmd_vel_pub.publish(stop_msg)
 	
+	def cancel_current_goal(self):
 		# Goal proberen te cancelen
 		if self._goal_handle is not None:
 			self.get_logger().info("Bezig met annuleren van huidige goal...")
@@ -152,6 +184,12 @@ class DriveToCoord(Node):
 			self.get_logger().warn(msg)
 			self.publish_status(12, msg)
 			return
+		
+        # Stuur geen goal als er al een actief is met dezelfde timestamp
+		if self.currentgoal_timestamp == coordinate.header.stamp:
+			self.get_logger().info("Zelfde coördinaat en timestamp als huidige goal, geen nieuwe goal verzonden.")
+			return
+		self.currentgoal_timestamp = coordinate.header.stamp
 		
 		self.currentgoal = NavigateToPose.Goal()
 		self.currentgoal.pose = coordinate
@@ -200,7 +238,6 @@ class DriveToCoord(Node):
 		self.status_pub.publish(msg)
 		self.get_logger().info(f"[STATUS] {text}")
 
-
 def main(args=None):
 	rclpy.init(args=args)
 	node = DriveToCoord()
@@ -216,7 +253,9 @@ def main(args=None):
 		node.destroy_node()
 		rclpy.shutdown()
 
-
 if __name__ == '__main__':
 	main()
+
+
+
 

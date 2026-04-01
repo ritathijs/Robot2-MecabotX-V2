@@ -2,7 +2,7 @@ from setuptools import setup
 import os
 from glob import glob
 
-package_name = 'wheeltec_roboto_launch'
+package_name = 'robotoo_launch'
 
 setup(
     name=package_name,
@@ -18,8 +18,7 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='wheeltec',
-    maintainer_email='rita.thijs@kuleuven.be',
+    maintainer_email='ebbe.vervoort@kuleuven.be',
     description='Launch files for Wheeltec robot stack',
-    license='TODO: License declaration',
+    license='MIT',
 )
