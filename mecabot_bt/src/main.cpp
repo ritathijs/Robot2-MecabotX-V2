@@ -12,6 +12,7 @@
 #include <fstream>
 #include <vector>
 
+
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 using namespace std::chrono_literals;
 
@@ -187,8 +188,10 @@ public:
     {
         node_ = rclcpp::Node::make_shared("bt_BatteryOk_node");
 
+        rclcpp::QoS qos(1);
+        qos.reliable();
         sub_ = node_->create_subscription<std_msgs::msg::String>(
-            "/auto_recharge_event", 10,
+            "/auto_recharge_event", qos,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
                 if(msg->data.size() < 2){
@@ -441,6 +444,8 @@ public:
     {
         node_ = rclcpp::Node::make_shared("btInWorkingZone");
         pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
+        rpi_pub_ = node_->create_publisher<std_msgs::msg::String>("/rpitopic", 10);
+
     }
 
     static BT::PortsList providedPorts()
@@ -493,6 +498,7 @@ public:
         }
 
         std_msgs::msg::String bt_msg;
+        std_msgs::msg::String rpi_msg;
 
         // 3. Afhandeling op basis van schema
         if (!is_working_time)
@@ -514,6 +520,10 @@ public:
         bt_msg.data = "CheckInWorkingZone-WORKING";
         pub_->publish(bt_msg);
 
+        rpi_msg.data = "RobotExplore"; // Scherm triggeren
+        rpi_pub_->publish(rpi_msg);
+
+
         // 4. Check of de fysieke locatie ook klopt
         std::string location;
         if (!getInput("robotLocation", location))
@@ -533,6 +543,7 @@ public:
 private:
     rclcpp::Node::SharedPtr node_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr rpi_pub_;
 };
 
 class InChargingStation : public BT::SyncActionNode
@@ -586,9 +597,11 @@ public:
           success_received_(false), timeout_(5.0)
     {
         node_ = rclcpp::Node::make_shared("btDriveToChargingStation");
+        rclcpp::QoS qos(1);
+        qos.reliable();
 
         sub_ = node_->create_subscription<std_msgs::msg::String>(
-            "/auto_recharge_event", 10,
+            "/auto_recharge_event", qos,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
                 std::cout << "\n[CALLBACK] Nieuw bericht ontvangen: " << msg->data << std::endl;
@@ -933,57 +946,57 @@ private:
 
 
 
-class CheckMainBTErrorState : public BT::SyncActionNode
-{
-public:
-    CheckMainBTErrorState(const std::string &name, const BT::NodeConfiguration &config)
-        : BT::SyncActionNode(name, config)
-    {
-        node_ = rclcpp::Node::make_shared("btCheckMainBTErrorState");
+// class CheckMainBTErrorState : public BT::SyncActionNode
+// {
+// public:
+//     CheckMainBTErrorState(const std::string &name, const BT::NodeConfiguration &config)
+//         : BT::SyncActionNode(name, config)
+//     {
+//         node_ = rclcpp::Node::make_shared("btCheckMainBTErrorState");
 
-        // Publisher voor BT-status zoals bij andere nodes
-        pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
-    }
+//         // Publisher voor BT-status zoals bij andere nodes
+//         pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
+//     }
 
-    // BlackBoard input-port
-    static BT::PortsList providedPorts()
-    {
-        return {
-            BT::InputPort<bool>("stop_flag")  // lees de flag van MainBTStopDrive
-        };
-    }
+//     // BlackBoard input-port
+//     static BT::PortsList providedPorts()
+//     {
+//         return {
+//             BT::InputPort<bool>("stop_flag")  // lees de flag van MainBTStopDrive
+//         };
+//     }
 
-    BT::NodeStatus tick() override
-    {
-        // Publiceer node-status
-        std_msgs::msg::String msg;
-        msg.data = "CheckMainBTErrorState";
-        pub_->publish(msg);
+//     BT::NodeStatus tick() override
+//     {
+//         // Publiceer node-status
+//         std_msgs::msg::String msg;
+//         msg.data = "CheckMainBTErrorState";
+//         pub_->publish(msg);
 
-        // Lees de blackboard-flag
-        bool stop_flag = false;
-        if (!getInput("stop_flag", stop_flag))
-        {
-            std::cout << "[CheckMainBTErrorState] stop_flag niet gevonden op blackboard, default FALSE" << std::endl;
-            stop_flag = false;
-        }
+//         // Lees de blackboard-flag
+//         bool stop_flag = false;
+//         if (!getInput("stop_flag", stop_flag))
+//         {
+//             std::cout << "[CheckMainBTErrorState] stop_flag niet gevonden op blackboard, default FALSE" << std::endl;
+//             stop_flag = false;
+//         }
 
-        if (stop_flag)
-        {
-            std::cout << "[CheckMainBTErrorState] stop_flag TRUE -> FAILURE" << std::endl;
-            return BT::NodeStatus::FAILURE;
-        }
-        else
-        {
-            std::cout << "[CheckMainBTErrorState] stop_flag FALSE -> SUCCESS" << std::endl;
-            return BT::NodeStatus::SUCCESS;
-        }
-    }
+//         if (stop_flag)
+//         {
+//             std::cout << "[CheckMainBTErrorState] stop_flag TRUE -> FAILURE" << std::endl;
+//             return BT::NodeStatus::FAILURE;
+//         }
+//         else
+//         {
+//             std::cout << "[CheckMainBTErrorState] stop_flag FALSE -> SUCCESS" << std::endl;
+//             return BT::NodeStatus::SUCCESS;
+//         }
+//     }
 
-private:
-    rclcpp::Node::SharedPtr node_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
-};
+// private:
+//     rclcpp::Node::SharedPtr node_;
+//     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+// };
 
 
 
@@ -997,9 +1010,10 @@ public:
           status_(""), timeout_(5.0)
     {
         node_ = rclcpp::Node::make_shared("btStatusDriveToChargingDock");
-
+        rclcpp::QoS qos(1);
+        qos.reliable();
         sub_ = node_->create_subscription<std_msgs::msg::String>(
-            "/auto_recharge_event", 10,
+            "/auto_recharge_event", qos,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
                 if(msg->data.size() < 2) return;
@@ -1105,9 +1119,10 @@ public:
     {
         node_ = rclcpp::Node::make_shared("btIsRobotCharging");
 
-
+        rclcpp::QoS qos(1);
+        qos.reliable();
         sub_ = node_->create_subscription<std_msgs::msg::String>(
-            "/auto_recharge_event", 1,
+            "/auto_recharge_event", qos,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
                 int msg_id = msg->data[0] - '0';
@@ -1210,10 +1225,11 @@ public:
         : BT::StatefulActionNode(name, config)
     {
         node_ = rclcpp::Node::make_shared("btBatteryFull");
-
+        rclcpp::QoS qos(1);
+        qos.reliable();
         // Subscriber
         sub_ = node_->create_subscription<std_msgs::msg::String>(
-            "/auto_recharge_event", 1,
+            "/auto_recharge_event", qos,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
                 int msg_id = msg->data[0] - '0';
@@ -1312,14 +1328,13 @@ public:
 
         // Publisher (zoals de andere nodes)
         pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
+        rclcpp::QoS qos(1);
+        qos.reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE);
+        qos.durability(RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL);
 
-        // Subscriber naar FollowMeTopic
         sub_ = node_->create_subscription<std_msgs::msg::Float32>(
-            "/target_distance", 1,
-            [this](std_msgs::msg::Float32::SharedPtr msg)
-            {
-                latest_value_ = msg->data;
-            });
+            "/target_distance", qos,
+            [this](std_msgs::msg::Float32::SharedPtr msg) { latest_value_ = msg->data; });
     }
 
     static BT::PortsList providedPorts()
@@ -1345,7 +1360,7 @@ public:
         rclcpp::spin_some(node_);
         std::cout << "[CheckingNearbyVisitors] Measured distance: " << latest_value_ << std::endl;
 
-        if (latest_value_ <= 3.5)
+        if (latest_value_ <= 1.5) 
         {
             std::cout << "[CheckingNearbyVisitors] STOP BIJ PERSOON -> SUCCESS" << std::endl;
             return BT::NodeStatus::SUCCESS;
@@ -1423,9 +1438,11 @@ public:
         msg_bt_.data = "ArrivedAtVisitors";
         pub_bt_->publish(msg_bt_);
 
+        /*/ FEEDBACK TABLOO => ROBOTGOTOVISITOS EN ARRIVEDATVISITORS MOETEN EEN WORDEN
         std_msgs::msg::String msg_quiz_;
         msg_quiz_.data = "RobotArrivedAtVisitors";
         pub_quiz_->publish(msg_quiz_);
+        /*/
 
         std::cout << "[ArrivedAtVisitors] START (timeout=" << timeout_ << "s)" << std::endl;
         return BT::NodeStatus::RUNNING;
@@ -1665,7 +1682,9 @@ public:
     {
         return {
             BT::InputPort<double>("timeout"),
-            BT::InputPort<std::string>("sent_timestamp")  // Timestamp uit blackboard
+            BT::InputPort<std::string>("sent_timestamp"),  // Timestamp uit blackboard
+            BT::OutputPort<bool>("drive_failed")
+              
         };
     }
 
@@ -1703,6 +1722,8 @@ public:
         if (received_success_)
         {
             std::cout << "[IsRobotAtQuiz] Successtatus ontvangen -> SUCCESS" << std::endl;
+            setOutput("drive_failed", false);
+
             return BT::NodeStatus::SUCCESS;
         }
 
@@ -1884,7 +1905,7 @@ private:
         bool buttonStop = false;
         if (!getInput("buttonStop", buttonStop))
         {
-            std::cerr << "[RobotWaitInChargingStation] Kan buttonStop niet lezen, default false" << std::endl;
+            //std::cerr << "[RobotWaitInChargingStation] Kan buttonStop niet lezen, default false" << std::endl;
         }
 
         if (buttonStop)
@@ -1927,7 +1948,7 @@ private:
             std::cout << "[RobotWaitInChargingStation] Werktijd begonnen (" << current_time_val << ") -> SUCCESS" << std::endl;
             return BT::NodeStatus::SUCCESS;
         }
-        std::cout << "[RobotWaitInChargingStation] Nog geen werktijd "<< std::endl;
+        //std::cout << "[RobotWaitInChargingStation] Nog geen werktijd "<< std::endl;
 
         // Nog geen werktijd, blijf RUNNING
         return BT::NodeStatus::RUNNING;
@@ -2071,7 +2092,7 @@ private:
 };
 
 
-
+/*/
 class MDChargeLocation: public BT::SyncActionNode
 {
 public:
@@ -2148,6 +2169,8 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
     rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pub_pose_;
 };
+
+/*/
 
 
 class BatteryCharged : public BT::StatefulActionNode
@@ -2292,12 +2315,14 @@ public:
     {
         return {
             BT::InputPort<double>("timeout"),
-            BT::InputPort<std::string>("workarea_timestamp")
+            BT::InputPort<std::string>("workarea_timestamp"),
+            BT::OutputPort<bool>("drive_failed")
         };
     }
 
     BT::NodeStatus onStart() override
     {
+
         received_success_ = false;
         received_failure_ = false;
         start_time_ = std::chrono::steady_clock::now();
@@ -2330,6 +2355,7 @@ public:
         if (received_success_)
         {
             std::cout << "[IsRobotAtWorkArea] Successtatus ontvangen -> SUCCESS" << std::endl;
+            setOutput("drive_failed", false);
             return BT::NodeStatus::SUCCESS;
         }
 
@@ -2366,7 +2392,7 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
 };
 
-
+/*/
 class MDTurnAround : public BT::StatefulActionNode
 {
 public:
@@ -2459,7 +2485,7 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr pub_cmd_;
 }; 
 
-
+/*/
 
 class WaitQuizToEnd : public BT::StatefulActionNode
 {
@@ -2552,7 +2578,6 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
 };
-
 class MainBTStopDrive : public BT::StatefulActionNode
 {
 public:
@@ -2568,7 +2593,8 @@ public:
     static BT::PortsList providedPorts()
     {
         return {
-            BT::OutputPort<bool>("stop_flag")  // BlackBoard output
+            BT::InputPort<bool>("drive_failed"),  // BlackBoard input
+            BT::OutputPort<bool>("stop_flag")     // BlackBoard output (optioneel)
         };
     }
 
@@ -2579,17 +2605,32 @@ public:
         msg.data = "MainBTStopDrive";
         pub_->publish(msg);
 
-        // Zet de blackboard-flag op true
+        // Eventueel stop_flag zetten op true
         setOutput("stop_flag", true);
 
-        std::cout << "[MainBTStopDrive] Node reached, stop_flag set to TRUE, RUNNING" << std::endl;
+        std::cout << "[MainBTStopDrive] Node gestart, check drive_failed op blackboard" << std::endl;
         return BT::NodeStatus::RUNNING;
     }
 
     BT::NodeStatus onRunning() override
     {
-        // Blijft gewoon RUNNING
-        return BT::NodeStatus::RUNNING;
+        bool drive_failed = false;
+        if (!getInput<bool>("drive_failed", drive_failed))
+        {
+            std::cout << "[MainBTStopDrive] Geen drive_failed waarde gevonden, ga van FALSE uit" << std::endl;
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        if (drive_failed)
+        {
+            std::cout << "[MainBTStopDrive] drive_failed = TRUE, blijf RUNNING" << std::endl;
+            return BT::NodeStatus::RUNNING;
+        }
+        else
+        {
+            std::cout << "[MainBTStopDrive] drive_failed = FALSE, returning SUCCESS" << std::endl;
+            return BT::NodeStatus::SUCCESS;
+        }
     }
 
     void onHalted() override
@@ -2601,6 +2642,38 @@ private:
     rclcpp::Node::SharedPtr node_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
 };
+
+
+class MainBTSetErrorFlag : public BT::SyncActionNode
+{
+public:
+    MainBTSetErrorFlag(const std::string &name, const BT::NodeConfiguration &config)
+        : BT::SyncActionNode(name, config)
+    {
+        node_ = rclcpp::Node::make_shared("btMainBTSetErrorFlag");
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {
+            BT::OutputPort<bool>("drive_failed")  // BlackBoard output
+        };
+    }
+
+    BT::NodeStatus tick() override
+    {
+
+        setOutput("drive_failed", true);
+
+        std::cout << "[MainBTSetErrorFlag] error_flag set to TRUE -> SUCCESS" << std::endl;
+
+        return BT::NodeStatus::SUCCESS;
+    }
+
+private:
+    rclcpp::Node::SharedPtr node_;
+};
+
 
 class StartDrivingToPeople : public BT::StatefulActionNode
 {
@@ -2634,7 +2707,7 @@ public:
 
 
         std_msgs::msg::String quiz_msg;
-        quiz_msg.data = "RobotGoToVisitors";
+        quiz_msg.data = "RobotArrivedAtVisitors";
         pub_quiz_->publish(quiz_msg);
 
         std::cout << "[StartDrivingToPeople] Started driving to people, timeout=" << timeout_ << "s" << std::endl;
@@ -2945,7 +3018,7 @@ private:
 
 
 
-
+/*/
 class ManualDriving : public BT::StatefulActionNode
 {
 public:
@@ -3016,7 +3089,7 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
     bool stop_received_;
 };
-
+/*/
 
 class CheckAdminPanel : public BT::StatefulActionNode
 {
@@ -3122,21 +3195,23 @@ int main(int argc, char **argv)
 
     factory.registerNodeType<CheckAdminCondition>("CheckAdminCondition");
     factory.registerNodeType<CheckButtonState>("CheckButtonState");
-    factory.registerNodeType<MDChargeLocation>("MDChargeLocation");
-    factory.registerNodeType<MDChargeLocation>("MDTurnAround");
+    //factory.registerNodeType<MDChargeLocation>("MDChargeLocation");
+    //factory.registerNodeType<MDChargeLocation>("MDTurnAround");
 
     factory.registerNodeType<ConnectionLost >("ConnectionLost");
 
     factory.registerNodeType<StopRobotCharging>("StopRobotCharging");
     factory.registerNodeType<MainBTStopDrive>("MainBTStopDrive");
+    factory.registerNodeType<MainBTSetErrorFlag>("MainBTSetErrorFlag");
+
 
     factory.registerNodeType<ForceSuccess>("MainFallbackForceSuccess");
     factory.registerNodeType<ForceSuccess>("BatteryForceSuccess");
 
-    factory.registerNodeType<ManualDriving>("ManualDriving");
+    //factory.registerNodeType<ManualDriving>("ManualDriving");
 
 
-    factory.registerNodeType<CheckMainBTErrorState>("CheckMainBTErrorState");
+    //factory.registerNodeType<CheckMainBTErrorState>("CheckMainBTErrorState");
 
     factory.registerNodeType<LoopSequence>("LoopSequence");
     factory.registerNodeType<LoopAdminPanel>("LoopAdminPanel");

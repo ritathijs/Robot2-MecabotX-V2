@@ -11,6 +11,8 @@ from nav2_simple_commander.robot_navigator import BasicNavigator,TaskResult
 from rclpy.duration import Duration
 from std_msgs.msg import String  
 
+from rclpy.qos import QoSProfile, ReliabilityPolicy
+
 # 用到的变量定义
 from std_msgs.msg import Bool 
 from std_msgs.msg import Int8 
@@ -120,14 +122,34 @@ class AutoRecharger(Node):
 
         self.charge_session_id = 0 # ID VOOR BERICHTEN VAN EN NAAR BT
 
-        self.Event_pub = self.create_publisher(String, '/auto_recharge_event', 10)
+        qos = QoSProfile(depth=1)
+        qos.reliability = ReliabilityPolicy.RELIABLE
 
+        self.Event_pub = self.create_publisher(
+            String,
+            '/auto_recharge_event',
+            qos
+        )
+
+        # Verbinding met positie-reset-code
+        self.Reset_Position_pub = self.create_publisher(
+            String,
+            '/resetPositionChargeStation',
+            qos
+        )
         # Verbinding met BT
         self.force_charge_sub = self.create_subscription(
             String,
             '/force_charge',
             self.force_charge_callback,
             10
+        )
+
+        self.charge_xstop_sub = self.create_subscription(
+                    String,
+                    '/charge_XSTOP',
+                    self.charge_xstop_callback,
+                    1
         )
 
         self.force_charge_active = False  # voorkomt dubbele START zonder STOP
@@ -230,10 +252,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
         event_msg = String()
         event_msg.data = msg
-
-        for i in range(3):
-            self.Event_pub.publish(event_msg)
-            time.sleep(0.05)
+        self.Event_pub.publish(event_msg)
 
         print_and_fixRetract(msg)
 
@@ -308,7 +327,27 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             
             time.sleep(0.5)
 
+    def charge_xstop_callback(self, msg):
+            command = msg.data.strip().upper()
 
+            if command == "XSTOP":
+                print_and_fixRetract(YELLOW + f"Ontvangen op /charge_XSTOP: XSTOP (sessie {self.charge_session_id})." + RESET)
+                
+                # Reset de actieve vlag
+                self.force_charge_active = False
+                
+                if self.robot['Charging'] == 1:
+                    reset_msg = String()
+                    reset_msg.data = "RESET" 
+                    self.Reset_Position_pub.publish(reset_msg)
+
+                    print_and_fixRetract(GREEN + "Robot laadt: Volledige stop + vooruit rijden." + RESET)
+                    self.Stop_Charge(drive_forward=True)
+                else:
+                    print_and_fixRetract(YELLOW + "Robot laadt niet: Stop zonder vooruit rijden." + RESET)
+                    self.Stop_Charge(drive_forward=False)
+
+                    
     def force_charge_callback(self, msg):
         command = msg.data.strip().upper()
 
@@ -317,7 +356,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             session_id = int(command[0])
             command_body = command[1:]
 
-            # Eerste START: als nog geen force_charge actief, accepteer het sessienummer
+            # Eerste START: als nog geen force_charge actief, accepteer het sessienummer (ook na een XSTOP reset)
             if command_body == "START" and not self.force_charge_active:
                 print_and_fixRetract(YELLOW + f"Eerste START ontvangen, sessie {session_id} wordt actief." + RESET)
                 self.charge_session_id = session_id
@@ -352,8 +391,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             self.charge_session_id += 1
             if self.charge_session_id > 9:
                 self.charge_session_id = 0
-            self.Stop_Charge()
-
+            self.Stop_Charge(drive_forward=True)
 
     def Pub_Charger_Position(self):
         '''使用最新充电桩位置发布导航目标点话题'''
@@ -533,9 +571,9 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
     def RED_Flag_callback(self, topic):
 
  
-        print_and_fixRetract(
-            CYAN + f"[DEBUG] RED callback | topic={topic.data} | prev_RED={self.robot['RED']} | start_turn={self.start_turn} | find_red={self.find_redsignal}" + RESET
-        )
+        # print_and_fixRetract(
+        #     CYAN + f"[DEBUG] RED callback | topic={topic.data} | prev_RED={self.robot['RED']} | start_turn={self.start_turn} | find_red={self.find_redsignal}" + RESET
+        # )
 
         self.red_count = topic.data
         '''更新是否寻找到红外信号(充电桩)状态'''
@@ -559,9 +597,9 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         if self.start_turn==1:
 
       
-            print_and_fixRetract(
-                CYAN + f"[DEBUG] TURNING | RED={self.robot['RED']} | find_red={self.find_redsignal}" + RESET
-            )
+            # print_and_fixRetract(
+            #     CYAN + f"[DEBUG] TURNING | RED={self.robot['RED']} | find_red={self.find_redsignal}" + RESET
+            # )
 
 
             if self.robot['RED']==1:
@@ -674,12 +712,12 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             self.Cmd_vel_pub.publish(stop)
             time.sleep(0.05)
 
-    def Stop_Charge(self):
+    def Stop_Charge(self, drive_forward=True):
         #如果在导航回充模式下，关闭导航
 
-        print_and_fixRetract(
-            CYAN + f"[DEBUG] STOP CHARGE BEFORE RESET | start_turn={self.start_turn} | find_red={self.find_redsignal} | RED={self.robot['RED']}" + RESET
-        )
+        # print_and_fixRetract(
+        #     CYAN + f"[DEBUG] STOP CHARGE BEFORE RESET | start_turn={self.start_turn} | find_red={self.find_redsignal} | RED={self.robot['RED']}" + RESET
+        # )
             
         self.Pub_NavGoal_Cancel() 
 
@@ -688,22 +726,22 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
         self.lost_power_once=1
         
-        print_and_fixRetract(
-                YELLOW + "Tijd voor naar voor te rijden om terug te starten aan normale gedrag" + RESET
-            )
-        move = Twist()
-        move.linear.x = 0.20
-        self.Cmd_vel_pub.publish(move)
-        time.sleep(3.0)
+        if drive_forward:
+            print_and_fixRetract(
+                    YELLOW + "Tijd voor naar voor te rijden om terug te starten aan normale gedrag" + RESET
+                )
+            move = Twist()
+            move.linear.x = 0.20
+            self.Cmd_vel_pub.publish(move)
+            time.sleep(3.0)
+            
+            # Stop weer na het vooruit rijden
+            move.linear.x = 0.0
+            self.Cmd_vel_pub.publish(move)
+        else:
+            print_and_fixRetract(YELLOW + "Gevraagd om niet naar voren te rijden." + RESET)
 
-        self.start_turn = 0
-        self.find_redsignal = 0
-        self.nav_end_z = 0
-        self.power_lost_count = 0
 
-        move.linear.x = 0.0
-        self.Cmd_vel_pub.publish(move)
-        
         #切换为停止回充模式
         self.chargeflag=0
         self.Pub_Recharger_Flag()
@@ -713,17 +751,15 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         )
 
 
-        print_and_fixRetract(YELLOW + "Systeem gaat 10 seconden in rust voor herstart..." + RESET)
+        print_and_fixRetract(YELLOW + "Systeem gaat 5 seconden in rust voor herstart..." + RESET)
         self.must_reset = True
                 
 
-
-
     def retry_docking_if_not_charging(self):
 
-        print_and_fixRetract(
-            CYAN + f"[DEBUG] RETRY DOCK | RED={self.robot['RED']} | start_turn={self.start_turn}" + RESET
-        )
+        # print_and_fixRetract(
+        #     CYAN + f"[DEBUG] RETRY DOCK | RED={self.robot['RED']} | start_turn={self.start_turn}" + RESET
+        # )
         # kleine wachttijd na hard stop
         print_and_fixRetract(
                 YELLOW + "Time delay voor retry docking ingezet (verwacht stilstaan)" + RESET
@@ -758,9 +794,9 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
 
 
-        print_and_fixRetract(
-            CYAN + f"[DEBUG] start_forced_charging | red_count={self.red_count} | chargeflag={self.chargeflag}" + RESET
-        )
+        # print_and_fixRetract(
+        #     CYAN + f"[DEBUG] start_forced_charging | red_count={self.red_count} | chargeflag={self.chargeflag}" + RESET
+        # )
         if self.red_count >= 3:
             self.Pub_NavGoal_Cancel()
             self.chargeflag = 1
@@ -855,9 +891,9 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                     res = self.nav_controller.getResult()
                     if res==TaskResult.SUCCEEDED:
 
-                        print_and_fixRetract(
-                            CYAN + f"[DEBUG] NAV SUCCEEDED | RED={self.robot['RED']} | start_turn={self.start_turn}" + RESET
-                        )
+                        # print_and_fixRetract(
+                        #     CYAN + f"[DEBUG] NAV SUCCEEDED | RED={self.robot['RED']} | start_turn={self.start_turn}" + RESET
+                        # )
                         # BT rijden naar dock succesvol => nu nog docken zelf
                         self.publish_event("DRIVE-TO-DOCK-SUCCESS")
                         print("已到达目标点.")  # NL: HET EINDPUNT IS BEREIKT
@@ -954,9 +990,9 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
          # 自转寻找红外执行判断
         if self.find_redsignal>=3:
 
-            print_and_fixRetract(
-                GREEN + f"[DEBUG] DOCKING TRIGGERED | find_red={self.find_redsignal}" + RESET
-            )
+            # print_and_fixRetract(
+            #     GREEN + f"[DEBUG] DOCKING TRIGGERED | find_red={self.find_redsignal}" + RESET
+            # )
             self.find_redsignal = 0 
             self.start_turn=0
             print_and_fixRetract(GREEN+'已通过自转发现红外信号,开始对接充电.(Infrared signals have been detected by rotation. Docking and charging has begun.)'+RESET)
@@ -987,17 +1023,45 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
         self.last_charge_complete=self.charge_complete
 
-    
+import threading
+
+def wait_for_nav2_simple(navigator, max_retries=5):
+    """
+    Eenvoudigere check zonder threads om 'generator already executing' te voorkomen.
+    We laten de navigator zelf wachten, maar doen dit binnen de hoofd-executor.
+    """
+    for attempt in range(1, max_retries + 1):
+        print_and_fixRetract(YELLOW + f"[NAV2] Poging {attempt}/{max_retries} om te verbinden..." + RESET)
+        
+        # We gebruiken een try-except om te voorkomen dat een crash de hele loop stopt
+        try:
+            # We geven de navigator een kortere interne timeout als dat kan, 
+            # maar standaard wacht hij tot de services verschijnen.
+            navigator.waitUntilNav2Active()
+            print_and_fixRetract(GREEN + "[NAV2] Nav2 is succesvol geactiveerd!" + RESET)
+            return True
+        except Exception as e:
+            print_and_fixRetract(RED + f"[NAV2] Poging {attempt} mislukt: {e}" + RESET)
+        
+        time.sleep(2)
+    return False
+
 def main():
     rclpy.init()
     try:
-        # De 'Outer Loop': Deze zorgt voor de volledige herstarts
         while rclpy.ok():
-            # 1. Maak een verse instantie van de node
             autorecharger = AutoRecharger() 
 
-            print_and_fixRetract("Wachten op Nav2 activatie voor deze sessie...")
-            autorecharger.nav_controller.waitUntilNav2Active()
+            # Gebruik de verbeterde activatie check
+            nav2_ok = wait_for_nav2_simple(autorecharger.nav_controller)
+
+            if not nav2_ok:
+                print_and_fixRetract(RED + "Nav2 blijft onbeschikbaar. Node wordt volledig vernietigd voor schone herstart..." + RESET)
+                autorecharger.destroy_node()
+                time.sleep(5)
+                continue
+
+
             print_and_fixRetract(autorecharger.tips)
             
             # Initialiseer chassis instellingen
@@ -1055,8 +1119,8 @@ def main():
                 break
 
             # 5. De 10 seconden "echte" ruststand
-            print_and_fixRetract(BLUE + "Systeem is nu 10 seconden inactief..." + RESET)
-            time.sleep(10)
+            print_and_fixRetract(BLUE + "Systeem is nu 5 seconden inactief..." + RESET)
+            time.sleep(5)
             print_and_fixRetract(GREEN + "Herstarten..." + RESET)
 
     except Exception as e:

@@ -15,7 +15,7 @@ from sensor_msgs.msg import Image
 from turn_on_wheeltec_robot.msg import Position as PositionMsg
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Float32
-
+from rclpy.qos import DurabilityPolicy, ReliabilityPolicy
 
 class PeopleFollowerNode(Node):
     def __init__(self):
@@ -105,7 +105,12 @@ class PeopleFollowerNode(Node):
         # Relative coordinates (x,y,z) in camera frame as PointStamped
         # Distance-only topic as Float32 (meters)
         self.pub_rel_point = self.create_publisher(PoseStamped, '/peoplesearchcoord', QoSProfile(depth=10))
-        self.pub_distance  = self.create_publisher(Float32,      '/target_distance',  QoSProfile(depth=10))
+
+        qos = QoSProfile(depth=1)
+        qos.reliability = ReliabilityPolicy.RELIABLE
+        qos.durability  = DurabilityPolicy.TRANSIENT_LOCAL  # houdt laatste bericht beschikbaar
+
+        self.pub_distance = self.create_publisher(Float32, '/target_distance', qos)
         # ------------------------------------------------------------------
 
         # throttle-instellingen voor /peoplesearchcoord en /target_distance

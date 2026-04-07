@@ -2,7 +2,7 @@ import requests
 import time
 import signal
 import sys
-
+import threading
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
@@ -38,6 +38,7 @@ class QuizBTNode(Node):
         self.admin_publisher = self.create_publisher(String, 'admin', qos)
 
         self.connection_publisher = self.create_publisher(String, 'connection', qos)
+        self.manual_drive_control_publisher = self.create_publisher(String, 'ManualDriveControleLocation', qos)
 
         # ROS2 subscriber
         self.subscription = self.create_subscription(
@@ -62,15 +63,14 @@ class QuizBTNode(Node):
         self.sio.on('quiz-finished', self.on_quiz_finished)
         self.sio.on('quiz_inactive', self.on_quiz_inactive)
         self.sio.on('drive_to_quiz_location', self.on_drive_to_quiz_location)
-        self.sio.on('manual-drive-start', self.robot_manual_drive)
-        self.sio.on('manual-drive-stop', self.robot_stop_manual_drive)
+
         
         self.sio.on('admin-panel-open', self.on_admin_panel_open)
 
         self.sio.on('admin-panel-closed', self.on_admin_panel_closed)
 
 
-        self.sio.on('manual-drive-stop', self.robot_stop_manual_drive)
+
         self.sio.on('schedule-updated', self.on_schedule_updated)
         self.sio.on('start-button', self.on_start_button)
         self.sio.on('stop-button', self.on_stop_button)
@@ -156,6 +156,10 @@ class QuizBTNode(Node):
         self.last_drive_cmd_time = time.time()
         self.is_moving = True
 
+        if hasattr(self, 'admin_panel_open') and self.admin_panel_open:
+            self.manual_drive_since_admin_open = True
+
+
         msg = Twist()
 
         if direction == 'forward':
@@ -235,13 +239,6 @@ class QuizBTNode(Node):
         self.get_logger().info("Drive to quiz location")
         self.publish_quiz_message("drive_to_quiz_location")
 
-    def robot_manual_drive(self):
-        self.get_logger().info("Starting robot manual drive")
-        self.publish_admin_message("RobotManualDrive")
-
-    def robot_stop_manual_drive(self):
-        self.get_logger().info("Stopping robot manual drive")
-        self.publish_admin_message("RobotStopManualDrive")
 
     def on_schedule_updated(self):
         self.get_logger().info("Schedule update event ontvangen")
@@ -255,16 +252,37 @@ class QuizBTNode(Node):
         self.get_logger().info("STOPBUTTON ontvangen van quizserver")
         self.publish_quiz_message("STOPBUTTON")
 
+
     def on_admin_panel_open(self):
         self.get_logger().info("Admin Panel geopend")
+        self.admin_panel_open = True
+        self.manual_drive_since_admin_open = False
         self.publish_admin_message("ADMINPANELOPEN")
+
 
     def on_admin_panel_closed(self):
         self.get_logger().info("Admin Panel gesloten")
+        self.admin_panel_open = False
+
+        if self.manual_drive_since_admin_open:
+            self.get_logger().info("Manual drive tijdens admin panel gedetecteerd. Eerst controlelocatie sturen...")
+            msg = String()
+            msg.data = "MANUAL_DRIVE_CONTROL"
+            self.manual_drive_control_publisher.publish(msg)
+
+            # Gebruik thread om niet te blokkeren in ROS spin
+            threading.Thread(target=self._delayed_admin_closed_publish).start()
+        else:
+            self.publish_admin_message("ADMINPANELCLOSED")
+            self.fetch_schedule()
+
+    def _delayed_admin_closed_publish(self):
+        time.sleep(10)  # Wacht 10 seconden
         self.publish_admin_message("ADMINPANELCLOSED")
         self.fetch_schedule()
+        self.manual_drive_since_admin_open = False
 
-
+        
     # ---------------- ROS MESSAGES ----------------
     def rpi_callback(self, msg):
         self.get_logger().info(f'Received from RPi: {msg.data}')
