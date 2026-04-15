@@ -24,6 +24,9 @@ class QuizBTNode(Node):
 
         # ROS2 publisher
 
+        self.blocking = False
+        self._admin_timer = None
+
         # Manual drive 
         self.gui_cmd_vel_publisher = self.create_publisher(Twist, '/gui_cmd_vel', 1)
         self.last_drive_cmd_time = time.time()
@@ -142,6 +145,8 @@ class QuizBTNode(Node):
         self.sio.emit("battery-update", {"percentage": percentage})
 
 
+    def _is_blocking(self):
+        return self.blocking
 
     # ---------------- QUIZ PUBLISHER ----------------
     def publish_quiz_message(self, message):
@@ -188,6 +193,8 @@ class QuizBTNode(Node):
         self.gui_cmd_vel_publisher.publish(msg)
 
     def check_drive(self):
+        if self._is_blocking():
+            return
         if self.is_moving and (time.time() - self.last_drive_cmd_time > 0.3):
             self.get_logger().info("Manual drive stopped")
             
@@ -219,65 +226,112 @@ class QuizBTNode(Node):
 
     # ---------------- SOCKET EVENTS ----------------
     def on_connect(self):
+        if self._is_blocking():
+            return
         self.get_logger().info('Connected to server')
         self.publish_connection_message("CONNECT")   
         self.fetch_schedule()
 
     def on_disconnect(self):
+        if self._is_blocking():
+            return
         self.get_logger().info('Disconnected from server')
         self.publish_connection_message("DISCONNECTED")
 
     def on_quiz_finished(self):
+        if self._is_blocking():
+            return
         self.get_logger().info("Quiz finished")
         self.publish_quiz_message("quiz-finished")
 
     def on_quiz_inactive(self):
+        if self._is_blocking():
+            return
         self.get_logger().info("Quiz inactive")
         self.publish_quiz_message("quiz_inactive")
 
     def on_drive_to_quiz_location(self):
+        if self._is_blocking():
+            return
         self.get_logger().info("Drive to quiz location")
         self.publish_quiz_message("drive_to_quiz_location")
 
 
     def on_schedule_updated(self):
+        if self._is_blocking():
+            return
         self.get_logger().info("Schedule update event ontvangen")
         self.fetch_schedule()
 
     def on_start_button(self):
+        if self._is_blocking():
+            return
         self.get_logger().info("STARTBUTTON ontvangen van quizserver")
         self.publish_quiz_message("STARTBUTTON")
 
     def on_stop_button(self):
+        if self._is_blocking():
+            return
         self.get_logger().info("STOPBUTTON ontvangen van quizserver")
         self.publish_quiz_message("STOPBUTTON")
 
 
     def on_admin_panel_open(self):
+
+        if self._is_blocking():
+            return
+
+        if hasattr(self, 'admin_panel_open') and self.admin_panel_open:
+            self.get_logger().info("Admin panel was al open -> negeren")
+            return
         self.get_logger().info("Admin Panel geopend")
         self.admin_panel_open = True
         self.manual_drive_since_admin_open = False
         self.publish_admin_message("ADMINPANELOPEN")
 
-
     def on_admin_panel_closed(self):
+        if self._is_blocking():
+            return
+
         self.get_logger().info("Admin Panel gesloten")
         self.admin_panel_open = False
 
         if self.manual_drive_since_admin_open:
-            self.get_logger().info("Manual drive tijdens admin panel gedetecteerd. Eerst controlelocatie sturen...")
+            self.get_logger().info("Manual drive gedetecteerd -> 10s vertraging")
+
+            self.blocking = True
+
             msg = String()
             msg.data = "MANUAL_DRIVE_CONTROL"
             self.manual_drive_control_publisher.publish(msg)
 
-            # Gebruik thread om niet te blokkeren in ROS spin
-            threading.Thread(target=self._delayed_admin_closed_publish).start()
+            self._admin_timer = self.create_timer(10.0, self._finalize_admin_closed_wrapper)
+
         else:
+            self.get_logger().info("Geen manual drive gedaan : meteen ADMINPANELCLOSED")
+
             self.publish_admin_message("ADMINPANELCLOSED")
             self.fetch_schedule()
 
+    def _finalize_admin_closed_wrapper(self):
+
+        if self._admin_timer is not None:
+            self._admin_timer.cancel()
+            self._admin_timer = None
+
+        self._finalize_admin_closed()
+
+    def _finalize_admin_closed(self):
+        self.get_logger().info("Na vertraging adminpanelclosed")
+
+        self.publish_admin_message("ADMINPANELCLOSED")
+        self.fetch_schedule()
+
+        self.manual_drive_since_admin_open = False
+        self.blocking = False
+
     def _delayed_admin_closed_publish(self):
-        time.sleep(10)  # Wacht 10 seconden
+        time.sleep(10) 
         self.publish_admin_message("ADMINPANELCLOSED")
         self.fetch_schedule()
         self.manual_drive_since_admin_open = False
@@ -285,6 +339,8 @@ class QuizBTNode(Node):
         
     # ---------------- ROS MESSAGES ----------------
     def rpi_callback(self, msg):
+        if self._is_blocking():
+            return
         self.get_logger().info(f'Received from RPi: {msg.data}')
 
         if msg.data == "RobotExplore":
@@ -295,6 +351,8 @@ class QuizBTNode(Node):
             self.sio.emit("robot-arrived-at-visitors")
         elif msg.data == "robot-arrived-at-quiz-location":
             self.sio.emit("robot-arrived-at-quiz-location")
+        elif msg.data == "RobotError":
+            self.sio.emit("robot-error")
         elif msg.data == "RobotGoCharge":
             self.sio.emit("robot-go-charge")
         elif msg.data == "RobotCharging":

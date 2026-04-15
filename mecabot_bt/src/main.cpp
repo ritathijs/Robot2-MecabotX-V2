@@ -2578,6 +2578,7 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
 };
+
 class MainBTStopDrive : public BT::StatefulActionNode
 {
 public:
@@ -2588,7 +2589,8 @@ public:
 
         // Publisher voor BT-status zoals bij andere nodes
         pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
-    }
+
+        rpi_pub_ = node_->create_publisher<std_msgs::msg::String>("/rpitopic", 10);    }
 
     static BT::PortsList providedPorts()
     {
@@ -2604,6 +2606,11 @@ public:
         std_msgs::msg::String msg;
         msg.data = "MainBTStopDrive";
         pub_->publish(msg);
+
+            // RPI topic publish
+        std_msgs::msg::String rpi_msg;
+        rpi_msg.data = "RobotError";
+        rpi_pub_->publish(rpi_msg);
 
         // Eventueel stop_flag zetten op true
         setOutput("stop_flag", true);
@@ -2641,16 +2648,19 @@ public:
 private:
     rclcpp::Node::SharedPtr node_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr rpi_pub_;
 };
 
-
-class MainBTSetErrorFlag : public BT::SyncActionNode
+class MainBTSetErrorFlag : public BT::StatefulActionNode
 {
 public:
     MainBTSetErrorFlag(const std::string &name, const BT::NodeConfiguration &config)
-        : BT::SyncActionNode(name, config)
+        : BT::StatefulActionNode(name, config)
     {
         node_ = rclcpp::Node::make_shared("btMainBTSetErrorFlag");
+
+        // Publisher naar rpitopic
+        rpi_pub_ = node_->create_publisher<std_msgs::msg::String>("/rpitopic", 10);
     }
 
     static BT::PortsList providedPorts()
@@ -2660,20 +2670,50 @@ public:
         };
     }
 
-    BT::NodeStatus tick() override
+    BT::NodeStatus onStart() override
     {
-
+        // Zet blackboard flag
         setOutput("drive_failed", true);
 
-        std::cout << "[MainBTSetErrorFlag] error_flag set to TRUE -> SUCCESS" << std::endl;
+        // Publish naar RPI topic
+        std_msgs::msg::String msg;
+        msg.data = "RobotExplore";
+        rpi_pub_->publish(msg);
 
-        return BT::NodeStatus::SUCCESS;
+        // Start tijd registreren
+        start_time_ = std::chrono::steady_clock::now();
+
+        std::cout << "[MainBTSetErrorFlag] started -> publishing RobotExplore" << std::endl;
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    BT::NodeStatus onRunning() override
+    {
+        auto elapsed = std::chrono::steady_clock::now() - start_time_;
+        auto seconds = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
+
+        if (seconds >= 5)
+        {
+            std::cout << "[MainBTSetErrorFlag] 5 seconds done -> SUCCESS" << std::endl;
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        std::cout << "[MainBTSetErrorFlag] running... (" << seconds << "s)" << std::endl;
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override
+    {
+        std::cout << "[MainBTSetErrorFlag] HALTED" << std::endl;
     }
 
 private:
     rclcpp::Node::SharedPtr node_;
-};
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr rpi_pub_;
 
+    std::chrono::steady_clock::time_point start_time_;
+};
 
 class StartDrivingToPeople : public BT::StatefulActionNode
 {
@@ -2946,21 +2986,9 @@ public:
         msg.data = "CheckAdminCondition";
         pub_->publish(msg);
 
-        return BT::NodeStatus::RUNNING;
-    }
-
-    BT::NodeStatus onRunning() override
-    {
-        rclcpp::spin_some(node_);
-
-        setOutput("admin_done", false);
-
-        if (manual_drive_)
-        {
-            std::cout << "[CheckAdminCondition] Manual drive -> FAILURE" << std::endl;
-            return BT::NodeStatus::FAILURE;
-        }
-
+        // Als bat_status stop is, zit robot niet in laadstation (hij reed er naar toe of was dit zelfs niet van plan)
+        // Er wordt 1 stop bericht gestuurd naar autocharge (wat wordt genegeerd indien het niet nodig was)
+        // En de integer voor volgende keer is +=1 gegaan
         std::string bat_status;
         if (getInput("bat_admin_status", bat_status))
         {
@@ -2972,6 +3000,20 @@ public:
                 publishStopCommand();
             }
         }
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+
+
+    BT::NodeStatus onRunning() override
+    {
+        rclcpp::spin_some(node_);
+
+        setOutput("admin_done", false);
+
+
+
 
         // 🔹 Admin closed + 3 sec delay
         if (admin_closed_)

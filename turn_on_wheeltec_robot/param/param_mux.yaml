@@ -3,8 +3,13 @@ twist_mux:
     topics:
       gui:
         topic   : gui_cmd_vel
-        timeout : 0.5
+        timeout : 2.0
         priority: 255
+
+      chargestop:
+        topic   : charge_cmd_vel
+        timeout : 0.5
+        priority: 220  
       
       estop:
         topic   : estop_cmd_vel
@@ -20,3 +25,6 @@ twist_mux:
         topic   : nav_cmd_vel
         timeout : 0.5
         priority: 10  
+
+
+

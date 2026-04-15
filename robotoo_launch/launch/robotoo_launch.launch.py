@@ -33,14 +33,17 @@ def generate_launch_description():
     drive_to_coord_node = Node(
         package='drive_to_coord',
         executable='drive_to_coord',
-        output='screen'
+        output='log',
+        arguments=['--ros-args', '--log-level', 'error']
+
     )
 
     # 4 - Bumper
     bumper_node = Node(
         package='bumper',
         executable='bumper',
-        output='screen'
+        output='log',
+        arguments=['--ros-args', '--log-level', 'error']
     )
 
     # 5 - Camera
@@ -59,7 +62,8 @@ def generate_launch_description():
         package='pointcloud_to_laserscan',
         executable='pointcloud_to_laserscan_node',
         name='pointcloud_to_laserscan_node',
-        output='screen',
+        output='log',
+        arguments=['--ros-args', '--log-level', 'error'],
         remappings=[
             ('cloud_in', '/camera/depth/points'),
             ('scan', '/camera_scan'),
@@ -98,10 +102,19 @@ def generate_launch_description():
     visualtracker_node = Node(
         package='people_follower_ros2',
         executable='visualtracker',
+        output='log',
+        arguments=['--ros-args', '--log-level', 'error']
+    )
+
+    # 10 - Robot position reset
+    robot_position_reset_node = Node(
+        package='robot_position_reset',
+        executable='robot_position_reset',
+        name='robot_position_reset',
         output='screen'
     )
 
-    # 10 - Behavior Tree
+    # 11 - Behavior Tree
     bt_node = Node(
         package='mecabot_bt',
         executable='bt_node',
@@ -116,9 +129,13 @@ def generate_launch_description():
     delay_5_camera = 14.0
     delay_6_pointcloud_to_laserscan = 16.0
     delay_7_keepout_filter = 18.0
-    delay_8_auto_recharge = 20.0
-    delay_9_visualtracker = 21.0
-    delay_10_bt_node = 25.0
+    delay_8_visualtracker = 19.0
+    delay_9_auto_recharge = 20.0
+
+    delay_10_robot_position_reset = 35.0
+
+
+    delay_11_bt_node = 50.0
     
     # ==========================================
     # LAUNCH DESCRIPTION RETURN
@@ -132,7 +149,8 @@ def generate_launch_description():
         TimerAction(period=delay_5_camera, actions=[wheeltec_camera_launch]),
         TimerAction(period=delay_6_pointcloud_to_laserscan, actions=[pointcloud_to_laserscan_node]),
         TimerAction(period=delay_7_keepout_filter, actions=[keepout_filter_launch]),
-        TimerAction(period=delay_8_auto_recharge, actions=[auto_recharge_ros2_node]),
-        TimerAction(period=delay_9_visualtracker, actions=[visualtracker_node]),
-        TimerAction(period=delay_10_bt_node, actions=[bt_node]),
-	])
+        TimerAction(period=delay_8_visualtracker, actions=[visualtracker_node]),
+        TimerAction(period=delay_9_auto_recharge, actions=[auto_recharge_ros2_node]),
+        TimerAction(period=delay_10_robot_position_reset, actions=[robot_position_reset_node]),
+        TimerAction(period=delay_11_bt_node, actions=[bt_node]),
+    ])
