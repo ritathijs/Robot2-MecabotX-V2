@@ -80,10 +80,20 @@ class PublishBackPose(Node):
         # Annuleer timer zodat dit maar 1 keer gebeurt
         self.start_timer.cancel()
 
-        # Stuur XSTOP richting autocharge om laden te stoppen
-        self.send_xstop()
+        # Stuur XSTOPS richting autocharge om laden te stoppen
+        self.send_xstopS()
 
+    def send_xstopS(self):
 
+        # wacht tot er minstens 1 subscriber is (enige code die luistert is autocharge)
+        while self.xstop_pub.get_subscription_count() == 0:
+            self.get_logger().info("Waiting for subscribers on /charge_XSTOP...")
+            time.sleep(0.1)
+        
+        msg = String()
+        msg.data = "XSTOPS"
+        self.xstop_pub.publish(msg)
+        self.get_logger().info("Sent XSTOPS to /force_charge (reliable)")
 
 
     def send_xstop(self):

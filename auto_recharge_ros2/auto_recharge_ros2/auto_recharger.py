@@ -361,23 +361,31 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
     # afhandeling van XSTOP bericht
     def charge_xstop_callback(self, msg):
-            command = msg.data.strip().upper()
+        command = msg.data.strip().upper()
 
-            if command == "XSTOP":
-                print_and_fixRetract(YELLOW + f"Ontvangen op /charge_XSTOP: XSTOP (sessie {self.charge_session_id})." + RESET)
-                
-                #als robot aan het laden is, moeten we naar voor rijden en de robot locatie laten aanpassen in andere code (laat die code dit dus weten)
-                if self.robot['Charging'] == 1:
-                    self.force_charge_active = False
-                    reset_msg = String()
-                    reset_msg.data = "RESET" 
-                    self.Reset_Position_pub.publish(reset_msg)
+        if command in ["XSTOP", "XSTOPS"]:
+            print_and_fixRetract(
+                YELLOW + f"Ontvangen op /charge_XSTOP: {command} (sessie {self.charge_session_id})." + RESET
+            )
 
-                    print_and_fixRetract(GREEN + "Robot laadt: Volledige stop + vooruit rijden." + RESET)
-                    self.Stop_Charge(drive_forward=True)
-                else:
-                    print_and_fixRetract(YELLOW + "Robot laadt niet, negeer XSTOP" + RESET)
+            # XSTOPS = altijd forceren
+            if command == "XSTOPS" or self.robot['Charging'] == 1:
+                self.force_charge_active = False
 
+                reset_msg = String()
+                reset_msg.data = "RESET"
+                self.Reset_Position_pub.publish(reset_msg)
+
+                print_and_fixRetract(
+                    GREEN + "Volledige stop + vooruit rijden (XSTOP/XSTOPS)." + RESET
+                )
+
+                self.Stop_Charge(drive_forward=True)
+
+            else:
+                print_and_fixRetract(
+                    YELLOW+ "Robot laadt niet, negeer XSTOP" + RESET
+            )
 
                     
     def force_charge_callback(self, msg):

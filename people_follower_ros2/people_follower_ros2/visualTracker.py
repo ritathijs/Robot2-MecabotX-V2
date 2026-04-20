@@ -140,6 +140,7 @@ class PeopleFollowerNode(Node):
         y = results[0]
 
         if y.boxes is None or len(y.boxes) == 0:
+            self._publish_zero_outputs(rgb_msg.header)
             self._publish_annotated(rgb_msg.header, y.plot())
             return
 
@@ -163,12 +164,13 @@ class PeopleFollowerNode(Node):
         annotated = y.plot()
 
         if closest is None:
+            self._publish_zero_outputs(rgb_msg.header)
             self._publish_annotated(rgb_msg.header, annotated)
             return
 
         cx, cy, dist_m, _ = closest
 
-        # Angle convention (same as your old node but configurable flips)
+        # Angle convention 
         angle_x = self._pixel_to_angle_x(cx)
         angle_y = self._pixel_to_angle_y(cy)
         if self.invert_x:
@@ -186,7 +188,7 @@ class PeopleFollowerNode(Node):
         # Distance output units
         distance_out = dist_m * 1000.0 if self.dist_mm_out else dist_m
 
-        # Publish PositionMsg (oude topic, ongewijzigd)
+        # Publish PositionMsg 
         self.pos_msg.angle_x = float(angle_x)
         self.pos_msg.angle_y = float(angle_y)
         self.pos_msg.distance = float(distance_out)
@@ -201,7 +203,7 @@ class PeopleFollowerNode(Node):
             pose = PoseStamped()
             pose.header = rgb_msg.header
             # eventueel expliciet frame_id zetten:
-            # pose.header.frame_id = 'camera_link'  # of wat jouw frame is
+            # pose.header.frame_id = 'camera_link'  
 
             pose.pose.position.x = float(rel_x)   # meters, +X right
             pose.pose.position.y = float(rel_y)   # meters, +Y down
@@ -219,7 +221,7 @@ class PeopleFollowerNode(Node):
             self.last_coord_pub_time = now  
         # ------------------------------------------------------------------
 
-        # Quick debug (one line, easy to watch)
+        # Quick debug 
         self.get_logger().info(
             f'cx={cx} cy={cy} angle_x={angle_x:.3f} angle_y={angle_y:.3f} '
             f'dist={"{:.0f}mm".format(distance_out) if self.dist_mm_out else f"{distance_out:.2f}m"}'
@@ -262,6 +264,28 @@ class PeopleFollowerNode(Node):
         msg.header = header
         self.pub_annot.publish(msg)
 
+    def _publish_zero_outputs(self, header):
+        zero_pos = PositionMsg()
+        zero_pos.angle_x = 0.0
+        zero_pos.angle_y = 0.0
+        zero_pos.distance = 0.0
+        self.pub_pos.publish(zero_pos)
+
+        pose = PoseStamped()
+        pose.header = header
+        pose.pose.position.x = 0.0
+        pose.pose.position.y = 0.0
+        pose.pose.position.z = 0.0
+
+        pose.pose.orientation.x = 0.0
+        pose.pose.orientation.y = 0.0
+        pose.pose.orientation.z = 0.0
+        pose.pose.orientation.w = 1.0
+
+        self.pub_rel_point.publish(pose)
+
+        self.pub_distance.publish(Float32(data=0.0))
+
 
 def main():
     rclpy.init()
@@ -276,4 +300,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

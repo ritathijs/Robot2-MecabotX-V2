@@ -3,9 +3,11 @@ from rclpy.node import Node
 import Jetson.GPIO as GPIO
 from geometry_msgs.msg import Twist
 
-PINS = [7, 15, 31, 32]
+PINS = [7, 15, 29,  31, 32]
+EMERGENCY_PIN = 29
 DIR = {"A": 15, "L": 32, "V": 7, "R": 31}  # Definieer Voor, Achter, Links, Rechts
 speed = 0.1
+
 
 class GPIOReaderNode(Node):
     def __init__(self):
@@ -18,25 +20,55 @@ class GPIOReaderNode(Node):
         self.timer_10s = None
         self.timer_3s = None
 
+        self.emergency_active = False
+        self.emergency_timer = None
+
         GPIO.setmode(GPIO.BOARD)  
         for pin in PINS:
             GPIO.setup(pin, GPIO.IN)
         
         self.timer = self.create_timer(0.2, self.detect)
-    
+
+
+    def cancelEmergencyTimer(self):
+        if self.emergency_timer is not None:
+            self.emergency_timer.cancel()
+            self.emergency_timer = None
+
+    def releaseEmergency(self):
+        self.emergency_active = False
+        self.emergency_timer = None
+
     def detect(self):
-        states = {pin: GPIO.input(pin) for pin in PINS} 
+        states = {pin: GPIO.input(pin) for pin in PINS}
+        bumper_states = {pin: val for pin, val in states.items() if pin != EMERGENCY_PIN}
         
         self.get_logger().info(f'status: {self.action} \t pinnen: {states}')
         
+        if states[EMERGENCY_PIN] == 0:
+            self.emergency_active = True
+            self.cancelEmergencyTimer()
+            self.stop()
+            return
+        else:
+            # net losgelaten → nog 1 seconde stoppen
+            if self.emergency_active and self.emergency_timer is None:
+                self.emergency_timer = self.create_timer(1.0, self.releaseEmergency)
+                self.stop()
+                return
+
+            if self.emergency_active:
+                self.stop()
+                return
+            
         if self.action == "Free":
-            if 1 in states.values():
+            if 1 in bumper_states.values():
                 self.action = "Touched"
                 self.stop()
                 self.timer_10s = self.create_timer(10.0, self.setAvoid)
                 
         elif self.action == "Touched":
-            if 1 in states.values():
+            if 1 in bumper_states.values():
                 self.stop()
             else:
                 self.action = "Free"
@@ -54,7 +86,7 @@ class GPIOReaderNode(Node):
             self.cancelTimer_3s()
             self.stop()
 
-            if not 1 in states.values():
+            if 1 not in bumper_states.values():
                 self.action = "Free"
 
     def cancelTimer_10s(self):
