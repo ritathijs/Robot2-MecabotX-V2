@@ -8,7 +8,7 @@
                 <Fallback name="AdminPanelFallback">
                     
                     <Parallel name="CheckButtonAndMainParallel" success_threshold="1" failure_threshold="1">
-                        <CheckAdminPanel admin_done="{admin_done}"/> 
+                        <CheckAdminPanel/> 
                         <Fallback name="BatteryLowFallback">
                             <Parallel name="RootParallel" success_threshold="1" failure_threshold="1">
                                 <BatteryOk robotLocationBAT="{robotLocationBAT}"
@@ -43,7 +43,7 @@
                                         
                                         <!-- MainBTStopDrive + MainBTSetErrorFlag als sequence met drive_failed -->
                                         <Sequence name="MainSTOPSequence">
-                                            <MainBTStopDrive stop_flag="{stop_flag}" drive_failed="{drive_failed}"/>
+                                            <MainBTStopDrive drive_failed="{drive_failed}"/>
                                             <MainBTSetErrorFlag drive_failed="{drive_failed}"/>
                                         </Sequence>
                                     </Fallback>
@@ -65,20 +65,19 @@
                         </Fallback> 
                     </Parallel>
 
-                    <LoopAdminPanel name="LoopAdminPanel" admin_done="{admin_done}">
+
                         <Sequence name="AdminSequence">
                             <CheckAdminCondition 
-                                admin_done="{admin_done}" 
+                              
                                 bat_admin_status="{bat_admin_status}" 
                                 chargingInteger="{chargingInteger}" 
                                 chargingInteger_nextCycle="{chargingInteger_nextCycle}"/>
 
                             <CheckButtonState 
-                                admin_done="{admin_done}"  
+                                
                                 buttonStop="{buttonStop}"  
                                 robotLocationBAT="{robotLocationBAT}" />
                         </Sequence>
-                    </LoopAdminPanel>
                 </Fallback>
             </Parallel>
 

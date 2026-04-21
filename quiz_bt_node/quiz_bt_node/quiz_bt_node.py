@@ -2,48 +2,64 @@ import requests
 import time
 import signal
 import sys
-import threading
+
 import rclpy
+import subprocess
 from rclpy.node import Node
 from std_msgs.msg import String
 from std_msgs.msg import Int8
 
+
+# Socket.IO client voor communicatie met server
 import socketio
 
+# QoS instellingen voor ROS2 (betrouwbaarheid van berichten)
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 
 from geometry_msgs.msg import Twist
 
+# URL van server waar settings (schedule) worden opgehaald
 URL = "http://192.168.137.100/cms/getSettings"
 
 
 class QuizBTNode(Node):
-
     def __init__(self):
-        super().__init__('quiz_bt_node')
+
+        super().__init__('quiz_bt_node') #aanmaak ros2node
 
         # ROS2 publisher
 
-        self.blocking = False
-        self._admin_timer = None
+        self.blocking = False  # gebruikt om tijdelijk inkomende events te negeren
+        self._admin_timer = None #voor delayed acties
 
-        # Manual drive 
+        # Publisher om eventuele stuurcommando's naar robot te sturen
         self.gui_cmd_vel_publisher = self.create_publisher(Twist, '/gui_cmd_vel', 1)
-        self.last_drive_cmd_time = time.time()
-        self.is_moving = False
-        self.check_drive_timer = self.create_timer(0.05, self.check_drive)
 
+        # tijdstip van het laatste commando (nodig om auto. te stoppen)
+        self.last_drive_cmd_time = time.time()
+
+        # is robot nu aan het bewegen
+        self.is_moving = False
+
+        # timer die elke 50 ms checkt of robot moet stoppen of niet
+        self.check_drive_timer = self.create_timer(0.05, self.check_drive)
 
         qos = QoSProfile(depth=1)
         qos.reliability = ReliabilityPolicy.RELIABLE
+
+        # publisher die quiz-related-events naar BT stuurt
         self.quiz_publisher = self.create_publisher(String, 'quiz', 1)
 
+        # publisher die admin-panel-related-events naar BT stuurt
         self.admin_publisher = self.create_publisher(String, 'admin', qos)
 
+        # publisher die connection-related-events naar BT stuurt (robot is verbinding kwijt of niet)
         self.connection_publisher = self.create_publisher(String, 'connection', qos)
+
+        # publisher die iets stuurt indien manual driving is gebeurd (nodig voor eventuele reset locatie)
         self.manual_drive_control_publisher = self.create_publisher(String, 'ManualDriveControleLocation', qos)
 
-        # ROS2 subscriber
+        # Berichten van BT om schermen aan te vragen
         self.subscription = self.create_subscription(
             String,
             'rpitopic',
@@ -51,6 +67,7 @@ class QuizBTNode(Node):
             10
         )
 
+        # Berichten van autochargecode om batterijpercentage te krijgen
         self.battery_subscription = self.create_subscription(
             Int8,
             '/battery_percentage',
@@ -58,25 +75,22 @@ class QuizBTNode(Node):
             10
         )
 
-
         # Socket.IO client
         self.sio = socketio.Client()
+
+        # Koppeling van inkomende berichten aan hun callback functie
         self.sio.on('connect', self.on_connect)
         self.sio.on('disconnect', self.on_disconnect)
         self.sio.on('quiz-finished', self.on_quiz_finished)
         self.sio.on('quiz_inactive', self.on_quiz_inactive)
         self.sio.on('drive_to_quiz_location', self.on_drive_to_quiz_location)
-
         
         self.sio.on('admin-panel-open', self.on_admin_panel_open)
+        self.sio.on('time-updated', self.on_time_updated)
 
         self.sio.on('admin-panel-closed', self.on_admin_panel_closed)
 
-
-
         self.sio.on('schedule-updated', self.on_schedule_updated)
-        self.sio.on('start-button', self.on_start_button)
-        self.sio.on('stop-button', self.on_stop_button)
 
 
         self.sio.on('drive-forward', lambda data=None: self.on_drive('forward'))
@@ -94,6 +108,7 @@ class QuizBTNode(Node):
 
     # ---------------- SETTINGS OPHALEN ----------------
     def fetch_schedule(self):
+        # mapping van de dagnamen uit de server naar het 1 letter formaat dat in de schedule.txt staat
         day_map = {
             "Mon": "M", "Tue": "D", "Wed": "W", "Thu": "T",
             "Fri": "F", "Sat": "S", "Sun": "U"
@@ -101,30 +116,41 @@ class QuizBTNode(Node):
 
         try:
             self.get_logger().info("Fetching schedule from server...")
+            # http get resuest naar backend om settings op te halen
             response = requests.get(URL)
 
+            # was het request succesvol?
             if response.status_code == 200:
                 data = response.json()
+                # indien lijst : pak eerste element, anders het hele object (redundant)
                 settings = data[0] if isinstance(data, list) else data
 
+                # haal schedule object uit settings
                 schedule = settings.get("schedule", {})
+
+                # pad naar bestand waar schedule wordt opgeslagen
                 file_path = "/home/wheeltec/wheeltec_ros2/src/quiz_bt_node/schedule.txt"
 
                 with open(file_path, "w") as f:
+
+                    # ittereer over elke dag in het schema
                     for day_name, info in schedule.items():
+
+                        # zet dag om naar 1 letterige prefix
                         prefix = day_map.get(day_name, "?")
 
+                        # haal start en eindtijd op
                         if info.get("active", False):
                             start = (info.get("start") or "0000").replace(":", "")
                             end = (info.get("end") or "0000").replace(":", "")
-
+                            #zorg dat tijden exact 4 karakters zijn bv 1000
                             start = start.ljust(4, '0')[:4]
                             end = end.ljust(4, '0')[:4]
 
                             line = f"{prefix}{start}{end}"
                         else:
                             line = f"{prefix}{'X'*8}"
-
+                        # schrijf lijn naar bestand
                         f.write(line + "\n")
 
                     # Schrijf ROBOTACTIVE pas **na** alle dagen
@@ -132,7 +158,7 @@ class QuizBTNode(Node):
                     f.write(f"ROBOTACTIVE:{str(robot_active).lower()}\n")
 
                 self.get_logger().info("Schedule succesvol geupdate.")
-            else:
+            else:  #server gaf fout
                 self.get_logger().error(f"Server fout: {response.status_code}")
 
         except Exception as e:
@@ -157,6 +183,9 @@ class QuizBTNode(Node):
 
 
     def on_drive(self, direction):
+
+        # wordt aangeroepen wanneer manual drive via GUI gebeurd
+
         self.get_logger().info(f'Direction received: {direction}')
         self.last_drive_cmd_time = time.time()
         self.is_moving = True
@@ -193,6 +222,7 @@ class QuizBTNode(Node):
         self.gui_cmd_vel_publisher.publish(msg)
 
     def check_drive(self):
+        # zorgt ervoor indien er geen nieuw commando komt dat robot stopt
         if self._is_blocking():
             return
         if self.is_moving and (time.time() - self.last_drive_cmd_time > 0.3):
@@ -224,11 +254,18 @@ class QuizBTNode(Node):
         self.get_logger().info(f'Published to connection topic: {msg.data}')
 
 
+    def on_time_updated(self, time_str):
+        try:
+            subprocess.run(["sudo", "date", "-s", time_str], check=True)
+            print("Systeemtijd succesvol aangepast.")
+        except subprocess.CalledProcessError as e:
+            print(f"Fout bij het aanpassen van de tijd: {e}")
     # ---------------- SOCKET EVENTS ----------------
     def on_connect(self):
         if self._is_blocking():
             return
         self.get_logger().info('Connected to server')
+        self.sio.emit("identification", "orin-nano-robot")
         self.publish_connection_message("CONNECT")   
         self.fetch_schedule()
 
@@ -256,24 +293,12 @@ class QuizBTNode(Node):
         self.get_logger().info("Drive to quiz location")
         self.publish_quiz_message("drive_to_quiz_location")
 
-
     def on_schedule_updated(self):
         if self._is_blocking():
             return
         self.get_logger().info("Schedule update event ontvangen")
         self.fetch_schedule()
 
-    def on_start_button(self):
-        if self._is_blocking():
-            return
-        self.get_logger().info("STARTBUTTON ontvangen van quizserver")
-        self.publish_quiz_message("STARTBUTTON")
-
-    def on_stop_button(self):
-        if self._is_blocking():
-            return
-        self.get_logger().info("STOPBUTTON ontvangen van quizserver")
-        self.publish_quiz_message("STOPBUTTON")
 
 
     def on_admin_panel_open(self):
@@ -281,12 +306,13 @@ class QuizBTNode(Node):
         if self._is_blocking():
             return
 
+        # negeer adminpanelopen als adminpanel al open was
         if hasattr(self, 'admin_panel_open') and self.admin_panel_open:
             self.get_logger().info("Admin panel was al open -> negeren")
             return
         self.get_logger().info("Admin Panel geopend")
         self.admin_panel_open = True
-        self.manual_drive_since_admin_open = False
+        self.manual_drive_since_admin_open = False # resetten van variabele
         self.publish_admin_message("ADMINPANELOPEN")
 
     def on_admin_panel_closed(self):
@@ -296,6 +322,9 @@ class QuizBTNode(Node):
         self.get_logger().info("Admin Panel gesloten")
         self.admin_panel_open = False
 
+        # als er manual drive is gebeurd, dan kan het zijn dat robotlocatie gereset moet worden
+        # hierbij moet vanalles gebeuren, zoals het loskoppelen van robot van laadstation
+        # we kiezen om de ADMINPANELCLOSED 10 seconde uit te stellen om zo niet direct in BT verder te gaan
         if self.manual_drive_since_admin_open:
             self.get_logger().info("Manual drive gedetecteerd -> 10s vertraging")
 
@@ -315,6 +344,7 @@ class QuizBTNode(Node):
 
     def _finalize_admin_closed_wrapper(self):
 
+        # Na delay van 10 seconden  om timer mooi af te sluiten
         if self._admin_timer is not None:
             self._admin_timer.cancel()
             self._admin_timer = None
@@ -325,17 +355,16 @@ class QuizBTNode(Node):
         self.get_logger().info("Na vertraging adminpanelclosed")
 
         self.publish_admin_message("ADMINPANELCLOSED")
-        self.fetch_schedule()
+        self.fetch_schedule() # bij sluiten adminpanel zeker de instellingen opvragen
 
         self.manual_drive_since_admin_open = False
         self.blocking = False
 
-    def _delayed_admin_closed_publish(self):
-        time.sleep(10) 
-        self.publish_admin_message("ADMINPANELCLOSED")
-        self.fetch_schedule()
-        self.manual_drive_since_admin_open = False
-
+    # def _delayed_admin_closed_publish(self):
+    #     time.sleep(10) 
+    #     self.publish_admin_message("ADMINPANELCLOSED")
+    #     self.fetch_schedule()
+    #     self.manual_drive_since_admin_open = False
         
     # ---------------- ROS MESSAGES ----------------
     def rpi_callback(self, msg):
@@ -368,7 +397,6 @@ class QuizBTNode(Node):
         self.destroy_node()
         rclpy.shutdown()
 
-
 # ---------------- MAIN ----------------
 def main():
     rclpy.init()
@@ -384,7 +412,6 @@ def main():
         rclpy.spin(node)
     except KeyboardInterrupt:
         node.shutdown()
-
 
 if __name__ == '__main__':
     main()

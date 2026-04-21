@@ -17,7 +17,7 @@
 using namespace std::chrono_literals;
 
 
-// -------------
+
 // Decorator atijd-SUCCES
 class ForceSuccess : public BT::DecoratorNode
 {
@@ -29,15 +29,19 @@ public:
 
     BT::NodeStatus tick() override
     {
+        // op moment decorator getikt wordt : hij moet zijn enig kind ticken
         const BT::NodeStatus child_state = child_node_->executeTick();
 
+        // als kind RUNNING geeft
         if (child_state == BT::NodeStatus::RUNNING) {
             return BT::NodeStatus::RUNNING;
         }
+        // ALS KIND GEEN RUNNING GEEFT, HETZIJ SUCCESS HETZIJ FAILURE
         return BT::NodeStatus::SUCCESS;
     }
 };
 
+// RECHTERKIND VAN FALLBACK OP MOMENT DAT ROBOT EN QUIZPI CONNECTIE VERLOREN ZIJN
 class ConnectionLost : public BT::StatefulActionNode
 {
 public:
@@ -50,6 +54,9 @@ public:
         pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
 
         // QoS en subscription naar /connection
+        // Dit om berichtaankomst te garanderen
+        // /connection wordt aangestuurd door quiz_bt_node()
+        // Indien die code herverbinding opmerkt, stuurt deze CONNECT
         rclcpp::QoS qos(1);
         qos.reliable();
 
@@ -59,13 +66,15 @@ public:
             {
                 last_connection_msg_ = msg->data;
             });
+
+
     }
 
     static BT::PortsList providedPorts() { return {}; }
 
     BT::NodeStatus onStart() override
     {
-        // Publiceer zijn naam
+        // Publiceer zijn naam op BehaviorTreeNode
         std_msgs::msg::String msg;
         msg.data = name();
         pub_->publish(msg);
@@ -79,7 +88,7 @@ public:
     BT::NodeStatus onRunning() override
     {
         rclcpp::spin_some(node_);
-
+        // als quit_bt_node heeft laten weten dat er een reconnect is gebeurd
         if (last_connection_msg_ == "CONNECT")
         {
             std::cout << "[ConnectionLost] CONNECT received -> SUCCESS" << std::endl;
@@ -101,26 +110,8 @@ private:
     std::string last_connection_msg_;
 };
 
-class WaitDriving : public BT::SyncActionNode
-{
-public:
-    WaitDriving(const std::string &name) : BT::SyncActionNode(name, {}) {
-    node_ = rclcpp::Node::make_shared("btWaitDriving");
-    pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);}
-    BT::NodeStatus tick() override {
-        std::string state = "WaitDriving";
-    	std_msgs::msg::String msg;
-        msg.data = state;
-        pub_->publish(msg);
-        std::cout << "[WaitDriving] STOP DRIVING" << std::endl;
-        return BT::NodeStatus::SUCCESS;
-    }
-        private:
-    rclcpp::Node::SharedPtr node_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
-};
-
-
+// Node die altijd draait (bovenaan in BT) tenzij hij faalt
+// Kijkt of quiz_bt_node laat weten dat er een disconnect heeft plaatsgevonden
 class CheckNetworkError : public BT::StatefulActionNode
 {
 public:
@@ -129,10 +120,12 @@ public:
     {
         node_ = rclcpp::Node::make_shared("btCheckNetworkError");
 
+        // reliable communicatie
         rclcpp::QoS qos(1);
         qos.reliable();
 
         // Subscriber naar /connection topic
+        // topic van quiz_bt_node die info geeft over connect en disconnect
         sub_ = node_->create_subscription<std_msgs::msg::String>(
             "/connection", qos,
             [this](std_msgs::msg::String::SharedPtr msg)
@@ -141,6 +134,8 @@ public:
             });
     }
 
+    // Indien disconnect plaatsvind op moment dat robot in laadstation zit : geen probleem
+    // Om dit te weten via blackboard status ophalen of robot aan het laden is
     static BT::PortsList providedPorts()
     {
         return { BT::InputPort<bool>("connection_chargeStatus") };
@@ -154,16 +149,17 @@ public:
 
     BT::NodeStatus onRunning() override
     {
-        rclcpp::spin_some(node_);
+        rclcpp::spin_some(node_); // Kijken of er nieuwe berichten zijn op topic
 
         // Lees van het blackboard (default = false)
         bool charge_connected = false;
         getInput("connection_chargeStatus", charge_connected);
 
+        // Indien DISCONNECTED message en niet aan het laden
         if (last_connection_msg_ == "DISCONNECTED" && !charge_connected)
         {
             std::cout << "[CheckNetworkError] NETWORK ERROR -> FAILURE" << std::endl;
-            return BT::NodeStatus::FAILURE;
+            return BT::NodeStatus::FAILURE;  // falback wordt getriggerd, BT komt in ConnectionLost
         }
 
         return BT::NodeStatus::RUNNING;
@@ -179,6 +175,7 @@ private:
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
     std::string last_connection_msg_;
 };
+
 
 class BatteryOk : public BT::StatefulActionNode
 {
@@ -213,12 +210,10 @@ public:
                     std::cout << "[CALLBACK] Blackboard chargingInteger_nextCycle: " << bt_id << std::endl;
                 }
 
-                if(msg_id == bt_id){
-                    last_event_ = event;
-                    std::cout << "[CALLBACK] Event geaccepteerd: " << last_event_ << std::endl;
-                } else {
-                    std::cout << "[CALLBACK] Event genegeerd, integer mismatch!" << std::endl;
-                }
+
+                last_event_ = event;
+                std::cout << "[CALLBACK] Event geaccepteerd: " << last_event_ << std::endl;
+
             });
 
         force_charge_pub_ = node_->create_publisher<std_msgs::msg::String>(
@@ -286,7 +281,7 @@ public:
 
         if (last_event_ == "BATTERY-LOW")
         {
-            int getal = updateChargingCounter();
+            setOutput("chargingInteger", 0);  // BATTERY-LOW bericht komt altijd met 0 voor (want telkens nieuwe sessie)
             updateSkipDrive();  // check bat_admin_status
             return BT::NodeStatus::FAILURE;
         }
@@ -332,60 +327,6 @@ private:
 };
 
 
-// Op termijn zal dit verwijdert worden wegens redundante info 
-class TimedCondition : public BT::StatefulActionNode
-{
-public:
-    TimedCondition(const std::string &name, const BT::NodeConfiguration &config)
-    : BT::StatefulActionNode(name, config), timeout_(7.0)
-    {
-    }
-
-    static BT::PortsList providedPorts()
-    {
-        return { BT::InputPort<double>("timeout") };
-    }
-
-    BT::NodeStatus onStart() override
-    {
-        // haal timeout uit XML, default 7s
-        if (!getInput<double>("timeout", timeout_))
-        {
-            timeout_ = 7.0;
-        }
-
-        start_time_ = std::chrono::steady_clock::now();
-        std::cout << "[" << name() << "] START with timeout = " << timeout_ << "s" << std::endl;
-
-        return BT::NodeStatus::RUNNING;
-    }
-
-    BT::NodeStatus onRunning() override
-    {
-        auto elapsed = std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - start_time_).count();
-
-        std::cout << "[" << name() << "] Running... (" << elapsed << "s)" << std::endl;
-
-        if (elapsed >= timeout_)
-        {
-            std::cout << "[" << name() << "] Timeout reached " << std::endl;
-            return BT::NodeStatus::SUCCESS;
-        }
-
-        return BT::NodeStatus::RUNNING;
-    }
-
-    void onHalted() override
-    {
-        std::cout << "[" << name() << "] HALTED" << std::endl;
-    }
-
-protected:
-    double timeout_;
-    std::chrono::steady_clock::time_point start_time_;
-};
-
 
 struct DaySchedule {
     char dayCode;      // M, D, W, T, F, S, U
@@ -393,7 +334,6 @@ struct DaySchedule {
     int startTime;     // bijv. 0900
     int endTime;       // bijv. 1700
 }; 
-
 
 
 class ScheduleParser {
@@ -546,48 +486,7 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr rpi_pub_;
 };
 
-class InChargingStation : public BT::SyncActionNode
-{
-public:
-    InChargingStation(const std::string &name)
-        : BT::SyncActionNode(name, {}), is_charging(false)
-    {
-        node_ = rclcpp::Node::make_shared("btInChargingStation");
 
-        pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
-
-        // Subscriber naar /robot_charging_flag
-        sub_ = node_->create_subscription<std_msgs::msg::Bool>(
-            "/robot_charging_flag", 10,
-            [this](std_msgs::msg::Bool::SharedPtr msg_in)
-            {
-                is_charging = msg_in->data;
-            });
-    }
-
-    BT::NodeStatus tick() override
-    {
-        std::string state = "InChargingStation";
-        std_msgs::msg::String msg_send;
-        msg_send.data = state;
-        pub_->publish(msg_send);
-
-
-        if (is_charging)
-        {
-            std::cout<< "[InChargingStation] Battery is charging !!! => SUCCESS" << std::endl;
-            return BT::NodeStatus::SUCCESS;
-        }
-        std::cout<< "[InChargingStation] Battery is not charging !!! => FAILURE" << std::endl;
-        return BT::NodeStatus::FAILURE;
-    }
-
-private:
-    rclcpp::Node::SharedPtr node_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
-    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr sub_;
-    bool is_charging;
-};
 
 class DriveToChargingStation : public BT::StatefulActionNode
 {
@@ -664,7 +563,7 @@ public:
 
         setOutput("connection_chargeStatus", true);
 
-        // ✅ Check skip_drive2charging
+        // Check skip_drive2charging
         bool skip = false;
         if (getInput("skip_drive2charging", skip))
         {
@@ -744,7 +643,8 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_; 
 };
 
-
+// Als er iets misloopt met het laden wordt deze node bereikt (via GoToChargeFallback)
+// Boom moet herstarten om hier uit te geraken (bv via adminpaneel)
 class BatteryStopDrive : public BT::StatefulActionNode
 {
 public:
@@ -754,6 +654,9 @@ public:
         node_ = rclcpp::Node::make_shared("btBatteryStopDrive");
 
         pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
+
+        
+        rpi_pub_ = node_->create_publisher<std_msgs::msg::String>("/rpitopic", 10);
     }
 
     static BT::PortsList providedPorts()
@@ -766,6 +669,11 @@ public:
         std_msgs::msg::String msg;
         msg.data = "BatteryStopDrive";
         pub_->publish(msg);
+
+        // NIEUW: scherm triggeren via RPi topic
+        std_msgs::msg::String rpi_msg;
+        rpi_msg.data = "RobotError";
+        rpi_pub_->publish(rpi_msg);
 
         return BT::NodeStatus::RUNNING;
     }
@@ -784,8 +692,10 @@ public:
 private:
     rclcpp::Node::SharedPtr node_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
-};
 
+    // NIEUW
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr rpi_pub_;
+};
 
 
 class DriveWorkArea : public BT::StatefulActionNode
@@ -910,7 +820,6 @@ public:
     pub_quiz_ = node_->create_publisher<std_msgs::msg::String>("/rpitopic", 10);
     pub_bt_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
 
-
     }
 
         static BT::PortsList providedPorts()
@@ -943,60 +852,6 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;    // nieuwe publisher
 };
 
-
-
-
-// class CheckMainBTErrorState : public BT::SyncActionNode
-// {
-// public:
-//     CheckMainBTErrorState(const std::string &name, const BT::NodeConfiguration &config)
-//         : BT::SyncActionNode(name, config)
-//     {
-//         node_ = rclcpp::Node::make_shared("btCheckMainBTErrorState");
-
-//         // Publisher voor BT-status zoals bij andere nodes
-//         pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
-//     }
-
-//     // BlackBoard input-port
-//     static BT::PortsList providedPorts()
-//     {
-//         return {
-//             BT::InputPort<bool>("stop_flag")  // lees de flag van MainBTStopDrive
-//         };
-//     }
-
-//     BT::NodeStatus tick() override
-//     {
-//         // Publiceer node-status
-//         std_msgs::msg::String msg;
-//         msg.data = "CheckMainBTErrorState";
-//         pub_->publish(msg);
-
-//         // Lees de blackboard-flag
-//         bool stop_flag = false;
-//         if (!getInput("stop_flag", stop_flag))
-//         {
-//             std::cout << "[CheckMainBTErrorState] stop_flag niet gevonden op blackboard, default FALSE" << std::endl;
-//             stop_flag = false;
-//         }
-
-//         if (stop_flag)
-//         {
-//             std::cout << "[CheckMainBTErrorState] stop_flag TRUE -> FAILURE" << std::endl;
-//             return BT::NodeStatus::FAILURE;
-//         }
-//         else
-//         {
-//             std::cout << "[CheckMainBTErrorState] stop_flag FALSE -> SUCCESS" << std::endl;
-//             return BT::NodeStatus::SUCCESS;
-//         }
-//     }
-
-// private:
-//     rclcpp::Node::SharedPtr node_;
-//     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
-// };
 
 
 
@@ -1145,16 +1000,12 @@ public:
     {
         return { BT::InputPort<double>("timeout"),
                 BT::InputPort<int>("chargingInteger"),
-                BT::InputPort<bool>("skip_drive2charging")  // <--- nieuw
-
-  
- };
+                BT::InputPort<bool>("skip_drive2charging")   
+        };
     }
 
     BT::NodeStatus onStart() override
     {
-
-
         event_ = "";
         getInput("timeout", timeout_);
         start_time_ = std::chrono::steady_clock::now();
@@ -1162,8 +1013,7 @@ public:
         msg.data = "IsRobotCharging";
         pub_->publish(msg);
 
-
-                bool skip = false;
+        bool skip = false;
         if (getInput("skip_drive2charging", skip))
         {
             if (skip)
@@ -1177,10 +1027,7 @@ public:
             }
         }
 
-
         return BT::NodeStatus::RUNNING;
-
-
     }
 
     BT::NodeStatus onRunning() override
@@ -1208,7 +1055,6 @@ public:
         std::cout << "[IsRobotCharging] HALTED" << std::endl;
     }
 
-
 private:
     std::string event_;
     double timeout_;
@@ -1217,6 +1063,7 @@ private:
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
 };
+
 
 class IsBatteryFull : public BT::StatefulActionNode
 {
@@ -1254,17 +1101,14 @@ public:
     static BT::PortsList providedPorts()
     {
         return { BT::OutputPort<std::string>("robotLocation"),
-                BT::InputPort<int>("chargingInteger"),
-             BT::OutputPort<std::string>("bat_admin_status")
-
-
- };
+                 BT::InputPort<int>("chargingInteger"),
+                 BT::OutputPort<std::string>("bat_admin_status")
+        };
     }
 
     BT::NodeStatus onStart() override
     {
         setOutput("robotLocation", "CHARGING");
-
         setOutput("bat_admin_status", "START");
 
         // Stuur bericht naar rpitopic
@@ -1360,7 +1204,7 @@ public:
         rclcpp::spin_some(node_);
         std::cout << "[CheckingNearbyVisitors] Measured distance: " << latest_value_ << std::endl;
 
-        if (latest_value_ <= 1.5) 
+        if (latest_value_ <= 1.5 and latest_value_ > 0.05) 
         {
             std::cout << "[CheckingNearbyVisitors] STOP BIJ PERSOON -> SUCCESS" << std::endl;
             return BT::NodeStatus::SUCCESS;
@@ -1395,7 +1239,7 @@ public:
 
         pub_bt_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
 
-        pub_quiz_ = node_->create_publisher<std_msgs::msg::String>("/rpitopic", 10);
+        //pub_quiz_ = node_->create_publisher<std_msgs::msg::String>("/rpitopic", 10);
 
         sub_follow_ = node_->create_subscription<std_msgs::msg::Float32>(
             "/target_distance", 10,
@@ -1477,8 +1321,8 @@ public:
 
         if (overlimit_count_ >= 5)
         {
-            //std::cout << "[ArrivedAtVisitors] 3 metingen > 3.0 -> FAILURE" << std::endl;
-            //return BT::NodeStatus::FAILURE;
+            std::cout << "[ArrivedAtVisitors] 3 metingen > 3.0 -> FAILURE" << std::endl;
+            return BT::NodeStatus::FAILURE;
         }
 
 
@@ -1488,7 +1332,7 @@ public:
         if (elapsed >= timeout_)
         {
             std::cout << "[ArrivedAtVisitors] Timeout (" << elapsed << "s) -> FAILURE" << std::endl;
-            return BT::NodeStatus::SUCCESS;  // TIJDELIJK NAAR SUCCESS VOOR TESTING ZONDER QUINTEN
+            return BT::NodeStatus::FAILURE;  // TIJDELIJK NAAR SUCCESS VOOR TESTING ZONDER QUINTEN
         }
 
         //std::cout << "[ArrivedAtVisitors] Running... distance=" << follow_value_
@@ -1511,7 +1355,7 @@ private:
 
     rclcpp::Node::SharedPtr node_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;
+    //rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;
 
     rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr sub_follow_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_quiz_;
@@ -1776,7 +1620,7 @@ public:
     static BT::PortsList providedPorts()
     {
         return {
-            BT::OutputPort<bool>("admin_done"),
+            
             BT::OutputPort<bool>("buttonStop"),
             BT::OutputPort<std::string>("robotLocationBAT")
         };
@@ -1840,7 +1684,7 @@ public:
             std::cout << "[CheckButtonState] START toestand (robot actief)" << std::endl;
             
             setOutput("buttonStop", false);
-            setOutput("admin_done", true);
+         
         }
         else
         {
@@ -1848,8 +1692,6 @@ public:
             std::cout << "[CheckButtonState] STOP toestand (robot NIET actief)" << std::endl;
 
             setOutput("buttonStop", true);
-            setOutput("admin_done", true);
-
             setOutput("robotLocationBAT", std::string("FORCE-CHARGING"));
         }
 
@@ -1875,7 +1717,7 @@ public:
     static BT::PortsList providedPorts()
     {
         return {
-            BT::InputPort<bool>("buttonStop")  // Voeg blackboard input toe
+            BT::InputPort<bool>("buttonStop")  
         };
     }
 
@@ -2555,7 +2397,6 @@ public:
         if (elapsed >= timeout_)
         {
             std::cout << "[WaitQuizToEnd] Timeout reached after " << elapsed << "s -> FAILURE" << std::endl;
-            //return BT::NodeStatus::FAILURE;
             return BT::NodeStatus::SUCCESS;
         }
 
@@ -2596,7 +2437,6 @@ public:
     {
         return {
             BT::InputPort<bool>("drive_failed"),  // BlackBoard input
-            BT::OutputPort<bool>("stop_flag")     // BlackBoard output (optioneel)
         };
     }
 
@@ -2607,13 +2447,12 @@ public:
         msg.data = "MainBTStopDrive";
         pub_->publish(msg);
 
-            // RPI topic publish
+        // RPI topic publish
         std_msgs::msg::String rpi_msg;
         rpi_msg.data = "RobotError";
         rpi_pub_->publish(rpi_msg);
 
-        // Eventueel stop_flag zetten op true
-        setOutput("stop_flag", true);
+        
 
         std::cout << "[MainBTStopDrive] Node gestart, check drive_failed op blackboard" << std::endl;
         return BT::NodeStatus::RUNNING;
@@ -2826,61 +2665,6 @@ public:
 };
 
 
-class LoopAdminPanel : public BT::DecoratorNode
-{
-public:
-    LoopAdminPanel(const std::string& name, const BT::NodeConfiguration& config)
-        : BT::DecoratorNode(name, config) {}
-
-    static BT::PortsList providedPorts()
-    {
-        return {
-            BT::InputPort<bool>("admin_done")
-        };
-    }
-
-    BT::NodeStatus tick() override
-    {
-        while (true)
-        {
-
-            bool admin_done = false;
-            getInput("admin_done", admin_done);
-
-            if (admin_done)
-            {
-                std::cout << "[LoopAdminPanel] Admin condition met -> STOP LOOP (SUCCESS)" << std::endl;
-                return BT::NodeStatus::SUCCESS;
-            }
-
-            const BT::NodeStatus child_state = child_node_->executeTick();
-
-            if (child_state == BT::NodeStatus::RUNNING)
-            {
-                return BT::NodeStatus::RUNNING;
-            }
-            else if (child_state == BT::NodeStatus::SUCCESS)
-            {
-                std::cout << "[LoopAdminPanel] Child success, but continue looping..." << std::endl;
-                child_node_->halt();
-                continue;
-            }
-            else if (child_state == BT::NodeStatus::FAILURE)
-            {
-                std::cout << "[LoopAdminPanel] Child failed, restarting sequence..." << std::endl;
-                child_node_->halt();
-                continue;
-            }
-        }
-    }
-
-    void halt() override
-    {
-        child_node_->halt();
-        setStatus(BT::NodeStatus::IDLE);
-    }
-};
-
 #include <chrono>
 
 class CheckAdminCondition : public BT::StatefulActionNode
@@ -2916,18 +2700,14 @@ public:
                     timer_started_ = true;
                     start_time_ = std::chrono::steady_clock::now();
                 }
-                else if (msg->data == "RobotManualDrive")
-                {
-                    std::cout << "[CheckAdminCondition] RobotManualDrive ontvangen!" << std::endl;
-                    manual_drive_ = true;
-                }
+
             });
     }
 
     static BT::PortsList providedPorts()
     {
         return {
-            BT::OutputPort<bool>("admin_done"),
+
             BT::InputPort<std::string>("bat_admin_status"),
             BT::InputPort<int>("chargingInteger"),
             BT::OutputPort<int>("chargingInteger_nextCycle")
@@ -3010,10 +2790,6 @@ public:
     {
         rclcpp::spin_some(node_);
 
-        setOutput("admin_done", false);
-
-
-
 
         // 🔹 Admin closed + 3 sec delay
         if (admin_closed_)
@@ -3026,7 +2802,7 @@ public:
                 if (elapsed >= 3)
                 {
                     std::cout << "[CheckAdminCondition] Admin panel closed + delay -> SUCCESS" << std::endl;
-                    setOutput("admin_done", false);
+                  
                     return BT::NodeStatus::SUCCESS;
                 }
                 else
@@ -3059,80 +2835,6 @@ private:
 };
 
 
-
-/*/
-class ManualDriving : public BT::StatefulActionNode
-{
-public:
-    ManualDriving(const std::string &name, const BT::NodeConfiguration &config)
-        : BT::StatefulActionNode(name, config),
-          stop_received_(false)
-    {
-        node_ = rclcpp::Node::make_shared("btManualDriving");
-
-        // Subscriber naar quiz topic
-        rclcpp::QoS qos(1);
-        qos.reliable(); 
-        sub_ = node_->create_subscription<std_msgs::msg::String>(
-            "/admin", qos,
-            [this](std_msgs::msg::String::SharedPtr msg)
-            {
-                if (msg->data == "RobotStopManualDrive")
-                {
-                    std::cout << "[ManualDriving] RobotStopManualDrive ontvangen!" << std::endl;
-                    stop_received_ = true;
-                }
-            });
-
-        // Publisher voor BehaviorTreeNode
-        pub_bt_ = node_->create_publisher<std_msgs::msg::String>(
-            "/BehaviorTreeNode", 10);
-    }
-
-    static BT::PortsList providedPorts()
-    {
-        return {};
-    }
-
-    BT::NodeStatus onStart() override
-    {
-        stop_received_ = false;
-
-        std_msgs::msg::String msg;
-        msg.data = "ManualDriving";
-        pub_bt_->publish(msg);
-
-        std::cout << "[ManualDriving] START" << std::endl;
-
-        return BT::NodeStatus::RUNNING;
-    }
-
-    BT::NodeStatus onRunning() override
-    {
-        rclcpp::spin_some(node_);
-
-        if (stop_received_)
-        {
-            std::cout << "[ManualDriving] Stop ontvangen -> SUCCESS" << std::endl;
-            return BT::NodeStatus::SUCCESS;
-        }
-
-        return BT::NodeStatus::RUNNING;
-    }
-
-    void onHalted() override
-    {
-        std::cout << "[ManualDriving] HALTED" << std::endl;
-    }
-
-private:
-    rclcpp::Node::SharedPtr node_;
-    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
-    bool stop_received_;
-};
-/*/
-
 class CheckAdminPanel : public BT::StatefulActionNode
 {
 public:
@@ -3159,14 +2861,12 @@ public:
 
     static BT::PortsList providedPorts()
     {
-        return {            BT::OutputPort<bool>("admin_done")};
+        return {};
     }
 
     BT::NodeStatus onStart() override
     {
         admin_panel_open_ = false;
-
-        setOutput("admin_done", false);  // Volgende keer mag adminloop bij start al niet metteen slagen => voorkom dit door hier blackboardvariabele te resetten
 
         return BT::NodeStatus::RUNNING;
     }
@@ -3202,7 +2902,11 @@ private:
 // -------------------------
 int main(int argc, char **argv)
 {
+
+    // starten RO2 communicatie 
     rclcpp::init(argc, argv);
+
+    // aanmaak object
     BT::BehaviorTreeFactory factory;
 
     // registreer nodes
@@ -3222,7 +2926,6 @@ int main(int argc, char **argv)
     factory.registerNodeType<RobotAtQuiz>("RobotAtQuiz");
     factory.registerNodeType<WaitQuizToEnd>("WaitQuizToEnd");
     factory.registerNodeType<BatteryOk>("BatteryOk");
-    factory.registerNodeType<InChargingStation>("InChargingStation");
     factory.registerNodeType<DriveToChargingStation>("DriveToChargingStation");
     factory.registerNodeType<StatusDriveToChargingDock>("StatusDriveToChargingDock");
     factory.registerNodeType<IsRobotCharging>("IsRobotCharging");
@@ -3237,8 +2940,6 @@ int main(int argc, char **argv)
 
     factory.registerNodeType<CheckAdminCondition>("CheckAdminCondition");
     factory.registerNodeType<CheckButtonState>("CheckButtonState");
-    //factory.registerNodeType<MDChargeLocation>("MDChargeLocation");
-    //factory.registerNodeType<MDChargeLocation>("MDTurnAround");
 
     factory.registerNodeType<ConnectionLost >("ConnectionLost");
 
@@ -3246,41 +2947,35 @@ int main(int argc, char **argv)
     factory.registerNodeType<MainBTStopDrive>("MainBTStopDrive");
     factory.registerNodeType<MainBTSetErrorFlag>("MainBTSetErrorFlag");
 
-
     factory.registerNodeType<ForceSuccess>("MainFallbackForceSuccess");
     factory.registerNodeType<ForceSuccess>("BatteryForceSuccess");
 
-    //factory.registerNodeType<ManualDriving>("ManualDriving");
-
-
-    //factory.registerNodeType<CheckMainBTErrorState>("CheckMainBTErrorState");
 
     factory.registerNodeType<LoopSequence>("LoopSequence");
-    factory.registerNodeType<LoopAdminPanel>("LoopAdminPanel");
+  
 
 
     // laad boom uit XML
     auto tree = factory.createTreeFromFile("src/mecabot_bt/trees/behavior_tree.xml");
 
     std::cout << "--- Starting BT in continuous mode ---" << std::endl;
-    rclcpp::Rate loop_rate(1.0); 
+    rclcpp::Rate loop_rate(1.0); // definieer hoeveel ticks/sec naar rootnode gaan
 
     while (rclcpp::ok())
     {
-        BT::NodeStatus status = tree.tickRoot();
+        BT::NodeStatus status = tree.tickRoot(); // root ticken
 
+        // status van root succes of failure : ga dan halten
         if (status == BT::NodeStatus::SUCCESS) {
             std::cout << "--- Tree ticked to SUCCESS ---" << std::endl;
-            // Optioneel: reset de boom zodat sommige nodes opnieuw kunnen uitvoeren
             tree.rootNode()->halt();
         }
         else if (status == BT::NodeStatus::FAILURE) {
             std::cout << "--- Tree ticked to FAILURE ---" << std::endl;
-            // Optioneel: reset de boom om opnieuw te proberen
             tree.rootNode()->halt();
         }
 
-        loop_rate.sleep();
+        loop_rate.sleep(); // wacht zolang zodat de rate klopt
     }
 
     rclcpp::shutdown();
