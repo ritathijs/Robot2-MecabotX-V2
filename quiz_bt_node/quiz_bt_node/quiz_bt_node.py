@@ -256,10 +256,12 @@ class QuizBTNode(Node):
 
     def on_time_updated(self, time_str):
         try:
+         # zet in instellingen automatisch dag en tijdsbepaling over internet uit indien je de tijd wilt zien updaten
             subprocess.run(["sudo", "date", "-s", time_str], check=True)
             print("Systeemtijd succesvol aangepast.")
         except subprocess.CalledProcessError as e:
             print(f"Fout bij het aanpassen van de tijd: {e}")
+
     # ---------------- SOCKET EVENTS ----------------
     def on_connect(self):
         if self._is_blocking():
@@ -298,8 +300,6 @@ class QuizBTNode(Node):
             return
         self.get_logger().info("Schedule update event ontvangen")
         self.fetch_schedule()
-
-
 
     def on_admin_panel_open(self):
 

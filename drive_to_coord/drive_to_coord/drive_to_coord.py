@@ -25,13 +25,13 @@ behavior_tree_nodes = {
 	"MDForceCharging":			  {"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
 
 	# --- Behavior Tree doelen ---
-	"IsRobotAtQuiz":				{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "once"},
-	"IsRobotAtWorkArea":			{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "once"},
+	"IsRobotAtQuiz":				{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "once"},
+	"IsRobotAtWorkArea":			{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "once"},
 
 	# --- People Search doelen ---
-	"CheckingNearbyVisitors":	   {"keepoutfilter_on": "True",  "drive_action": "peoplesearch", "message_frequency": "always"},
-	"DriveWorkArea":				{"keepoutfilter_on": "True",  "drive_action": "peoplesearch", "message_frequency": "always"},
-	"DriveQuizLocation":			{"keepoutfilter_on": "True",  "drive_action": "peoplesearch", "message_frequency": "always"},
+	"CheckingNearbyVisitors":	   {"keepoutfilter_on": "False",  "drive_action": "peoplesearch", "message_frequency": "always"},
+	"DriveWorkArea":				{"keepoutfilter_on": "False",  "drive_action": "peoplesearch", "message_frequency": "always"},
+	"DriveQuizLocation":			{"keepoutfilter_on": "False",  "drive_action": "peoplesearch", "message_frequency": "always"},
 	
 	# --- Default ---
 	"Default":					  {"keepoutfilter_on": "none",  "drive_action": "estop", "message_frequency": "always"},
@@ -125,7 +125,7 @@ class DriveToCoord(Node):
 		with self.lock:
 			if self.needs_action:
 				self.actiondistribute()
-				self.needs_action = False
+				#self.needs_action = False
 
 	# --- LOGICA & ACTIES ---
 

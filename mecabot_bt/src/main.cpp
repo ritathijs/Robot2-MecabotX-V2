@@ -1332,7 +1332,7 @@ public:
         if (elapsed >= timeout_)
         {
             std::cout << "[ArrivedAtVisitors] Timeout (" << elapsed << "s) -> FAILURE" << std::endl;
-            return BT::NodeStatus::FAILURE;  // TIJDELIJK NAAR SUCCESS VOOR TESTING ZONDER QUINTEN
+            return BT::NodeStatus::FAILURE;  
         }
 
         //std::cout << "[ArrivedAtVisitors] Running... distance=" << follow_value_

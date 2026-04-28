@@ -156,6 +156,8 @@ class AutoRecharger(Node):
             10
         )
 
+        self.battery_full_sent = False
+
 
         self.force_charge_active = False  # NA START MOET EEN STOP KOMEN, EEN NIEUWE START WORDT GENEGEERD (VLAG HOOG)
 
@@ -1106,8 +1108,11 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             if self.last_charge_complete!=0:
                 self.last_charge_complete=0
             print_and_fixRetract(GREEN+'充电已完成.(Chrge complete.)'+RESET)#Charging complete
+            
             #BT charging gelukt
-            self.publish_event("BATTERY-FULL")
+            if not self.battery_full_sent:
+                self.publish_event("BATTERY-FULL")
+                self.battery_full_sent = True
 
         self.last_charge_complete=self.charge_complete
 
