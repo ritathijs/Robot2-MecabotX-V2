@@ -23,15 +23,8 @@
                                             <Fallback name="CheckWorkingZone">
                                                 <CheckInWorkingZone robotLocationBAT="{robotLocationBAT}" />
                                                 <Sequence name="GoToWorkAreaSequence">
-                                                <DriveWorkArea timeout="5.0"
-                                                    x="3.0487911701202393"
-                                                    y="-0.05911848694086075"
-                                                    z="0.0"
-                                                    qx="0.0"
-                                                    qy="0.0"
-                                                    qz="-0.685763245510487"
-                                                    qw="0.7278246843209727"
-                                                    workarea_timestamp="{workarea_timestamp}" />                                                    <IsRobotAtWorkArea timeout="200.0" workarea_timestamp="{workarea_timestamp}" drive_failed="{drive_failed}" />
+                                                    <DriveWorkArea timeout="5.0" x="-2.2921230792999268" y="2.3765931129455566" z="0.0033969879150390625" qx="0.0" qy="0.0" qz="0" qw="1.0" workarea_timestamp="{workarea_timestamp}" />
+                                                <IsRobotAtWorkArea timeout="200.0" workarea_timestamp="{workarea_timestamp}" drive_failed="{drive_failed}" />
                                                 </Sequence>
                                             </Fallback>
                                             <RobotExplore robotLocation="{robotLocation}"/>
@@ -42,15 +35,8 @@
                                                     <ArrivedAtVisitors timeout="30.0"/>
                                                 </Sequence>
                                             </LoopSequence>
-                                            <DriveQuizLocation timeout="5.0"
-                                                x="3.31720232963562"
-                                                y="-4.291603088378906"
-                                                z="0.0"
-                                                qx="0.0"
-                                                qy="0.0"
-                                                qz="0.7151928043065381"
-                                                qw="0.6989272155726588"
-                                                sent_timestamp="{quiz_timestamp}" />                                            <IsRobotAtQuiz timeout="200.0" sent_timestamp="{quiz_timestamp}" drive_failed="{drive_failed}" />
+                                            <DriveQuizLocation timeout="5.0" x="1.9707672595977783" y="0.4888995885848999" z="0.0" qx="0.0" qy="0.0" qz="0.9599275506038583" qw="0.28024827848120143" sent_timestamp="{quiz_timestamp}" />
+                                            <IsRobotAtQuiz timeout="200.0" sent_timestamp="{quiz_timestamp}" drive_failed="{drive_failed}" />
                                             <RobotAtQuiz robotLocation="{robotLocation}"/>
                                             <WaitQuizToEnd timeout="120.0"/>
                                         </Sequence>

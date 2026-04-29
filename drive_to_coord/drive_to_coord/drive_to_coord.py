@@ -133,7 +133,15 @@ class DriveToCoord(Node):
 		# Aangeroepen vanuit de control_loop, de lock is al actief.
 		
 		currentnode = behavior_tree_nodes.get(self.last_BehaviorTreeNode)
-		if currentnode is None: currentnode = behavior_tree_nodes["Default"]
+
+		if currentnode is None:
+
+			self.get_logger().error(
+				f"Onbekende BehaviorTreeNode ontvangen: '{self.last_BehaviorTreeNode}' → ESTOP geactiveerd!"
+			)
+			print(f"[ESTOP TRIGGER] Onbekende node: {self.last_BehaviorTreeNode}")
+			
+			currentnode = behavior_tree_nodes["Default"]
 		
 		if currentnode["keepoutfilter_on"] == "True": 
 			self.keepout_filter(True)

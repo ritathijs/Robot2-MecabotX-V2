@@ -672,7 +672,7 @@ public:
 
         // NIEUW: scherm triggeren via RPi topic
         std_msgs::msg::String rpi_msg;
-        rpi_msg.data = "RobotError";
+        rpi_msg.data = "RobotErrorCharge";
         rpi_pub_->publish(rpi_msg);
 
         return BT::NodeStatus::RUNNING;

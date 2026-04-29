@@ -59,6 +59,10 @@ class QuizBTNode(Node):
         # publisher die iets stuurt indien manual driving is gebeurd (nodig voor eventuele reset locatie)
         self.manual_drive_control_publisher = self.create_publisher(String, 'ManualDriveControleLocation', qos)
 
+        # Logica om bij te houden of laatst verstuurde event robot-charge is om bij adminpanelclosed juist bericht te sturen
+        self.last_emitted_event = None
+
+
         # Berichten van BT om schermen aan te vragen
         self.subscription = self.create_subscription(
             String,
@@ -200,8 +204,8 @@ class QuizBTNode(Node):
             msg.linear.x = 0.15
             self.get_logger().info(f'0.15')
         elif direction == 'backward':
-            msg.linear.x = -0.25
-            self.get_logger().info(f'0.25')
+            msg.linear.x = -0.20
+            self.get_logger().info(f'0.20')
         elif direction == 'left':
             msg.linear.y = -0.1
             self.get_logger().info(f'0.1')
@@ -301,6 +305,10 @@ class QuizBTNode(Node):
         self.get_logger().info("Schedule update event ontvangen")
         self.fetch_schedule()
 
+    def emit_event(self, event, data=None):
+        self.sio.emit(event, data) if data else self.sio.emit(event)
+        self.last_emitted_event = event
+
     def on_admin_panel_open(self):
 
         if self._is_blocking():
@@ -338,9 +346,16 @@ class QuizBTNode(Node):
 
         else:
             self.get_logger().info("Geen manual drive gedaan : meteen ADMINPANELCLOSED")
+            
+            if self.last_emitted_event == "robot-charging":
+                self.get_logger().info("Laatste event was robot-charging -> opnieuw versturen")
+                self.emit_event("robot-charging")
+            else:
+                self.get_logger().info("Laatste event was niet robot-charging -> niets versturen")
 
             self.publish_admin_message("ADMINPANELCLOSED")
             self.fetch_schedule()
+
 
     def _finalize_admin_closed_wrapper(self):
 
@@ -353,6 +368,11 @@ class QuizBTNode(Node):
 
     def _finalize_admin_closed(self):
         self.get_logger().info("Na vertraging adminpanelclosed")
+        if self.last_emitted_event == "robot-charging":
+            self.get_logger().info("Laatste event was robot-charging -> opnieuw versturen")
+            self.emit_event("robot-charging")
+        else:
+            self.get_logger().info("Laatste event was niet robot-charging -> niets versturen")
 
         self.publish_admin_message("ADMINPANELCLOSED")
         self.fetch_schedule() # bij sluiten adminpanel zeker de instellingen opvragen
@@ -381,12 +401,14 @@ class QuizBTNode(Node):
         elif msg.data == "robot-arrived-at-quiz-location":
             self.sio.emit("robot-arrived-at-quiz-location")
         elif msg.data == "RobotError":
-            self.sio.emit("robot-error")
+            self.sio.emit("robot-error-drive")
+        elif msg.data == "RobotErrorCharge":
+            self.sio.emit("robot-error-charge")
         elif msg.data == "RobotGoCharge":
             self.sio.emit("robot-go-charge")
         elif msg.data == "RobotCharging":
             self.sio.emit("robot-charging")
-        elif msg.data == "RobotStartup":
+        elif msg.data == "RobotStarting":
             self.sio.emit("robot-startup")
 
     # ---------------- CLEANUP ----------------

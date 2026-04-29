@@ -1,7 +1,7 @@
 image: WHEELTEC.pgm
 mode: trinary
-resolution: 0.02
-origin: [-12.94, -12.9, 0.0]
+resolution: 0.05
+origin: [-43.6, -37.2, 0]
 negate: 0
-occupied_thresh: 0.65
-free_thresh: 0.196
+occupied_thresh: 0.70
+free_thresh: 0.70
