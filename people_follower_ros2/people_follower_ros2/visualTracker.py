@@ -108,7 +108,7 @@ class PeopleFollowerNode(Node):
 
         qos = QoSProfile(depth=1)
         qos.reliability = ReliabilityPolicy.RELIABLE
-        qos.durability  = DurabilityPolicy.TRANSIENT_LOCAL  # houdt laatste bericht beschikbaar
+        qos.durability  = DurabilityPolicy.TRANSIENT_LOCAL  # aangepast van TRANSIENT_LOCAL naar VOLATILE (04/05/2025)
 
         self.pub_distance = self.create_publisher(Float32, '/target_distance', qos)
         # ------------------------------------------------------------------
@@ -211,7 +211,7 @@ class PeopleFollowerNode(Node):
 
             # Geen oriëntatie info → identity quaternion
             pose.pose.orientation.x = 0.0
-            pose.pose.orientation.y = -1.0
+            pose.pose.orientation.y = -1.0 #Stond op -1.0
             pose.pose.orientation.z = 0.0
             pose.pose.orientation.w = 1.0
 
@@ -271,18 +271,18 @@ class PeopleFollowerNode(Node):
         zero_pos.distance = 0.0
         self.pub_pos.publish(zero_pos)
 
-        pose = PoseStamped()
-        pose.header = header
-        pose.pose.position.x = 0.0
-        pose.pose.position.y = 0.0
-        pose.pose.position.z = 0.0
+        #pose = PoseStamped()
+        #pose.header = header
+        #pose.pose.position.x = 0.0
+        #pose.pose.position.y = 0.0
+        #pose.pose.position.z = 0.0
 
-        pose.pose.orientation.x = 0.0
-        pose.pose.orientation.y = 0.0
-        pose.pose.orientation.z = 0.0
-        pose.pose.orientation.w = 1.0
+        #pose.pose.orientation.x = 0.0
+        #pose.pose.orientation.y = 0.0
+        #pose.pose.orientation.z = 0.0
+        #pose.pose.orientation.w = 1.0
 
-        self.pub_rel_point.publish(pose)
+        #self.pub_rel_point.publish(pose)
 
         self.pub_distance.publish(Float32(data=0.0))
 

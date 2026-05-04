@@ -2101,7 +2101,6 @@ private:
 
 };
 
-
 class IsRobotAtWorkArea : public BT::StatefulActionNode
 {
 public:
@@ -2117,7 +2116,13 @@ public:
                 std::string data = msg->data;
                 std::cout << "[IsRobotAtWorkArea] Ontvangen bericht: " << data << std::endl;
 
-                // Split op '-'
+                if (data.size() >= 7 && data.substr(0, 7) == "12-0000")
+                {
+                    received_failure_ = true;
+                    std::cout << "[IsRobotAtWorkArea] FAILURE door 12-0000 prefix" << std::endl;
+                    return;
+                }
+
                 std::vector<std::string> parts;
                 std::stringstream ss(data);
                 std::string segment;
@@ -2132,7 +2137,6 @@ public:
                 std::string status_code = parts[0];
                 std::string recv_timestamp = parts[1];
 
-                // Alleen eerste 10 cijfers vergelijken
                 std::string expected_prefix = sent_timestamp_.substr(0, 10);
                 std::string recv_prefix = recv_timestamp.substr(0, 10);
 
@@ -2187,8 +2191,6 @@ public:
 
     BT::NodeStatus onRunning() override
     {
-
-
         rclcpp::spin_some(node_);
 
         auto elapsed = std::chrono::duration<double>(
@@ -2233,6 +2235,8 @@ private:
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
 };
+
+
 
 /*/
 class MDTurnAround : public BT::StatefulActionNode

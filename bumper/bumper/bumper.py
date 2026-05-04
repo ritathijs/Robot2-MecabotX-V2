@@ -4,7 +4,6 @@ import Jetson.GPIO as GPIO
 from geometry_msgs.msg import Twist
 
 PINS = [7, 15, 31, 32]
-EMERGENCY_BUTTON_PIN = 29
 DIR = {"A": 15, "L": 32, "V": 7, "R": 31}  # Definieer Voor, Achter, Links, Rechts
 speed = 0.1
 
@@ -19,38 +18,18 @@ class GPIOReaderNode(Node):
         
         self.timer_10s = None
         self.timer_3s = None
+        
+        GPIO.setmode(GPIO.BOARD)
 
-        self.emergency_active = False
-        self.emergency_timer = None
-
-        GPIO.setmode(GPIO.BOARD)  
-        GPIO.setup(EMERGENCY_BUTTON_PIN, GPIO.IN)
         for pin in PINS:
             GPIO.setup(pin, GPIO.IN)
         
         self.timer = self.create_timer(0.2, self.detect)
 
-
-    def cancelEmergencyTimer(self):
-        if self.emergency_timer is not None:
-            self.emergency_timer.cancel()
-            self.emergency_timer = None
-
-    def releaseEmergency(self):
-        self.emergency_active = False
-        self.emergency_timer = None
-
     def detect(self):
         states = {pin: GPIO.input(pin) for pin in PINS}
-        emergency_button_state = GPIO.input(EMERGENCY_BUTTON_PIN)
         
-        self.get_logger().info(f'status: {self.action} \t pinnen: {states} \t noodstop: {emergency_button_state}')
-        
-        if emergency_button_state == 1:
-            self.stop()
-            self.get_logger().info('Noodstop ingedrukt')
-            return
-        
+        self.get_logger().info(f'status: {self.action} \t pinnen: {states}')
                    
         if self.action == "Free":
             if 1 in states.values():

@@ -2,6 +2,7 @@
     <!-- unique camera name-->
     <arg name="camera_name" default="camera"/>
     <!-- Hardware depth registration -->
+    <!-- default fps voor color, depth, ir=30 -->
     <arg name="depth_registration" default="false"/>
     <arg name="serial_number" default=""/>
     <arg name="device_num" default="1"/>
@@ -13,21 +14,21 @@
     <arg name="connection_delay" default="100"/>
     <arg name="color_width" default="640"/>
     <arg name="color_height" default="480"/>
-    <arg name="color_fps" default="30"/>
+    <arg name="color_fps" default="10"/>
     <arg name="enable_color" default="true"/>
     <arg name="flip_color" default="false"/>
     <arg name="color_qos" default="default"/>
     <arg name="color_camera_info_qos" default="default"/>
     <arg name="depth_width" default="640"/>
     <arg name="depth_height" default="480"/>
-    <arg name="depth_fps" default="30"/>
+    <arg name="depth_fps" default="10"/>
     <arg name="enable_depth" default="true"/>
     <arg name="flip_depth" default="false"/>
     <arg name="depth_qos" default="default"/>
     <arg name="depth_camera_info_qos" default="default"/>
     <arg name="ir_width" default="640"/>
     <arg name="ir_height" default="480"/>
-    <arg name="ir_fps" default="30"/>
+    <arg name="ir_fps" default="10"/>
     <arg name="enable_ir" default="true"/>
     <arg name="flip_ir" default="false"/>
     <arg name="ir_qos" default="default"/>

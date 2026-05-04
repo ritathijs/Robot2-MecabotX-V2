@@ -86,7 +86,7 @@ bt_navigator_rclcpp_node:
 controller_server:
   ros__parameters:
     use_sim_time: False                             
-    controller_frequency: 30.0                      #RT orig:30 运行控制器的频率 (hz)
+    controller_frequency: 10.0                      #RT orig:30 运行控制器的频率 (hz)
     controller_plugins: ["FollowPath"]              # 用于处理请求和参数的控制器插件的映射名称列表
     odom_topic: /odom_combined                      #里程计话题名称
 
@@ -106,9 +106,9 @@ controller_server:
 
     FollowPath:
       plugin: "nav2_mppi_controller::MPPIController" #MPPI控制器
-      time_steps: 56    #候选轨迹中的时间步长（点）数
-      model_dt: 0.05    #每个时间步长的时间步长的长度dt（以秒为单位）是预测范围
-      batch_size: 2000  #在给定迭代中从当前最佳控制序列中随机采样的候选轨迹的数量
+      time_steps: 30    #org: 56 候选轨迹中的时间步长（点）数
+      model_dt: 0.1    #org: 0.05, hangt samen met controller frequency 每个时间步长的时间步长的长度dt（以秒为单位）是预测范围
+      batch_size: 200  #org: 2000 在给定迭代中从当前最佳控制序列中随机采样的候选轨迹的数量
       vx_std: 0.2       #Vx 的抽样标准差
       vy_std: 0.02       #Vy 的抽样标准差
       wz_std: 0.2       #org: 0.4 Wz（角速度）的抽样标准差
