@@ -7,6 +7,16 @@ from geometry_msgs.msg import PoseStamped, Twist
 from std_msgs.msg import String, Bool
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
+from dataclasses import dataclass
+
+@dataclass
+class GoalRecord:
+	source: str				  # De bron van het doel (BehaviorTree of PeopleSearch)
+	goal: NavigateToPose.Goal	# De PoseStamped (coördinaten)
+	handle: any = None		   # De ClientGoalHandle (wordt later gevuld)
+	result: any = None		   # Het uiteindelijke Resultaat
+	accepted: bool = False	   # Is het doel geaccepteerd?
+	status: int = 0			  # De statuscode (1=Pending, 4=Canceled, etc.)
 
 behavior_tree_nodes = {
 	# keepoutfilter_on: "True" / "False" / "none"
@@ -14,27 +24,27 @@ behavior_tree_nodes = {
 	# message_frequency: "always" / "once"
 
 	# --- Oplaad statussen ---
-	"DriveToChargingStation":	   {"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
+	"DriveToChargingStation":	  {"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
 	"StatusDriveToChargingDock":	{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
-	"IsRobotCharging":			  {"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
+	"IsRobotCharging":			{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
 	"IsBatteryFull":				{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
-	"BatteryCharged":			   {"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
+	"BatteryCharged":			  {"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
 	"RobotWaitInChargingStation":   {"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
 	"StopRobotCharging":			{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
 	"ManualDriving":				{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
-	"MDForceCharging":			  {"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
+	"MDForceCharging":			{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
 
 	# --- Behavior Tree doelen ---
-	"IsRobotAtQuiz":				{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "once"},
-	"IsRobotAtWorkArea":			{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "once"},
+	"IsRobotAtQuiz":				{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "once"},
+	"IsRobotAtWorkArea":			{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "once"},
 
 	# --- People Search doelen ---
-	"CheckingNearbyVisitors":	   {"keepoutfilter_on": "False",  "drive_action": "peoplesearch", "message_frequency": "always"},
-	"DriveWorkArea":				{"keepoutfilter_on": "False",  "drive_action": "peoplesearch", "message_frequency": "always"},
-	"DriveQuizLocation":			{"keepoutfilter_on": "False",  "drive_action": "peoplesearch", "message_frequency": "always"},
+	"CheckingNearbyVisitors":	  {"keepoutfilter_on": "True",  "drive_action": "peoplesearch", "message_frequency": "always"},
+	"DriveWorkArea":				{"keepoutfilter_on": "True",  "drive_action": "peoplesearch", "message_frequency": "always"},
+	"DriveQuizLocation":			{"keepoutfilter_on": "True",  "drive_action": "peoplesearch", "message_frequency": "always"},
 	
 	# --- Default ---
-	"Default":					  {"keepoutfilter_on": "none",  "drive_action": "estop", "message_frequency": "always"},
+	"Default":					{"keepoutfilter_on": "none",  "drive_action": "estop", "message_frequency": "always"},
 }
 
 class DriveToCoord(Node):
@@ -49,13 +59,10 @@ class DriveToCoord(Node):
 		self.last_btDriveCoord = None
 		self.last_peoplesearchcoord = None
 		
-		self.currentgoal = None
-		self._goal_handle = None
+		self.current_goals = []
 		self.needs_action = False
 		
 		self.keepoutfilter_state = None
-
-		self.currentgoal_timestamp = None
 
 		# --- CALLBACK GROUPS ---
 		# drie aparte groepen: één voor inkomende data, één voor de verwerkings-loop, en één voor de callbacks van de nav
@@ -111,7 +118,7 @@ class DriveToCoord(Node):
 	def btDriveCoord_callback(self, msg):
 		with self.lock:
 			self.last_btDriveCoord = msg
-		self.publish_status(11, "coördinaat opgeslagen")
+			self.publish_status(11, "coördinaat opgeslagen")
 		self.get_logger().info('Nieuw coördinaat ontvangen.')
 
 	def peoplesearchcoord_callback(self, msg):
@@ -125,7 +132,6 @@ class DriveToCoord(Node):
 		with self.lock:
 			if self.needs_action:
 				self.actiondistribute()
-				#self.needs_action = False
 
 	# --- LOGICA & ACTIES ---
 
@@ -135,13 +141,11 @@ class DriveToCoord(Node):
 		currentnode = behavior_tree_nodes.get(self.last_BehaviorTreeNode)
 
 		if currentnode is None:
-
+			currentnode = behavior_tree_nodes["Default"]
 			self.get_logger().error(
 				f"Onbekende BehaviorTreeNode ontvangen: '{self.last_BehaviorTreeNode}' → ESTOP geactiveerd!"
 			)
 			print(f"[ESTOP TRIGGER] Onbekende node: {self.last_BehaviorTreeNode}")
-			
-			currentnode = behavior_tree_nodes["Default"]
 		
 		if currentnode["keepoutfilter_on"] == "True": 
 			self.keepout_filter(True)
@@ -150,9 +154,9 @@ class DriveToCoord(Node):
 			
 		if currentnode["drive_action"] == "estop":
 			self.emergencystop()
-			self.cancel_current_goal()
+			self.cancel_all_goals()
 		elif currentnode["drive_action"] == "release":
-			self.cancel_current_goal()
+			self.cancel_all_goals()
 		elif currentnode["drive_action"] == "behaviortree":
 			self.send_goal("BehaviorTree", self.last_btDriveCoord)
 		elif currentnode["drive_action"] == "peoplesearch":
@@ -164,7 +168,7 @@ class DriveToCoord(Node):
 			self.needs_action = False
 
 	def keepout_filter(self, state):
-		if self.keepoutfilter_state is not state:
+		if self.keepoutfilter_state != state:
 			self.keepoutfilter_state = state
 			msg = Bool()
 			msg.data = state
@@ -176,15 +180,23 @@ class DriveToCoord(Node):
 		stop_msg = Twist()
 		self.estop_cmd_vel_pub.publish(stop_msg)
 	
-	def cancel_current_goal(self):
-		# Goal proberen te cancelen
-		if self._goal_handle is not None:
-			self.get_logger().info("Bezig met annuleren van huidige goal...")
-			try:
-				self._goal_handle.cancel_goal_async()
-				self._goal_handle = None
-			except Exception as e:
-				self.get_logger().warn(f"Fout bij annuleren goal: {e}")
+	def cancel_all_goals(self):
+		if not self.current_goals:
+			return
+
+		# Doorloop de records in omgekeerde volgorde
+		for record in reversed(self.current_goals):
+			# We kunnen alleen annuleren als er een handle is opgeslagen
+			if record.handle is not None and record.accepted:
+				self.get_logger().info("Bezig met annuleren van huidige goal...")
+				try:
+					record.handle.cancel_goal_async()
+				except Exception as e:
+					self.get_logger().warn(f"Fout bij annuleren goal: {e}")
+		
+		# Maak de lijst leeg nadat alles is geannuleerd
+		self.current_goals.clear()
+		self.get_logger().info("Alle lokale goal-records zijn gewist.")
 
 	def send_goal(self, source, coordinate=None):
 		if coordinate is None:
@@ -193,44 +205,73 @@ class DriveToCoord(Node):
 			self.publish_status(12, msg)
 			return
 		
-        # Stuur geen goal als er al een actief is met dezelfde timestamp
-		if self.currentgoal_timestamp == coordinate.header.stamp:
-			self.get_logger().info("Zelfde coördinaat en timestamp als huidige goal, geen nieuwe goal verzonden.")
-			return
-		self.currentgoal_timestamp = coordinate.header.stamp
-		
-		self.currentgoal = NavigateToPose.Goal()
-		self.currentgoal.pose = coordinate
+		# Voorkom IndexError door eerst te checken of de lijst niet leeg is
+		if self.current_goals:
+			# Let op: we moeten .goal.pose aanspreken omdat .pose in het Goal() bericht zit
+			if self.current_goals[-1].goal.pose.header.stamp == coordinate.header.stamp:
+				self.get_logger().info("Zelfde coördinaat en timestamp als huidige goal, geen nieuwe goal verzonden.")
+				return
 
+		goal_msg = NavigateToPose.Goal()
+		goal_msg.pose = coordinate
+
+		new_record = GoalRecord(
+			source=source,
+			goal=goal_msg, 
+			handle=None,
+			result=None,
+			accepted=False,
+			status=0  # Nav2 statussen zijn integers (0 = onbekend/verzonden)
+		)
+		
+		self.current_goals.append(new_record)
+	
 		self.publish_status(13, "goal verzonden")
 
-		self._send_goal_future = self._action_client.send_goal_async(self.currentgoal)
-		self._send_goal_future.add_done_callback(self.goal_response_callback)
+		self.send_goal_future = self._action_client.send_goal_async(new_record.goal)
+		
+		# Geef het new_record mee aan de callback via een lambda
+		self.send_goal_future.add_done_callback(
+			lambda future: self.goal_response_callback(future, new_record)
+		)
 		
 
 	# --- CALLBACKS (Nav_cb_group) ---
-	def goal_response_callback(self, future):
+	def goal_response_callback(self, future, record):
 		with self.lock:
-			self._goal_handle = future.result()
+			handle = future.result()
 			
-			if not self._goal_handle.accepted:
+			# Sla de handle en de accepted-status op in ons record
+			record.handle = handle
+			record.accepted = handle.accepted
+			
+			if not record.accepted:
 				self.publish_status(10, "goal afgewezen")
 				self.get_logger().warn("Goal NIET geaccepteerd door Nav2!")
-				self._goal_handle = None
+				record.status = 5 # 5 staat vaak voor Aborted/Rejected
 				return
 
 			self.get_logger().info("Goal geaccepteerd ✅")
 			self.publish_status(15, "goal geaccepteerd")
+			record.status = 2 # 2 staat voor Executing
 
-			self._get_result_future = self._goal_handle.get_result_async()
-			self._get_result_future.add_done_callback(self.result_callback)
+			self._get_result_future = handle.get_result_async()
+			
+			# Geef het record opnieuw mee aan de result callback
+			self._get_result_future.add_done_callback(
+				lambda future: self.result_callback(future, record)
+			)
 
-	def result_callback(self, future):
+	def result_callback(self, future, record):
 		with self.lock:
-			status = future.result().status
-			self.publish_status(status, "NAV")
-			self.get_logger().info(f"Goal afgerond, Nav2-status: {status:02d}")
-			self._goal_handle = None
+			result_handle = future.result()
+			
+			# Vul de laatste informatie in het record in
+			record.result = result_handle.result
+			record.status = result_handle.status
+			
+			self.publish_status(record.status, "NAV")
+			self.get_logger().info(f"Goal afgerond, Nav2-status: {record.status:02d}")
 
 	# --- status publisher ---
 	def publish_status(self, status, text: str):
@@ -263,6 +304,7 @@ def main(args=None):
 
 if __name__ == '__main__':
 	main()
+
 
 
 
