@@ -1227,31 +1227,38 @@ private:
 };
  
 
-
+// BT node die bepaalt of robot de visitors bereikt heeft via afstand + trigger event
 class ArrivedAtVisitors : public BT::StatefulActionNode
 {
 public:
     ArrivedAtVisitors(const std::string &name, const BT::NodeConfiguration &config)
         : BT::StatefulActionNode(name, config),
-          timeout_(15.0), received_drive_to_quiz_(false), overlimit_count_(0), follow_value_(0.0)
+          timeout_(15.0),
+          received_drive_to_quiz_(false),
+          overlimit_count_(0),
+          follow_value_(0.0)
     {
         node_ = rclcpp::Node::make_shared("btArrivedAtVisitors");
 
-        pub_bt_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
+        pub_bt_ = node_->create_publisher<std_msgs::msg::String>(
+            "/BehaviorTreeNode", 10);
 
-        //pub_quiz_ = node_->create_publisher<std_msgs::msg::String>("/rpitopic", 10);
-
+        // volgt afstand tot persoon/target
         sub_follow_ = node_->create_subscription<std_msgs::msg::Float32>(
-            "/target_distance", 10,
+            "/target_distance",
+            10,
             [this](std_msgs::msg::Float32::SharedPtr msg)
             {
                 follow_value_ = msg->data;
             });
 
         rclcpp::QoS qos(1);
-        qos.reliable(); 
+        qos.reliable();
+
+        // externe trigger dat robot effectief op quiz locatie is aangekomen
         sub_quiz_ = node_->create_subscription<std_msgs::msg::String>(
-            "/quiz", qos,
+            "/quiz",
+            qos,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
                 if (msg->data == "drive_to_quiz_location")
@@ -1264,7 +1271,7 @@ public:
 
     static BT::PortsList providedPorts()
     {
-        return { BT::InputPort<double>("timeout") };
+        return {BT::InputPort<double>("timeout")};
     }
 
     BT::NodeStatus onStart() override
@@ -1282,34 +1289,30 @@ public:
         msg_bt_.data = "ArrivedAtVisitors";
         pub_bt_->publish(msg_bt_);
 
-        /*/ FEEDBACK TABLOO => ROBOTGOTOVISITOS EN ARRIVEDATVISITORS MOETEN EEN WORDEN
-        std_msgs::msg::String msg_quiz_;
-        msg_quiz_.data = "RobotArrivedAtVisitors";
-        pub_quiz_->publish(msg_quiz_);
-        /*/
+        std::cout << "[ArrivedAtVisitors] START (timeout="
+                  << timeout_ << "s)" << std::endl;
 
-        std::cout << "[ArrivedAtVisitors] START (timeout=" << timeout_ << "s)" << std::endl;
         return BT::NodeStatus::RUNNING;
     }
 
     BT::NodeStatus onRunning() override
     {
-
         rclcpp::spin_some(node_);
-        
+
+        // status wordt continu gepubliceerd voor debugging
         std_msgs::msg::String msg_bt_;
         msg_bt_.data = "ArrivedAtVisitors";
         pub_bt_->publish(msg_bt_);
 
-        //std::cout << "[ArrivedAtVisitors] Measured distance: " << follow_value_ << std::endl;
-
+        // directe success trigger via extern event
         if (received_drive_to_quiz_)
         {
             std::cout << "[ArrivedAtVisitors] 'drive_to_quiz_location' ontvangen -> SUCCESS" << std::endl;
+
             return BT::NodeStatus::SUCCESS;
         }
 
-
+        // filter: detectie van "te ver weg" over meerdere samples
         if (follow_value_ > 3.0)
         {
             overlimit_count_++;
@@ -1319,24 +1322,26 @@ public:
             overlimit_count_ = 0;
         }
 
+        // robuuste failure als meerdere opeenvolgende metingen te ver zijn
         if (overlimit_count_ >= 5)
         {
-            std::cout << "[ArrivedAtVisitors] 3 metingen > 3.0 -> FAILURE" << std::endl;
+            std::cout << "[ArrivedAtVisitors] 5 metingen > 3.0 -> FAILURE" << std::endl;
+
             return BT::NodeStatus::FAILURE;
         }
 
-
+        // timeout fallback
         auto elapsed = std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - start_time_).count();
+                           std::chrono::steady_clock::now() - start_time_)
+                           .count();
 
         if (elapsed >= timeout_)
         {
-            std::cout << "[ArrivedAtVisitors] Timeout (" << elapsed << "s) -> FAILURE" << std::endl;
-            return BT::NodeStatus::FAILURE;  
-        }
+            std::cout << "[ArrivedAtVisitors] Timeout (" << elapsed
+                      << "s) -> FAILURE" << std::endl;
 
-        //std::cout << "[ArrivedAtVisitors] Running... distance=" << follow_value_
-          //        << " overlimit_count=" << overlimit_count_ << std::endl;
+            return BT::NodeStatus::FAILURE;
+        }
 
         return BT::NodeStatus::RUNNING;
     }
@@ -1351,11 +1356,12 @@ private:
     bool received_drive_to_quiz_;
     int overlimit_count_;
     float follow_value_;
+
     std::chrono::steady_clock::time_point start_time_;
 
     rclcpp::Node::SharedPtr node_;
+
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
-    //rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;
 
     rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr sub_follow_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_quiz_;
@@ -1363,9 +1369,7 @@ private:
 
 
 
-
-
-
+// BT node die een doelpositie naar quiz locatie stuurt via PoseStamped
 class DriveQuizLocation : public BT::StatefulActionNode
 {
 public:
@@ -1376,6 +1380,9 @@ public:
 
         pub_bt_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
         pub_coord_ = node_->create_publisher<geometry_msgs::msg::PoseStamped>("/btDriveCoord", 10);
+
+        pub_tracking_enable_ = node_->create_publisher<std_msgs::msg::Bool>(
+            "/tracking_enable", 10);
     }
 
     static BT::PortsList providedPorts()
@@ -1395,14 +1402,18 @@ public:
 
     BT::NodeStatus onStart() override
     {
-        //return BT::NodeStatus::SUCCESS;
-
-        // Publish BT node naam
         std_msgs::msg::String bt_msg;
         bt_msg.data = "DriveQuizLocation";
         pub_bt_->publish(bt_msg);
 
-        // Publish coordinate
+        // stop follow-me/person tracking
+        std_msgs::msg::Bool tracking_msg;
+        tracking_msg.data = false;
+        pub_tracking_enable_->publish(tracking_msg);
+
+        std::cout << "[DriveQuizLocation] Tracking DISABLED" << std::endl;
+
+        // pose opbouwen voor navigation stack
         sent_coord_.header.stamp = node_->get_clock()->now();
         sent_coord_.header.frame_id = "map";
 
@@ -1416,7 +1427,6 @@ public:
         getInput("qz", qz);
         getInput("qw", qw);
 
-
         sent_coord_.pose.position.x = x;
         sent_coord_.pose.position.y = y;
         sent_coord_.pose.position.z = z;
@@ -1425,14 +1435,17 @@ public:
         sent_coord_.pose.orientation.y = qy;
         sent_coord_.pose.orientation.z = qz;
         sent_coord_.pose.orientation.w = qw;
+
         pub_coord_->publish(sent_coord_);
 
-        // Timestamp opslaan en op blackboard zetten
+        // timestamp voor tracking van deze navigation request
         sent_timestamp_ = std::to_string(sent_coord_.header.stamp.sec) + "." +
                           std::to_string(sent_coord_.header.stamp.nanosec);
+
         setOutput("sent_timestamp", sent_timestamp_);
 
-        std::cout << "[DriveQuizLocation] Published coordinate at timestamp: " << sent_timestamp_ << std::endl;
+        std::cout << "[DriveQuizLocation] Published coordinate at timestamp: "
+                  << sent_timestamp_ << std::endl;
 
         if (!getInput<double>("timeout", timeout_))
             timeout_ = 5.0;
@@ -1444,8 +1457,8 @@ public:
 
     BT::NodeStatus onRunning() override
     {
-
-        auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start_time_).count();
+        auto elapsed = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - start_time_).count();
 
         if (elapsed >= timeout_)
         {
@@ -1468,9 +1481,13 @@ private:
     geometry_msgs::msg::PoseStamped sent_coord_;
 
     rclcpp::Node::SharedPtr node_;
+
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pub_coord_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_tracking_enable_;
 };
+
+
 
 
 class IsRobotAtQuiz : public BT::StatefulActionNode
@@ -2557,28 +2574,41 @@ private:
 
     std::chrono::steady_clock::time_point start_time_;
 };
+// =======================================================
+// StartDrivingToPeople
+// → Start beweging richting bezoekers/people node
+// → Publishes BT status + quiz trigger
+// =======================================================
 
 class StartDrivingToPeople : public BT::StatefulActionNode
 {
 public:
-    StartDrivingToPeople(const std::string &name, const BT::NodeConfiguration &config)
-        : BT::StatefulActionNode(name, config), timeout_(5.0)  // default 5 seconden
+    StartDrivingToPeople(const std::string &name,
+                         const BT::NodeConfiguration &config)
+        : BT::StatefulActionNode(name, config),
+          timeout_(5.0)
     {
         node_ = rclcpp::Node::make_shared("btStartDrivingToPeople");
 
-        pub_bt_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
-        pub_quiz_ = node_->create_publisher<std_msgs::msg::String>("/rpitopic", 10);
+        pub_bt_ = node_->create_publisher<std_msgs::msg::String>(
+            "/BehaviorTreeNode", 10);
+
+        pub_quiz_ = node_->create_publisher<std_msgs::msg::String>(
+            "/rpitopic", 10);
+
+        pub_tracking_enable_ = node_->create_publisher<std_msgs::msg::Bool>(
+            "/tracking_enable", 10);
     }
 
     static BT::PortsList providedPorts()
     {
-        return { BT::InputPort<double>("timeout") };
+        return {
+            BT::InputPort<double>("timeout")
+        };
     }
 
     BT::NodeStatus onStart() override
     {
-
-
         getInput("timeout", timeout_);
 
         start_time_ = std::chrono::steady_clock::now();
@@ -2588,24 +2618,35 @@ public:
         bt_msg.data = "StartDrivingToPeople";
         pub_bt_->publish(bt_msg);
 
-
+        // Publish naar RPi topic
         std_msgs::msg::String quiz_msg;
         quiz_msg.data = "RobotArrivedAtVisitors";
         pub_quiz_->publish(quiz_msg);
 
-        std::cout << "[StartDrivingToPeople] Started driving to people, timeout=" << timeout_ << "s" << std::endl;
+        // Tracking inschakelen
+        std_msgs::msg::Bool tracking_msg;
+        tracking_msg.data = true;
+        pub_tracking_enable_->publish(tracking_msg);
+
+        std::cout << "[StartDrivingToPeople] Tracking ENABLED" << std::endl;
+        std::cout << "[StartDrivingToPeople] Started driving to people, timeout="
+                  << timeout_ << "s" << std::endl;
 
         return BT::NodeStatus::RUNNING;
     }
 
     BT::NodeStatus onRunning() override
     {
-
-        auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start_time_).count();
+        auto elapsed =
+            std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - start_time_)
+                .count();
 
         if (elapsed >= timeout_)
         {
-            std::cout << "[StartDrivingToPeople] Timeout reached -> SUCCESS" << std::endl;
+            std::cout << "[StartDrivingToPeople] Timeout reached -> SUCCESS"
+                      << std::endl;
+
             return BT::NodeStatus::SUCCESS;
         }
 
@@ -2614,15 +2655,25 @@ public:
 
     void onHalted() override
     {
+        // Tracking uitschakelen
+        std_msgs::msg::Bool tracking_msg;
+        tracking_msg.data = false;
+        pub_tracking_enable_->publish(tracking_msg);
+
+        std::cout << "[StartDrivingToPeople] Tracking DISABLED" << std::endl;
         std::cout << "[StartDrivingToPeople] HALTED" << std::endl;
     }
 
 private:
     double timeout_;
     std::chrono::steady_clock::time_point start_time_;
+
     rclcpp::Node::SharedPtr node_;
+
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;
+
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_tracking_enable_;
 };
 
 

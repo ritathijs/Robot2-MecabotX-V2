@@ -17,6 +17,9 @@ from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Float32
 from rclpy.qos import DurabilityPolicy, ReliabilityPolicy
 
+from std_msgs.msg import Bool
+
+
 class PeopleFollowerNode(Node):
     def __init__(self):
         super().__init__('people_follower')
@@ -29,14 +32,14 @@ class PeopleFollowerNode(Node):
 
         self.declare_parameter('yolo_model', 'yolov8n.pt')
         self.declare_parameter('conf', 0.5)
-        self.declare_parameter('use_cuda', False)
+        self.declare_parameter('use_cuda', True)
 
         # Half FOVs (radians)
         self.declare_parameter('horizontal_half_fov', 0.5235987755982988)
         self.declare_parameter('vertical_half_fov',   0.43196898986859655)
 
         # Depth handling
-        self.declare_parameter('depth_scale', 1.0)         # multiply raw depth to get meters
+        self.declare_parameter('depth_scale', 1.0)  # multiply raw depth to get meters
         self.declare_parameter('min_valid_distance', 0.2)  # m
         self.declare_parameter('max_valid_distance', 5.0)  # m
         self.declare_parameter('patch_radius_px', 6)       # sampling patch radius
@@ -53,6 +56,13 @@ class PeopleFollowerNode(Node):
         # Topics
         self.declare_parameter('annotated_topic', '/detected_image')
         self.declare_parameter('position_topic',  '/object_tracker/current_position')
+
+        # Schakelaar voor het wel of niet publiceren/renderen van de geannoteerde afbeelding (CPU besparing)
+        self.declare_parameter('publish_annotated_img', False)
+
+        # Verwerkingsfrequentie (hoeveel beelden per seconde YOLO mag verwerken)
+        self.declare_parameter('processing_rate_hz', 1.0)
+
 
         # Read params
         self.rgb_topic   = self.get_parameter('rgb_topic').value
@@ -80,6 +90,17 @@ class PeopleFollowerNode(Node):
 
         self.annotated_topic = self.get_parameter('annotated_topic').value
         self.position_topic  = self.get_parameter('position_topic').value
+        
+        self.publish_annotated_img = bool(self.get_parameter('publish_annotated_img').value)
+
+        self.processing_rate_hz = float(self.get_parameter('processing_rate_hz').value)
+
+        if self.processing_rate_hz <= 0.0:
+            self.processing_period = 0.0
+        else:
+            self.processing_period = 1.0 / self.processing_rate_hz
+
+
 
         # Model
         self.model = YOLO(self.yolo_model)
@@ -114,9 +135,12 @@ class PeopleFollowerNode(Node):
         # ------------------------------------------------------------------
 
         # throttle-instellingen voor /peoplesearchcoord en /target_distance
-        self.coord_pub_hz = 2.0  # frequentie waarmee coords worden gepubliceerd (Hz)
+        self.coord_pub_hz = 1.0  # frequentie waarmee coords worden gepubliceerd (Hz)
         self.coord_pub_period = 1.0 / self.coord_pub_hz  
         self.last_coord_pub_time = self.get_clock().now()  
+
+        self.last_processing_time = self.get_clock().now()
+
 
         self.get_logger().info(f'RGB: {self.rgb_topic}, Depth: {self.depth_topic}')
         self.get_logger().info(f'Annotated: {self.annotated_topic}, Position: {self.position_topic}')
@@ -125,7 +149,47 @@ class PeopleFollowerNode(Node):
         self.img_h = None
         self.img_w = None
 
+
+        # Connection setup with Behavior Tree (BT will decide if the YOLO must run or not)
+        self.tracking_enabled = False
+
+        self.enable_sub = self.create_subscription(
+            Bool,
+            '/tracking_enable',
+            self.enable_callback,
+            10
+        )
+
+
+    # Connection callback with Behavior Tree
+    def enable_callback(self, msg):
+        self.tracking_enabled = msg.data
+
+        if self.tracking_enabled:
+            self.get_logger().info("Tracking ENABLED")
+        else:
+            self.get_logger().info("Tracking DISABLED")
+
+
+
     def on_synced(self, rgb_msg: Image, depth_msg: Image):
+
+        # Behavior Tree decides if YOLO needs to run or not
+        if not self.tracking_enabled:
+            return
+
+
+        # Limiteer het aantal verwerkte beelden per seconde
+        if self.processing_period > 0.0:
+            now = self.get_clock().now()
+            elapsed = (now - self.last_processing_time).nanoseconds / 1e9
+
+            if elapsed < self.processing_period:
+                return
+
+            self.last_processing_time = now
+
+
         # RGB -> BGR for OpenCV/YOLO
         frame = self.bridge.imgmsg_to_cv2(rgb_msg, desired_encoding='bgr8')
         if self.img_h is None or self.img_w is None:
@@ -141,7 +205,8 @@ class PeopleFollowerNode(Node):
 
         if y.boxes is None or len(y.boxes) == 0:
             self._publish_zero_outputs(rgb_msg.header)
-            self._publish_annotated(rgb_msg.header, y.plot())
+            if self.publish_annotated_img:
+                self._publish_annotated(rgb_msg.header, y.plot())
             return
 
         # Pick closest person with valid depth
@@ -161,11 +226,10 @@ class PeopleFollowerNode(Node):
             if closest is None or dist_m < closest[2]:
                 closest = (cx, cy, dist_m, i)
 
-        annotated = y.plot()
-
         if closest is None:
             self._publish_zero_outputs(rgb_msg.header)
-            self._publish_annotated(rgb_msg.header, annotated)
+            if self.publish_annotated_img:
+                self._publish_annotated(rgb_msg.header, y.plot())
             return
 
         cx, cy, dist_m, _ = closest
@@ -227,9 +291,11 @@ class PeopleFollowerNode(Node):
             f'dist={"{:.0f}mm".format(distance_out) if self.dist_mm_out else f"{distance_out:.2f}m"}'
         )
 
-        self._publish_annotated(rgb_msg.header, annotated)
+        if self.publish_annotated_img:
+            self._publish_annotated(rgb_msg.header, y.plot())
 
     # ---------- helpers ----------
+    # (Rest van de code ongewijzigd)
     def _normalize_depth(self, depth_raw):
         if depth_raw.dtype == np.uint16:
             depth = depth_raw.astype(np.float32)
@@ -270,17 +336,6 @@ class PeopleFollowerNode(Node):
         zero_pos.angle_y = 0.0
         zero_pos.distance = 0.0
         self.pub_pos.publish(zero_pos)
-
-        #pose = PoseStamped()
-        #pose.header = header
-        #pose.pose.position.x = 0.0
-        #pose.pose.position.y = 0.0
-        #pose.pose.position.z = 0.0
-
-        #pose.pose.orientation.x = 0.0
-        #pose.pose.orientation.y = 0.0
-        #pose.pose.orientation.z = 0.0
-        #pose.pose.orientation.w = 1.0
 
         #self.pub_rel_point.publish(pose)
 
