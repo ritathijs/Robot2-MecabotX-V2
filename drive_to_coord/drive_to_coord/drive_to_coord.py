@@ -34,6 +34,9 @@ behavior_tree_nodes = {
 	"ManualDriving":				{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
 	"MDForceCharging":			{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
 
+
+	"RobotRotationFollowMe":	{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
+
 	# --- Behavior Tree doelen ---
 	"IsRobotAtQuiz":				{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "once"},
 	"IsRobotAtWorkArea":			{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "once"},

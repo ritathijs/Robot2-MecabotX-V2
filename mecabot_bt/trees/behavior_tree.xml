@@ -30,9 +30,14 @@
                                             <RobotExplore robotLocation="{robotLocation}"/>
                                             <LoopSequence name="LoopSequence">
                                                 <Sequence name="FollowMeSequence">
-                                                    <StartDrivingToPeople timeout="5.0"/>
-                                                    <CheckingNearbyVisitors/>
-                                                    <ArrivedAtVisitors timeout="30.0"/>
+                                                    <StartDrivingToPeople timeout="5.0" robot_rotate="{robot_rotate}"/>
+                                                    <CheckingNearbyVisitors
+                                                            distance_max="2"
+                                                            timer="30.0"
+                                                            zero_limit="10"
+                                                            robot_rotate="{robot_rotate}" />
+                                                    <RobotRotationFollowMe robot_rotate="{robot_rotate}"/>
+                                                    <ArrivedAtVisitors robot_rotate="{robot_rotate}" timeout="30.0"/>
                                                 </Sequence>
                                             </LoopSequence>
                                             <DriveQuizLocation timeout="5.0" x="1.9707672595977783" y="0.4888995885848999" z="0.0" qx="0.0" qy="0.0" qz="0.9599275506038583" qw="0.28024827848120143" sent_timestamp="{quiz_timestamp}" />

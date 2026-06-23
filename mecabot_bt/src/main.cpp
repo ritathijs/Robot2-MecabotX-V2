@@ -1161,52 +1161,108 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
 
 };
-
 class CheckingNearbyVisitors : public BT::StatefulActionNode
 {
 public:
     CheckingNearbyVisitors(const std::string &name, const BT::NodeConfiguration &config)
-        : BT::StatefulActionNode(name, config), success_count_(0)
+        : BT::StatefulActionNode(name, config),
+          zero_streak_(0)
     {
         node_ = rclcpp::Node::make_shared("btCheckingNearbyVisitors");
 
-        // Publisher (zoals de andere nodes)
         pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
+
         rclcpp::QoS qos(1);
         qos.reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE);
         qos.durability(RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL);
 
         sub_ = node_->create_subscription<std_msgs::msg::Float32>(
             "/target_distance", qos,
-            [this](std_msgs::msg::Float32::SharedPtr msg) { latest_value_ = msg->data; });
+            [this](std_msgs::msg::Float32::SharedPtr msg)
+            {
+                latest_value_ = msg->data;
+            });
     }
 
     static BT::PortsList providedPorts()
     {
-        return {};
+        return {
+            BT::InputPort<float>("distance_max"),
+            BT::InputPort<float>("timer"),
+            BT::InputPort<int>("zero_limit"),
+            BT::OutputPort<bool>("robot_rotate")
+        };
     }
 
     BT::NodeStatus onStart() override
     {
+        zero_streak_ = 0;
+        latest_value_ = 999.0;
+        start_time_ = std::chrono::steady_clock::now();
 
-        success_count_ = 0;
-        latest_value_ = 999.0; 
+        setOutput("robot_rotate", false);
+
         std_msgs::msg::String msg;
         msg.data = "CheckingNearbyVisitors";
         pub_->publish(msg);
+
         std::cout << "[CheckingNearbyVisitors] START" << std::endl;
         return BT::NodeStatus::RUNNING;
     }
 
     BT::NodeStatus onRunning() override
     {
-
         rclcpp::spin_some(node_);
-        std::cout << "[CheckingNearbyVisitors] Measured distance: " << latest_value_ << std::endl;
 
-        if (latest_value_ <= 1.5 and latest_value_ > 0.05) 
+        // standaardwaarden, worden overschreden door de blackboardwaarden (zie xml)
+        float distance_max = 1.5;
+        int zero_limit = 5;
+
+        getInput<float>("distance_max", distance_max);
+        getInput<int>("zero_limit", zero_limit);
+
+        std::cout << "[CheckingNearbyVisitors] Distance: " << latest_value_ << std::endl;
+
+        // -----------------------------
+        // 1. persoon dichtbij → SUCCESS (geen robot_rotate wijziging)
+        // -----------------------------
+        if (latest_value_ <= distance_max && latest_value_ > 0.05)
         {
-            std::cout << "[CheckingNearbyVisitors] STOP BIJ PERSOON -> SUCCESS" << std::endl;
+            std::cout << "[CheckingNearbyVisitors] PERSON DICHTBIJ -> SUCCESS" << std::endl;
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        // -----------------------------
+        // 2. zero detectie logica (reset zich vanaf er een niet-nulmeting heeft plaatsgevonden)
+        // -----------------------------
+        if (latest_value_ == 0.0)
+        {
+            zero_streak_++;
+        }
+        else
+        {
+            zero_streak_ = 0;
+        }
+
+        // -----------------------------
+        // 3. timeout
+        // -----------------------------
+        getInput<double>("timer", timeout_);
+
+        auto elapsed = std::chrono::duration<double>(
+                           std::chrono::steady_clock::now() - start_time_)
+                           .count();
+
+        bool timeout = (elapsed >= timeout_);
+
+        // -----------------------------
+        // 4. failure-conditie → robot rotate
+        // -----------------------------
+        if (zero_streak_ >= zero_limit || timeout)
+        {
+            std::cout << "[CheckingNearbyVisitors] ZERO-STREAK OR TIMEOUT -> SUCCESS + ROTATE" << std::endl;
+
+            setOutput("robot_rotate", true);
             return BT::NodeStatus::SUCCESS;
         }
 
@@ -1222,9 +1278,14 @@ private:
     rclcpp::Node::SharedPtr node_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
     rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr sub_;
+
     float latest_value_;
-    int success_count_;
+    int zero_streak_;
+
+    double timeout_;
+    std::chrono::steady_clock::time_point start_time_;
 };
+
  
 
 // BT node die bepaalt of robot de visitors bereikt heeft via afstand + trigger event
@@ -1271,11 +1332,25 @@ public:
 
     static BT::PortsList providedPorts()
     {
-        return {BT::InputPort<double>("timeout")};
+        return {BT::InputPort<double>("timeout"),
+                BT::InputPort<bool>("robot_rotate")};
     }
 
     BT::NodeStatus onStart() override
     {
+
+        bool robot_rotate = false;
+
+        if (getInput<bool>("robot_rotate", robot_rotate))
+        {
+            if (robot_rotate)
+            {
+                std::cout << "[ArrivedAtVisitors] robot_rotate == true -> FAILURE" << std::endl;
+                return BT::NodeStatus::FAILURE;
+            }
+        }
+
+
         overlimit_count_ = 0;
         received_drive_to_quiz_ = false;
         follow_value_ = 0.0;
@@ -2254,7 +2329,138 @@ private:
 };
 
 
+class RobotRotationFollowMe : public BT::StatefulActionNode
+{
+public:
+    RobotRotationFollowMe(const std::string &name, const BT::NodeConfiguration &config)
+        : BT::StatefulActionNode(name, config),
+          has_started_(false),
+          rotation_done_(false)
+    {
+        node_ = rclcpp::Node::make_shared("bt_robot_rotation_follow_me");
 
+        pub_bt_ = node_->create_publisher<std_msgs::msg::String>(
+            "/BehaviorTreeNode", 10);
+
+        pub_cmd_vel_ = node_->create_publisher<geometry_msgs::msg::Twist>(
+            "/cmd_vel", 10);
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {
+            BT::InputPort<bool>("robot_rotate")
+        };
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        bool robot_rotate = false;
+
+        if (!getInput("robot_rotate", robot_rotate))
+        {
+            throw BT::RuntimeError("Missing input port: robot_rotate");
+        }
+
+        // Als false → direct success
+        if (!robot_rotate)
+        {
+            std::cout << "[RobotRotationFollowMe] robot_rotate == false -> SUCCESS" << std::endl;
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        // publish BT node naam
+        std_msgs::msg::String bt_msg;
+        bt_msg.data = "RobotRotationFollowMe";
+        pub_bt_->publish(bt_msg);
+
+        start_time_ = std::chrono::steady_clock::now();
+        has_started_ = true;
+        rotation_done_ = false;
+
+        std::cout << "[RobotRotationFollowMe] START (waiting 3s before rotation)" << std::endl;
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    BT::NodeStatus onRunning() override
+    {
+        rclcpp::spin_some(node_);
+
+        if (!has_started_)
+            return BT::NodeStatus::SUCCESS;
+
+        auto elapsed = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - start_time_
+        ).count();
+
+        // 1) 3 seconden wachten
+        if (elapsed < 3.0)
+        {
+            return BT::NodeStatus::RUNNING;
+        }
+
+        // 2) na 3 sec: 1x kwart rotatie uitvoeren
+        if (!rotation_done_)
+        {
+            geometry_msgs::msg::Twist cmd;
+            cmd.linear.x = 0.0;
+            cmd.angular.z = 0.6;   // lage snelheid rotatie
+
+            rotation_start_ = std::chrono::steady_clock::now();
+            rotation_duration_ = 6; 
+
+            pub_cmd_vel_->publish(cmd);
+
+            rotation_done_ = true;
+
+            std::cout << "[RobotRotationFollowMe] Rotation started (quarter turn)" << std::endl;
+            return BT::NodeStatus::RUNNING;
+        }
+
+        // 3) rotatie stoppen na duur
+        auto rot_elapsed = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - rotation_start_
+        ).count();
+
+        if (rot_elapsed >= rotation_duration_)
+        {
+            geometry_msgs::msg::Twist stop;
+            stop.linear.x = 0.0;
+            stop.angular.z = 0.0;
+
+            pub_cmd_vel_->publish(stop);
+
+            std::cout << "[RobotRotationFollowMe] Rotation done -> SUCCESS" << std::endl;
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override
+    {
+        geometry_msgs::msg::Twist stop;
+        stop.linear.x = 0.0;
+        stop.angular.z = 0.0;
+
+        pub_cmd_vel_->publish(stop);
+
+        std::cout << "[RobotRotationFollowMe] HALTED" << std::endl;
+    }
+
+private:
+    rclcpp::Node::SharedPtr node_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
+    rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr pub_cmd_vel_;
+
+    bool has_started_;
+    bool rotation_done_;
+
+    std::chrono::steady_clock::time_point start_time_;
+    std::chrono::steady_clock::time_point rotation_start_;
+    double rotation_duration_;
+};
 /*/
 class MDTurnAround : public BT::StatefulActionNode
 {
@@ -2603,12 +2809,16 @@ public:
     static BT::PortsList providedPorts()
     {
         return {
-            BT::InputPort<double>("timeout")
+            BT::InputPort<double>("timeout"),
+            BT::OutputPort<bool>("robot_rotate")  // BlackBoard output
+
         };
     }
 
     BT::NodeStatus onStart() override
     {
+        setOutput("robot_rotate", false); // reset van robot_rotate zodat in deze sequentie van mensenzoeken we opnieuw gewoon starten met zoeken zonder rotatie
+
         getInput("timeout", timeout_);
 
         start_time_ = std::chrono::steady_clock::now();
@@ -2988,6 +3198,8 @@ int main(int argc, char **argv)
     factory.registerNodeType<BatteryCharged>("BatteryCharged");
     factory.registerNodeType<RobotWaitInChargingStation>("RobotWaitInChargingStation");
     factory.registerNodeType<BatteryStopDrive>("BatteryStopDrive");
+    
+    factory.registerNodeType<RobotRotationFollowMe>("RobotRotationFollowMe");
 
 
     factory.registerNodeType<CheckNetworkError>("CheckNetworkError");
