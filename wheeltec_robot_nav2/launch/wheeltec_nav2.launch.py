@@ -8,7 +8,7 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node, SetRemap # Toegevoegd om de mux te tesen
 
 def generate_launch_description():
-    use_sim_time = LaunchConfiguration('use_sim_time', default='true')
+    use_sim_time = LaunchConfiguration('use_sim_time', default='false')
 
     wheeltec_robot_dir = get_package_share_directory('turn_on_wheeltec_robot')
     wheeltec_launch_dir = os.path.join(wheeltec_robot_dir, 'launch')
@@ -34,7 +34,6 @@ def generate_launch_description():
         param_dir, 'param_flagship_mec_dl.yaml'))
         
     # Toegevoegd om de mux te testen
-    # Nu met de drive_mux in commentaar gezet en het origineel beneden terug gebruikt
     nav2_group = GroupAction(
         actions=[
             SetRemap(src='/cmd_vel', dst='/nav_cmd_vel'),
@@ -76,7 +75,6 @@ def generate_launch_description():
         ),        
         
         # In commentaar gezet om de mux te testen
-        #Nu terug gebruikt omdat we drive_mux gebruiken
         #IncludeLaunchDescription(
         #    PythonLaunchDescriptionSource(
         #        [wheeltec_nav_launchr, '/bringup_launch.py']),
