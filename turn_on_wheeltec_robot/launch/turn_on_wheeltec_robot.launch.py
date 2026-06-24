@@ -58,7 +58,8 @@ def generate_launch_description():
             package='tf2_ros', 
             executable='static_transform_publisher', 
             name='base_to_gyro',
-            arguments=['0', '0', '0','0', '0','0','base_footprint','gyro_link'],
+            #Origineel was dit allemaal nul, de IMU is in de finale robot 180° gedraaid dus hebben we pi toegevoegd
+            arguments=['0', '0', '0','3.14159', '0','0','base_footprint','gyro_link'],
     )
     
     imu_filter_node =  launch_ros.actions.Node(

@@ -21,6 +21,10 @@ from geometry_msgs.msg import Twist
 # URL van server waar settings (schedule) worden opgehaald
 URL = "http://192.168.137.100/cms/getSettings"
 
+# De systeemtijd van de pi wordt doorgestuurd naar de robot
+# Indien volgende parameter op False staat wordt de robot zijn systeemtijd NIET aangepast
+# Indien volgende parameter op True  staat wordt de robot zijn systeemtijd WEL  aangepast (kan transformproblemen leveren in RVIZ)
+CHANGETIME = False
 
 class QuizBTNode(Node):
     def __init__(self):
@@ -259,6 +263,8 @@ class QuizBTNode(Node):
 
 
     def on_time_updated(self, time_str):
+        if not(CHANGETIME):
+            return
         try:
          # zet in instellingen automatisch dag en tijdsbepaling over internet uit indien je de tijd wilt zien updaten
             subprocess.run(["sudo", "date", "-s", time_str], check=True)

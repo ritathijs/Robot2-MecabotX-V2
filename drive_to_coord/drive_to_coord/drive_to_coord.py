@@ -44,8 +44,8 @@ behavior_tree_nodes = {
 
 	# --- People Search doelen ---
 	"CheckingNearbyVisitors":	  {"keepoutfilter_on": "True",  "drive_action": "peoplesearch", "message_frequency": "always"},
-	"DriveWorkArea":				{"keepoutfilter_on": "True",  "drive_action": "peoplesearch", "message_frequency": "always"},
-	"DriveQuizLocation":			{"keepoutfilter_on": "True",  "drive_action": "peoplesearch", "message_frequency": "always"},
+	"DriveWorkArea":				{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "always"},
+	"DriveQuizLocation":			{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "always"},
 	
 	# --- Default ---
 	"Default":					{"keepoutfilter_on": "none",  "drive_action": "estop", "message_frequency": "always"},

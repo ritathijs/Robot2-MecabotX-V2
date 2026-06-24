@@ -2405,10 +2405,10 @@ public:
         {
             geometry_msgs::msg::Twist cmd;
             cmd.linear.x = 0.0;
-            cmd.angular.z = 0.6;   // lage snelheid rotatie
+            cmd.angular.z = 0.6;   // rotatiesnelheid
 
             rotation_start_ = std::chrono::steady_clock::now();
-            rotation_duration_ = 6; 
+            rotation_duration_ = 3; 
 
             pub_cmd_vel_->publish(cmd);
 
