@@ -20,6 +20,11 @@ twist_mux:
         topic   : bump_cmd_vel
         timeout : 0.5
         priority: 100
+        
+      turn:
+        topic   : turn_cmd_vel
+        timeout : 2.0
+        priority: 15
       
       navigation:
         topic   : nav_cmd_vel

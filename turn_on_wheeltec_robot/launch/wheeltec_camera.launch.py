@@ -19,8 +19,13 @@ def generate_launch_description():
 		'video_device', default_value='/dev/video0',
 		description='video device serial number.')
  
+	#Astra_S = IncludeLaunchDescription(
+	#AnyLaunchDescriptionSource(os.path.join(astra_launch_dir,'astra.launch.xml')),)
+	#Launch nu mét simtime is true
 	Astra_S = IncludeLaunchDescription(
-	AnyLaunchDescriptionSource(os.path.join(astra_launch_dir,'astra.launch.xml')),)
+            AnyLaunchDescriptionSource(os.path.join(astra_launch_dir, 'astra.launch.xml')),
+            launch_arguments={'use_sim_time': 'true'}.items()
+        )
 
 	Astra_Pro = IncludeLaunchDescription(
 	AnyLaunchDescriptionSource(os.path.join(astra_launch_dir,'astra_pro.launch.xml')),)

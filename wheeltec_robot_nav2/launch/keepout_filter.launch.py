@@ -33,7 +33,7 @@ def generate_launch_description():
             executable='lifecycle_manager',
             name='lifecycle_manager_costmap_filters',
             output='screen',
-            parameters=[{'use_sim_time': False},
+            parameters=[{'use_sim_time': True},
                         {'autostart': True},
                         {'node_names': ['costmap_filter_info_server', 'keepout_map_server']}]),
         

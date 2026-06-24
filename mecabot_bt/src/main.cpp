@@ -1286,9 +1286,7 @@ private:
     std::chrono::steady_clock::time_point start_time_;
 };
 
- 
-
-// BT node die bepaalt of robot de visitors bereikt heeft via afstand + trigger event
+ // BT node die bepaalt of robot de visitors bereikt heeft via afstand + trigger event
 class ArrivedAtVisitors : public BT::StatefulActionNode
 {
 public:
@@ -1303,6 +1301,10 @@ public:
 
         pub_bt_ = node_->create_publisher<std_msgs::msg::String>(
             "/BehaviorTreeNode", 10);
+
+        // NIEUW: publisher voor scherm/RPi
+        pub_quiz_screen_ = node_->create_publisher<std_msgs::msg::String>(
+            "/rpitopic", 10);
 
         // volgt afstand tot persoon/target
         sub_follow_ = node_->create_subscription<std_msgs::msg::Float32>(
@@ -1332,13 +1334,14 @@ public:
 
     static BT::PortsList providedPorts()
     {
-        return {BT::InputPort<double>("timeout"),
-                BT::InputPort<bool>("robot_rotate")};
+        return {
+            BT::InputPort<double>("timeout"),
+            BT::InputPort<bool>("robot_rotate")
+        };
     }
 
     BT::NodeStatus onStart() override
     {
-
         bool robot_rotate = false;
 
         if (getInput<bool>("robot_rotate", robot_rotate))
@@ -1350,19 +1353,28 @@ public:
             }
         }
 
-
         overlimit_count_ = 0;
         received_drive_to_quiz_ = false;
         follow_value_ = 0.0;
 
         if (!getInput<double>("timeout", timeout_))
+        {
             timeout_ = 15.0;
+        }
 
         start_time_ = std::chrono::steady_clock::now();
 
+        // Publish naar BehaviorTreeNode
         std_msgs::msg::String msg_bt_;
         msg_bt_.data = "ArrivedAtVisitors";
         pub_bt_->publish(msg_bt_);
+
+        // NIEUW: scherm tonen
+        std_msgs::msg::String screen_msg;
+        screen_msg.data = "RobotArrivedAtVisitors";
+        pub_quiz_screen_->publish(screen_msg);
+
+        std::cout << "[ArrivedAtVisitors] Screen trigger sent: RobotArrivedAtVisitors" << std::endl;
 
         std::cout << "[ArrivedAtVisitors] START (timeout="
                   << timeout_ << "s)" << std::endl;
@@ -1438,10 +1450,12 @@ private:
 
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
 
+    // NIEUW
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_screen_;
+
     rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr sub_follow_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_quiz_;
 };
-
 
 
 // BT node die een doelpositie naar quiz locatie stuurt via PoseStamped
@@ -2343,7 +2357,7 @@ public:
             "/BehaviorTreeNode", 10);
 
         pub_cmd_vel_ = node_->create_publisher<geometry_msgs::msg::Twist>(
-            "/cmd_vel", 10);
+            "/turn_cmd_vel", 10);
     }
 
     static BT::PortsList providedPorts()
@@ -2783,7 +2797,7 @@ private:
 // =======================================================
 // StartDrivingToPeople
 // → Start beweging richting bezoekers/people node
-// → Publishes BT status + quiz trigger
+// → Publishes BT status + quiz trigger-
 // =======================================================
 
 class StartDrivingToPeople : public BT::StatefulActionNode
@@ -2823,14 +2837,14 @@ public:
 
         start_time_ = std::chrono::steady_clock::now();
 
-        // Publish naar BehaviorTreeNode
+        // Publish naar BehaviorTreeNode"
         std_msgs::msg::String bt_msg;
         bt_msg.data = "StartDrivingToPeople";
         pub_bt_->publish(bt_msg);
 
         // Publish naar RPi topic
         std_msgs::msg::String quiz_msg;
-        quiz_msg.data = "RobotArrivedAtVisitors";
+        quiz_msg.data = "RobotExplore";
         pub_quiz_->publish(quiz_msg);
 
         // Tracking inschakelen
