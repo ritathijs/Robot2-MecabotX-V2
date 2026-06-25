@@ -737,7 +737,7 @@ turn_on_robot::turn_on_robot():rclcpp::Node ("wheeltec_robot")
   //Set the velocity control command callback function
   //速度控制命令订阅回调函数设置
   Cmd_Vel_Sub = create_subscription<geometry_msgs::msg::Twist>(
-      "cmd_vel", 2, std::bind(&turn_on_robot::Cmd_Vel_Callback, this, _1));
+      "robot_cmd_vel", 2, std::bind(&turn_on_robot::Cmd_Vel_Callback, this, _1));
 
   RCLCPP_INFO(this->get_logger(),"wheeltec_robot Data ready"); //Prompt message //提示信息
 
