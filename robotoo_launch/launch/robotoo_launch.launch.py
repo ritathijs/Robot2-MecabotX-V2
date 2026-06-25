@@ -21,24 +21,31 @@ def generate_launch_description():
         )
     )
 
-    # 2 - Quiz_bt_node (socket naar roscommando's)
+    # 2 - Drive Mux
+    drive_mux_node = Node(
+        package='drive_mux',
+        executable='drive_mux',
+        name='drive_mux',
+        output='screen'
+    )
+
+    # 3 - Quiz_bt_node (socket naar roscommando's)
     quiz_bt_node = Node(
-        package='quiz_bt_node',    
+        package='quiz_bt_node',
         executable='quiz_bt_node',
         name='quiz_bt_node',
         output='screen'
     )
 
-    # 3 - Drive to coord
+    # 4 - Drive to coord
     drive_to_coord_node = Node(
         package='drive_to_coord',
         executable='drive_to_coord',
         output='log',
         arguments=['--ros-args', '--log-level', 'error']
-
     )
 
-    # 4 - Bumper
+    # 5 - Bumper
     bumper_node = Node(
         package='bumper',
         executable='bumper',
@@ -46,7 +53,7 @@ def generate_launch_description():
         arguments=['--ros-args', '--log-level', 'error']
     )
 
-    # 5 - Camera
+    # 6 - Camera
     wheeltec_camera_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([
@@ -57,7 +64,7 @@ def generate_launch_description():
         )
     )
 
-    # 6 - Pointcloud to laserscan (zodat cameraview wordt opgenomen door nav)
+    # 7 - Pointcloud to laserscan (zodat cameraview wordt opgenomen door nav)
     pointcloud_to_laserscan_node = Node(
         package='pointcloud_to_laserscan',
         executable='pointcloud_to_laserscan_node',
@@ -80,7 +87,7 @@ def generate_launch_description():
         }]
     )
 
-    # 7 - Keepoutfilter (no go zones)
+    # 8 - Keepoutfilter (no go zones)
     keepout_filter_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([
@@ -91,14 +98,14 @@ def generate_launch_description():
         )
     )
 
-    # 8 - Autocharge
+    # 9 - Autocharge
     auto_recharge_ros2_node = Node(
         package='auto_recharge_ros2',
         executable='auto_recharge',
         output='screen'
     )
 
-    # 9 - Visual tracker (people follower)
+    # 10 - Visual tracker (people follower)
     visualtracker_node = Node(
         package='people_follower_ros2',
         executable='visualtracker',
@@ -106,7 +113,7 @@ def generate_launch_description():
         arguments=['--ros-args', '--log-level', 'error']
     )
 
-    # 10 - Robot position reset
+    # 11 - Robot position reset
     robot_position_reset_node = Node(
         package='robot_position_reset',
         executable='robot_position_reset',
@@ -114,43 +121,48 @@ def generate_launch_description():
         output='screen'
     )
 
-    # 11 - Behavior Tree
+    # 12 - Behavior Tree
     bt_node = Node(
         package='mecabot_bt',
         executable='bt_node',
         output='screen'
     )
-    
-    
+
+    # ==========================================
+    # DELAYS
+    # ==========================================
+
     delay_1_nav2 = 0.0
-    delay_2_quiz_bt = 5.0
-    delay_3_drive_to_coord = 10.0
-    delay_4_bumper = 13.0
-    delay_5_camera = 14.0
-    delay_6_pointcloud_to_laserscan = 16.0
-    delay_7_keepout_filter = 18.0
-    delay_8_visualtracker = 19.0
-    delay_9_auto_recharge = 20.0
+    delay_2_drive_mux = 7.0
 
-    delay_10_robot_position_reset = 35.0
+    delay_3_quiz_bt = 10.0
+    delay_4_drive_to_coord = 15.0
+    delay_5_bumper = 18.0
+    delay_6_camera = 19.0
+    delay_7_pointcloud_to_laserscan = 21.0
+    delay_8_keepout_filter = 23.0
+    delay_9_visualtracker = 24.0
+    delay_10_auto_recharge = 25.0
 
+    delay_11_robot_position_reset = 40.0
 
-    delay_11_bt_node = 50.0
-    
+    delay_12_bt_node = 55.0
+
     # ==========================================
     # LAUNCH DESCRIPTION RETURN
     # ==========================================
 
     return LaunchDescription([
         TimerAction(period=delay_1_nav2, actions=[wheeltec_nav2_launch]),
-        TimerAction(period=delay_2_quiz_bt, actions=[quiz_bt_node]),
-        TimerAction(period=delay_3_drive_to_coord, actions=[drive_to_coord_node]),
-        TimerAction(period=delay_4_bumper, actions=[bumper_node]),
-        TimerAction(period=delay_5_camera, actions=[wheeltec_camera_launch]),
-        TimerAction(period=delay_6_pointcloud_to_laserscan, actions=[pointcloud_to_laserscan_node]),
-        TimerAction(period=delay_7_keepout_filter, actions=[keepout_filter_launch]),
-        TimerAction(period=delay_8_visualtracker, actions=[visualtracker_node]),
-        TimerAction(period=delay_9_auto_recharge, actions=[auto_recharge_ros2_node]),
-        TimerAction(period=delay_10_robot_position_reset, actions=[robot_position_reset_node]),
-        TimerAction(period=delay_11_bt_node, actions=[bt_node]),
+        TimerAction(period=delay_2_drive_mux, actions=[drive_mux_node]),
+        TimerAction(period=delay_3_quiz_bt, actions=[quiz_bt_node]),
+        TimerAction(period=delay_4_drive_to_coord, actions=[drive_to_coord_node]),
+        TimerAction(period=delay_5_bumper, actions=[bumper_node]),
+        TimerAction(period=delay_6_camera, actions=[wheeltec_camera_launch]),
+        TimerAction(period=delay_7_pointcloud_to_laserscan, actions=[pointcloud_to_laserscan_node]),
+        TimerAction(period=delay_8_keepout_filter, actions=[keepout_filter_launch]),
+        TimerAction(period=delay_9_visualtracker, actions=[visualtracker_node]),
+        TimerAction(period=delay_10_auto_recharge, actions=[auto_recharge_ros2_node]),
+        TimerAction(period=delay_11_robot_position_reset, actions=[robot_position_reset_node]),
+        TimerAction(period=delay_12_bt_node, actions=[bt_node]),
     ])
