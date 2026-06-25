@@ -810,49 +810,62 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pub_coord_;
 };
 
-
 class RobotExplore : public BT::SyncActionNode
 {
 public:
     RobotExplore(const std::string& name, const BT::NodeConfiguration& config)
-        : BT::SyncActionNode(name, config) {
-    node_ = rclcpp::Node::make_shared("btRobotExplore");
-    pub_quiz_ = node_->create_publisher<std_msgs::msg::String>("/rpitopic", 10);
-    pub_bt_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
-
-    }
-
-        static BT::PortsList providedPorts()
+        : BT::SyncActionNode(name, config)
     {
-        return { BT::OutputPort<std::string>("robotLocation") };
+        node_ = rclcpp::Node::make_shared("btRobotExplore");
+        pub_quiz_ = node_->create_publisher<std_msgs::msg::String>("/rpitopic", 10);
+        pub_bt_   = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
     }
 
-    BT::NodeStatus tick() override {
+    static BT::PortsList providedPorts()
+    {
+        return {
+            BT::OutputPort<std::string>("robotLocation"),
+            BT::OutputPort<std::string>("explore_timestamp")   // <-- toegevoegd
+        };
+    }
 
+    BT::NodeStatus tick() override
+    {
+        // output state
         setOutput("robotLocation", "WORKING");
 
+        // timestamp maken (Unix time)
+        auto stamp = node_->get_clock()->now();
 
-    	std::string state = "RobotExplore";
-    	std_msgs::msg::String msg;
+        int64_t sec = static_cast<int64_t>(stamp.seconds());
+        int64_t nanosec = stamp.nanoseconds() % 1000000000;
+
+        std::string explore_timestamp =
+            std::to_string(sec) + "." + std::to_string(nanosec);
+
+        // blackboard output
+        setOutput("explore_timestamp", explore_timestamp);
+
+        std::string state = "RobotExplore";
+        std_msgs::msg::String msg;
         msg.data = state;
         pub_quiz_->publish(msg);
-        
-        std::string bt_state = "RobotExplore";
+
         std_msgs::msg::String bt_msg;
-        bt_msg.data = bt_state;
+        bt_msg.data = "RobotExplore";
         pub_bt_->publish(bt_msg);
 
         std::cout << "[RobotExplore] Exploring environment (sim)" << std::endl;
+        std::cout << "[RobotExplore] Timestamp: " << explore_timestamp << std::endl;
+
         return BT::NodeStatus::SUCCESS;
     }
 
 private:
     rclcpp::Node::SharedPtr node_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;  // bestaande publisher
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;    // nieuwe publisher
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
 };
-
-
 
 
 
@@ -1395,7 +1408,6 @@ public:
         if (received_drive_to_quiz_)
         {
             std::cout << "[ArrivedAtVisitors] 'drive_to_quiz_location' ontvangen -> SUCCESS" << std::endl;
-
             return BT::NodeStatus::SUCCESS;
         }
 
@@ -2363,7 +2375,9 @@ public:
     static BT::PortsList providedPorts()
     {
         return {
-            BT::InputPort<bool>("robot_rotate")
+            BT::InputPort<bool>("robot_rotate"),
+            BT::InputPort<std::string>("explore_timestamp"),
+            BT::InputPort<int>("delta_seconds")
         };
     }
 
@@ -2376,14 +2390,12 @@ public:
             throw BT::RuntimeError("Missing input port: robot_rotate");
         }
 
-        // Als false → direct success
         if (!robot_rotate)
         {
             std::cout << "[RobotRotationFollowMe] robot_rotate == false -> SUCCESS" << std::endl;
             return BT::NodeStatus::SUCCESS;
         }
 
-        // publish BT node naam
         std_msgs::msg::String bt_msg;
         bt_msg.data = "RobotRotationFollowMe";
         pub_bt_->publish(bt_msg);
@@ -2401,6 +2413,46 @@ public:
     {
         rclcpp::spin_some(node_);
 
+        // =========================================================
+        // 0) TIME CHECK (MOET VOOR ALLE LOGICA)
+        // =========================================================
+        std::string ts_str;
+        int delta_seconds = 0;
+
+        if (getInput("explore_timestamp", ts_str) &&
+            getInput("delta_seconds", delta_seconds))
+        {
+            try
+            {
+                // parse "sec.nanosec"
+                size_t dot = ts_str.find('.');
+                if (dot != std::string::npos)
+                {
+                    long sec = std::stol(ts_str.substr(0, dot));
+
+                    auto now = node_->get_clock()->now();
+                    long now_sec = now.seconds();
+
+                    long diff = std::abs(now_sec - sec);
+
+                    if (diff > delta_seconds)
+                    {
+                        std::cout << "[RobotRotationFollowMe] TIMEOUT detected (diff="
+                                  << diff << "s > delta=" << delta_seconds
+                                  << ") -> restart_tree = true" << std::endl;
+
+                        config().blackboard->set("restart_tree", true);
+                        return BT::NodeStatus::FAILURE;
+                    }
+                }
+            }
+            catch (const std::exception &e)
+            {
+                std::cout << "[RobotRotationFollowMe] Timestamp parse error: "
+                          << e.what() << std::endl;
+            }
+        }
+
         if (!has_started_)
             return BT::NodeStatus::SUCCESS;
 
@@ -2414,15 +2466,15 @@ public:
             return BT::NodeStatus::RUNNING;
         }
 
-        // 2) na 3 sec: 1x kwart rotatie uitvoeren
+        // 2) rotatie starten
         if (!rotation_done_)
         {
             geometry_msgs::msg::Twist cmd;
             cmd.linear.x = 0.0;
-            cmd.angular.z = 0.4;   // rotatiesnelheid
+            cmd.angular.z = 0.4;
 
             rotation_start_ = std::chrono::steady_clock::now();
-            rotation_duration_ = 3; 
+            rotation_duration_ = 3;
 
             pub_cmd_vel_->publish(cmd);
 
@@ -2432,7 +2484,7 @@ public:
             return BT::NodeStatus::RUNNING;
         }
 
-        // 3) rotatie stoppen na duur
+        // 3) rotatie stoppen
         auto rot_elapsed = std::chrono::duration<double>(
             std::chrono::steady_clock::now() - rotation_start_
         ).count();
@@ -3239,26 +3291,46 @@ int main(int argc, char **argv)
     // laad boom uit XML
     auto tree = factory.createTreeFromFile("src/mecabot_bt/trees/behavior_tree.xml");
 
+    tree.rootBlackboard()->set("restart_tree", false);
+
     std::cout << "--- Starting BT in continuous mode ---" << std::endl;
     rclcpp::Rate loop_rate(1.0); // definieer hoeveel ticks/sec naar rootnode gaan
 
     while (rclcpp::ok())
-    {
-        BT::NodeStatus status = tree.tickRoot(); // root ticken
+        {
+            BT::NodeStatus status = tree.tickRoot();
 
-        // status van root succes of failure : ga dan halten
-        if (status == BT::NodeStatus::SUCCESS) {
-            std::cout << "--- Tree ticked to SUCCESS ---" << std::endl;
-            tree.rootNode()->halt();
+            bool restart_tree = false;
+
+            tree.rootBlackboard()->get("restart_tree", restart_tree);
+
+            if (restart_tree)
+            {
+                std::cout << "=== RESTART TREE REQUESTED ===" << std::endl;
+
+                // oude boom stoppen
+                tree.rootNode()->halt();
+
+
+                // flag resetten in nieuwe boom
+                tree.rootBlackboard()->set("restart_tree", false);
+
+                continue;
+            }
+
+            if (status == BT::NodeStatus::SUCCESS)
+            {
+                std::cout << "--- Tree ticked to SUCCESS ---" << std::endl;
+                tree.rootNode()->halt();
+            }
+            else if (status == BT::NodeStatus::FAILURE)
+            {
+                std::cout << "--- Tree ticked to FAILURE ---" << std::endl;
+                tree.rootNode()->halt();
+            }
+
+            loop_rate.sleep();
         }
-        else if (status == BT::NodeStatus::FAILURE) {
-            std::cout << "--- Tree ticked to FAILURE ---" << std::endl;
-            tree.rootNode()->halt();
-        }
-
-        loop_rate.sleep(); // wacht zolang zodat de rate klopt
-    }
-
     rclcpp::shutdown();
     return 0;
 }

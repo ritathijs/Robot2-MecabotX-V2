@@ -27,7 +27,8 @@
                                                 <IsRobotAtWorkArea timeout="200.0" workarea_timestamp="{workarea_timestamp}" drive_failed="{drive_failed}" />
                                                 </Sequence>
                                             </Fallback>
-                                            <RobotExplore robotLocation="{robotLocation}"/>
+                                            <RobotExplore robotLocation="{robotLocation}"      
+                                            explore_timestamp="{explore_timestamp}"  />
                                             <LoopSequence name="LoopSequence">
                                                 <Sequence name="FollowMeSequence">
                                                     <StartDrivingToPeople timeout="5.0" robot_rotate="{robot_rotate}"/>
@@ -36,7 +37,11 @@
                                                             timer="30.0"
                                                             zero_limit="10"
                                                             robot_rotate="{robot_rotate}" />
-                                                    <RobotRotationFollowMe robot_rotate="{robot_rotate}"/>
+                                                    <RobotRotationFollowMe 
+                                                            robot_rotate="{robot_rotate}" 
+                                                            explore_timestamp="{explore_timestamp}"
+                                                            delta_seconds="100"
+                                                        />
                                                     <ArrivedAtVisitors robot_rotate="{robot_rotate}" timeout="30.0"/>
                                                 </Sequence>
                                             </LoopSequence>
