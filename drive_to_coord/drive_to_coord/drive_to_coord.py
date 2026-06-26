@@ -35,6 +35,10 @@ behavior_tree_nodes = {
 	"MDForceCharging":			{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
 
 
+	"RobotDriveToChargingStation":	{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "always"},
+	"RobotIsRobotAtChargingStation":   {"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "once"},
+
+
 	"RobotRotationFollowMe":	{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
 
 	# --- Behavior Tree doelen ---

@@ -13,6 +13,10 @@
 #include <vector>
 
 
+#include <fstream>
+#include <nlohmann/json.hpp>
+using json = nlohmann::json;
+
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 using namespace std::chrono_literals;
 
@@ -177,6 +181,7 @@ private:
 };
 
 
+
 class BatteryOk : public BT::StatefulActionNode
 {
 public:
@@ -216,8 +221,6 @@ public:
 
             });
 
-        force_charge_pub_ = node_->create_publisher<std_msgs::msg::String>(
-            "/force_charge", 10);
     }
 
     static BT::PortsList providedPorts()
@@ -241,7 +244,7 @@ public:
             counter = 0;
         }
 
-        setOutput("chargingInteger", counter);
+        setOutput("chargingInteger", 0);
         return counter;
     }
 
@@ -269,11 +272,8 @@ public:
             std::cout << "[BatteryOk] FORCE-CHARGING detected -> sending START" << std::endl;
             int counter = updateChargingCounter();
 
-            std_msgs::msg::String msg;
-            msg.data = std::to_string(counter) + "START";
 
-            for (int i = 0; i < 3; ++i)
-                force_charge_pub_->publish(msg);
+
 
             updateSkipDrive();  // check bat_admin_status
             return BT::NodeStatus::FAILURE;
@@ -297,11 +297,9 @@ public:
         if (getInput("robotLocationBAT", bat_state) && bat_state == "FORCE-CHARGING")
         {
             int counter = updateChargingCounter();
-            std_msgs::msg::String msg;
-            msg.data = std::to_string(counter) + "START";
 
-            for (int i = 0; i < 3; ++i)
-                force_charge_pub_->publish(msg);
+
+
 
             updateSkipDrive();  // check bat_admin_status
             return BT::NodeStatus::FAILURE;
@@ -323,8 +321,8 @@ private:
     std::string last_event_;
     rclcpp::Node::SharedPtr node_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr force_charge_pub_;
 };
+
 
 
 
@@ -486,61 +484,20 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr rpi_pub_;
 };
 
-
-
-class DriveToChargingStation : public BT::StatefulActionNode
+// BT node die een doelpositie naar charging station stuurt via PoseStamped
+// BT node die een doelpositie naar charging station stuurt via PoseStamped
+class RobotDriveToChargingStation : public BT::StatefulActionNode
 {
 public:
-    DriveToChargingStation(const std::string &name, const BT::NodeConfiguration &config)
-        : BT::StatefulActionNode(name, config),
-          success_received_(false), timeout_(5.0)
+    RobotDriveToChargingStation(const std::string &name, const BT::NodeConfiguration &config)
+        : BT::StatefulActionNode(name, config)
     {
-        node_ = rclcpp::Node::make_shared("btDriveToChargingStation");
-        rclcpp::QoS qos(1);
-        qos.reliable();
+        node_ = rclcpp::Node::make_shared("btRobotDriveToChargingStation");
 
-        sub_ = node_->create_subscription<std_msgs::msg::String>(
-            "/auto_recharge_event", qos,
-            [this](std_msgs::msg::String::SharedPtr msg)
-            {
-                std::cout << "\n[CALLBACK] Nieuw bericht ontvangen: " << msg->data << std::endl;
+        pub_bt_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
+        pub_coord_ = node_->create_publisher<geometry_msgs::msg::PoseStamped>("/btDriveCoord", 10);
 
-                if(msg->data.size() < 2){
-                    std::cout << "[CALLBACK] Bericht te kort -> negeren" << std::endl;
-                    return;
-                }
-
-                int msg_id = msg->data[0] - '0';
-                std::string event = msg->data.substr(1);
-
-                std::cout << "[CALLBACK] Parsed msg_id: " << msg_id 
-                          << " | event: " << event << std::endl;
-
-                int bt_id = 0;
-                if(!getInput("chargingInteger", bt_id)){
-                    std::cout << "[CALLBACK] FOUT: kon chargingInteger niet uit blackboard halen!" << std::endl;
-                } else {
-                    std::cout << "[CALLBACK] Blackboard chargingInteger: " << bt_id << std::endl;
-                }
-
-                if(msg_id != bt_id){
-                    std::cout << "[CALLBACK] msg_id != bt_id -> bericht genegeerd" << std::endl;
-                    return;
-                }
-
-                std::cout << "[CALLBACK] msg_id komt overeen met bt_id!" << std::endl;
-
-                if (event == "DRIVING-TO-DOCK"){
-                    std::cout << "[CALLBACK] Event is DRIVING-TO-DOCK -> success_received_ = true" << std::endl;
-                    success_received_ = true;
-                }
-                else{
-                    std::cout << "[CALLBACK] Event is iets anders -> success_received_ = false" << std::endl;
-                    success_received_ = false;
-                }
-            });
-
-        pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
+        // Raspberry Pi topic
         pub_quiz_ = node_->create_publisher<std_msgs::msg::String>("/rpitopic", 10);
     }
 
@@ -548,54 +505,231 @@ public:
     {
         return {
             BT::InputPort<double>("timeout"),
-            BT::InputPort<int>("chargingInteger"),
-            BT::OutputPort<std::string>("bat_admin_status"),
-            BT::OutputPort<bool>("connection_chargeStatus"),  
-            BT::InputPort<bool>("skip_drive2charging")  
+            BT::InputPort<bool>("skip_drive2charging"),
+            BT::OutputPort<std::string>("charging_sent_timestamp"),
+            BT::OutputPort<std::string>("bat_admin_status")
         };
     }
 
     BT::NodeStatus onStart() override
     {
-        success_received_ = false;
-        start_time_ = std::chrono::steady_clock::now();
-        getInput("timeout", timeout_);
-
-        setOutput("connection_chargeStatus", true);
-
-        // Check skip_drive2charging
+        // Eerst controleren of rijden moet worden overgeslagen
         bool skip = false;
-        if (getInput("skip_drive2charging", skip))
+        getInput("skip_drive2charging", skip);
+
+        if (skip)
         {
-            if (skip)
-            {
-                std::cout << "[DriveToChargingStation] skip_drive2charging = TRUE -> direct SUCCESS" << std::endl;
-                return BT::NodeStatus::SUCCESS;
-            }
-            else
-            {
-                std::cout << "[DriveToChargingStation] skip_drive2charging = FALSE -> direct FAILURE" << std::endl;
-            }
+            std::cout << "[RobotDriveToChargingStation] skip_drive2charging = TRUE -> SUCCESS" << std::endl;
+            return BT::NodeStatus::SUCCESS;
         }
 
-        setOutput("bat_admin_status", "STOP");
+        std_msgs::msg::String bt_msg;
+        bt_msg.data = "RobotDriveToChargingStation";
+        pub_bt_->publish(bt_msg);
 
-        int bt_id = 0;
-        getInput("chargingInteger", bt_id);
-
-        std::cout << "\n[DriveToChargingStation] === ON START ===" << std::endl;
-        std::cout << "[DriveToChargingStation] timeout: " << timeout_ << std::endl;
-        std::cout << "[DriveToChargingStation] chargingInteger: " << bt_id << std::endl;
-
-        std_msgs::msg::String msg;
-        msg.data = "DriveToChargingStation";
-        pub_->publish(msg);
-
+        // Raspberry Pi informeren
         std_msgs::msg::String quiz_msg;
         quiz_msg.data = "RobotGoCharge";
         pub_quiz_->publish(quiz_msg);
 
-        std::cout << "[DriveToChargingStation] START waiting for DRIVING-TO-DOCK" << std::endl;
+        // Blackboard variabele zetten
+        setOutput("bat_admin_status", std::string("STOP"));
+
+        // ===============================
+        // Charger positie uit JSON lezen
+        // ===============================
+        std::string filePath =
+            "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/Charger_Position.json";
+
+        std::ifstream file(filePath);
+
+        if (!file.is_open())
+        {
+            std::cerr << "[RobotDriveToChargingStation] Kan JSON niet openen: "
+                      << filePath << std::endl;
+            return BT::NodeStatus::FAILURE;
+        }
+
+        json j;
+
+        try
+        {
+            file >> j;
+        }
+        catch (const std::exception &e)
+        {
+            std::cerr << "[RobotDriveToChargingStation] JSON parse fout: "
+                      << e.what() << std::endl;
+            return BT::NodeStatus::FAILURE;
+        }
+
+        // Pose opbouwen
+        sent_coord_.header.stamp = node_->get_clock()->now();
+        sent_coord_.header.frame_id = "map";
+
+        sent_coord_.pose.position.x = j.at("p_x").get<double>();
+        sent_coord_.pose.position.y = j.at("p_y").get<double>();
+        sent_coord_.pose.position.z = 0.0;
+
+        sent_coord_.pose.orientation.x = 0.0;
+        sent_coord_.pose.orientation.y = 0.0;
+        sent_coord_.pose.orientation.z = j.at("orien_z").get<double>();
+        sent_coord_.pose.orientation.w = j.at("orien_w").get<double>();
+
+        pub_coord_->publish(sent_coord_);
+
+        // Timestamp bewaren
+        sent_timestamp_ =
+            std::to_string(sent_coord_.header.stamp.sec) + "." +
+            std::to_string(sent_coord_.header.stamp.nanosec);
+
+        setOutput("charging_sent_timestamp", sent_timestamp_);
+
+        std::cout << "[RobotDriveToChargingStation] Published charger coordinate from JSON at timestamp: "
+                  << sent_timestamp_ << std::endl;
+
+        if (!getInput<double>("timeout", timeout_))
+            timeout_ = 5.0;
+
+        start_time_ = std::chrono::steady_clock::now();
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    BT::NodeStatus onRunning() override
+    {
+        auto elapsed = std::chrono::duration<double>(
+                           std::chrono::steady_clock::now() - start_time_)
+                           .count();
+
+        if (elapsed >= timeout_)
+        {
+            std::cout << "[RobotDriveToChargingStation] Timeout ("
+                      << timeout_ << "s) -> SUCCESS" << std::endl;
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override
+    {
+        std::cout << "[RobotDriveToChargingStation] HALTED" << std::endl;
+    }
+
+private:
+    double timeout_;
+    std::string sent_timestamp_;
+    std::chrono::steady_clock::time_point start_time_;
+    geometry_msgs::msg::PoseStamped sent_coord_;
+
+    rclcpp::Node::SharedPtr node_;
+
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pub_coord_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;
+};
+
+
+class RobotIsRobotAtChargingStation : public BT::StatefulActionNode
+{
+public:
+    RobotIsRobotAtChargingStation(const std::string &name, const BT::NodeConfiguration &config)
+        : BT::StatefulActionNode(name, config), timeout_(10.0)
+    {
+        node_ = rclcpp::Node::make_shared("btRobotIsRobotAtChargingStation");
+
+        sub_ = node_->create_subscription<std_msgs::msg::String>(
+            "/drive_to_coord_status", 10,
+            [this](std_msgs::msg::String::SharedPtr msg)
+            {
+                std::string data = msg->data;
+                std::cout << "[RobotIsRobotAtChargingStation] Ontvangen bericht: "
+                          << data << std::endl;
+
+                std::vector<std::string> parts;
+                std::stringstream ss(data);
+                std::string segment;
+
+                while (std::getline(ss, segment, '-'))
+                {
+                    parts.push_back(segment);
+                }
+
+                if (parts.size() < 2)
+                    return;
+
+                std::string status_code = parts[0];
+                std::string recv_timestamp = parts[1];
+
+                // Alleen de eerste 10 cijfers van de timestamp vergelijken
+                std::string expected_prefix = sent_timestamp_.substr(0, 10);
+                std::string recv_prefix = recv_timestamp.substr(0, 10);
+
+                if (recv_prefix == expected_prefix)
+                {
+                    if (status_code == "04")
+                    {
+                        received_success_ = true;
+                    }
+                    else if (status_code == "05" || status_code == "07")
+                    {
+                        received_failure_ = true;
+                        std::cout << "[RobotIsRobotAtChargingStation] FAILURE ontvangen"
+                                  << std::endl;
+                    }
+                }
+            });
+
+        pub_ = node_->create_publisher<std_msgs::msg::String>(
+            "/BehaviorTreeNode", 10);
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {
+            BT::InputPort<double>("timeout"),
+            BT::InputPort<std::string>("charging_sent_timestamp"),
+            BT::InputPort<bool>("skip_drive2charging"),
+            BT::OutputPort<bool>("drive_failed")
+        };
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        // Eerst controleren of rijden moet worden overgeslagen
+        bool skip = false;
+        getInput("skip_drive2charging", skip);
+
+        if (skip)
+        {
+            std::cout << "[RobotIsRobotAtChargingStation] skip_drive2charging = TRUE -> SUCCESS"
+                      << std::endl;
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        received_success_ = false;
+        received_failure_ = false;
+
+        start_time_ = std::chrono::steady_clock::now();
+
+        if (!getInput<double>("timeout", timeout_))
+            timeout_ = 10.0;
+
+        if (!getInput<std::string>("charging_sent_timestamp", sent_timestamp_))
+        {
+            std::cout << "[RobotIsRobotAtChargingStation] Geen timestamp ontvangen van blackboard!"
+                      << std::endl;
+        }
+        else
+        {
+            std::cout << "[RobotIsRobotAtChargingStation] Verwachte timestamp = "
+                      << sent_timestamp_ << std::endl;
+        }
+
+        std_msgs::msg::String msg;
+        msg.data = "RobotIsRobotAtChargingStation";
+        pub_->publish(msg);
 
         return BT::NodeStatus::RUNNING;
     }
@@ -604,24 +738,306 @@ public:
     {
         rclcpp::spin_some(node_);
 
-        std::cout << "[DriveToChargingStation] success_received_: " 
-                  << (success_received_ ? "TRUE" : "FALSE") << std::endl;
+        auto elapsed = std::chrono::duration<double>(
+                           std::chrono::steady_clock::now() - start_time_)
+                           .count();
 
-        if (success_received_)
+        if (received_success_)
         {
-            std::cout << "[DriveToChargingStation] -> SUCCESS" << std::endl;
+            std::cout << "[RobotIsRobotAtChargingStation] Successtatus ontvangen -> SUCCESS"
+                      << std::endl;
+
+            setOutput("drive_failed", false);
+
             return BT::NodeStatus::SUCCESS;
         }
 
-        auto elapsed = std::chrono::duration<double>(
-            std::chrono::steady_clock::now() - start_time_).count();
+        if (received_failure_)
+        {
+            std::cout << "[RobotIsRobotAtChargingStation] Faalstatus ontvangen -> FAILURE"
+                      << std::endl;
 
-        std::cout << "[DriveToChargingStation] elapsed: " << elapsed 
-                  << " / timeout: " << timeout_ << std::endl;
+            setOutput("drive_failed", true);
+
+            return BT::NodeStatus::FAILURE;
+        }
 
         if (elapsed >= timeout_)
         {
-            std::cout << "[DriveToChargingStation] -> TIMEOUT FAILURE" << std::endl;
+            std::cout << "[RobotIsRobotAtChargingStation] Timeout ("
+                      << timeout_ << "s) -> FAILURE" << std::endl;
+
+            setOutput("drive_failed", true);
+
+            return BT::NodeStatus::FAILURE;
+        }
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override
+    {
+        std::cout << "[RobotIsRobotAtChargingStation] HALTED" << std::endl;
+    }
+
+private:
+    double timeout_;
+
+    bool received_success_;
+    bool received_failure_;
+
+    std::chrono::steady_clock::time_point start_time_;
+
+    std::string sent_timestamp_;
+
+    rclcpp::Node::SharedPtr node_;
+
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+};
+
+
+
+
+class DriveToChargingStation : public BT::StatefulActionNode
+{
+public:
+    DriveToChargingStation(const std::string &name, const BT::NodeConfiguration &config)
+        : BT::StatefulActionNode(name, config),
+          success_received_(false),
+          force_charge_received_(false),
+          timeout_(5.0)
+    {
+        node_ = rclcpp::Node::make_shared("btDriveToChargingStation");
+
+        rclcpp::QoS qos(1);
+        qos.reliable();
+
+        // ==========================
+        // Subscriber auto recharge
+        // ==========================
+        sub_ = node_->create_subscription<std_msgs::msg::String>(
+            "/auto_recharge_event", qos,
+            [this](std_msgs::msg::String::SharedPtr msg)
+            {
+                std::cout << "\n[CALLBACK] Nieuw bericht ontvangen: "
+                          << msg->data << std::endl;
+
+                if(msg->data.size() < 2)
+                {
+                    std::cout << "[CALLBACK] Bericht te kort -> negeren" << std::endl;
+                    return;
+                }
+
+                int msg_id = msg->data[0] - '0';
+                std::string event = msg->data.substr(1);
+
+                std::cout << "[CALLBACK] Parsed msg_id: "
+                          << msg_id
+                          << " | event: "
+                          << event << std::endl;
+
+                int bt_id = 0;
+                if(!getInput("chargingInteger", bt_id))
+                {
+                    std::cout << "[CALLBACK] chargingInteger niet gevonden." << std::endl;
+                }
+
+                if(msg_id != bt_id)
+                {
+                    std::cout << "[CALLBACK] msg_id != bt_id -> genegeerd" << std::endl;
+                    return;
+                }
+
+                if(event == "DRIVING-TO-DOCK")
+                {
+                    std::cout << "[CALLBACK] DRIVING-TO-DOCK ontvangen." << std::endl;
+
+                    setOutput("skip_statusDriveToChargingStation", false);
+
+                    success_received_ = true;
+                }
+                else if(event == "DRIVE-TO-DOCK-SUCCESS")
+                {
+                    std::cout << "[CALLBACK] DRIVE-TO-DOCK-SUCCESS ontvangen." << std::endl;
+
+                    setOutput("skip_statusDriveToChargingStation", true);
+
+                    success_received_ = true;
+                }
+            });
+
+        // ==========================
+        // Echo subscriber force charge
+        // ==========================
+        force_charge_sub_ = node_->create_subscription<std_msgs::msg::String>(
+            "/force_charge", qos,
+            [this](std_msgs::msg::String::SharedPtr msg)
+            {
+                std::cout << "[FORCE_CHARGE CALLBACK] Ontvangen: "
+                          << msg->data << std::endl;
+
+                if(msg->data == "0START")
+                {
+                    force_charge_received_ = true;
+                    std::cout << "[FORCE_CHARGE CALLBACK] Echo OK." << std::endl;
+                }
+            });
+
+        // ==========================
+        // Publishers
+        // ==========================
+        pub_ = node_->create_publisher<std_msgs::msg::String>(
+            "/BehaviorTreeNode", 10);
+
+        pub_quiz_ = node_->create_publisher<std_msgs::msg::String>(
+            "/rpitopic", 10);
+
+        force_charge_pub_ = node_->create_publisher<std_msgs::msg::String>(
+            "/force_charge", 10);
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {
+            BT::InputPort<double>("timeout"),
+            BT::InputPort<int>("chargingInteger"),
+            BT::OutputPort<std::string>("bat_admin_status"),
+            BT::OutputPort<bool>("connection_chargeStatus"),
+            BT::InputPort<bool>("skip_drive2charging"),
+            BT::OutputPort<bool>("skip_statusDriveToChargingStation")
+
+        };
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        success_received_ = false;
+        force_charge_received_ = false;
+
+        start_time_ = std::chrono::steady_clock::now();
+
+        getInput("timeout", timeout_);
+
+        setOutput("connection_chargeStatus", true);
+
+        //---------------------------------
+        // Skip check
+        //---------------------------------
+        bool skip = false;
+
+        if(getInput("skip_drive2charging", skip))
+        {
+            if(skip)
+            {
+                std::cout << "[DriveToChargingStation] Skip -> SUCCESS" << std::endl;
+                return BT::NodeStatus::SUCCESS;
+            }
+        }
+
+        //---------------------------------
+        // Blackboard check
+        //---------------------------------
+        int bt_id = 0;
+
+        if(!getInput("chargingInteger", bt_id))
+        {
+            std::cout << "[DriveToChargingStation] chargingInteger ontbreekt."
+                      << std::endl;
+            return BT::NodeStatus::FAILURE;
+        }
+
+        setOutput("bat_admin_status", "STOP");
+
+        //---------------------------------
+        // Andere publishers
+        //---------------------------------
+        std_msgs::msg::String msg;
+        msg.data = "DriveToChargingStation";
+        pub_->publish(msg);
+
+        std_msgs::msg::String quiz_msg;
+        quiz_msg.data = "RobotGoCharge";
+        pub_quiz_->publish(quiz_msg);
+
+        //---------------------------------
+        // Force charge sturen
+        //---------------------------------
+        std_msgs::msg::String force_msg;
+        force_msg.data = "0START";
+
+        std::cout << "[DriveToChargingStation] Verstuur force_charge #1"
+                  << std::endl;
+        force_charge_pub_->publish(force_msg);
+
+        rclcpp::spin_some(node_);
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        std::cout << "[DriveToChargingStation] Verstuur force_charge #2"
+                  << std::endl;
+        force_charge_pub_->publish(force_msg);
+
+        rclcpp::spin_some(node_);
+
+        //---------------------------------
+        // Wachten op echo
+        //---------------------------------
+        auto wait_start = std::chrono::steady_clock::now();
+
+        while(rclcpp::ok())
+        {
+            rclcpp::spin_some(node_);
+
+            if(force_charge_received_)
+            {
+                std::cout << "[DriveToChargingStation] Echo ontvangen op /force_charge"
+                          << std::endl;
+                break;
+            }
+
+            auto elapsed =
+                std::chrono::duration<double>(
+                    std::chrono::steady_clock::now() - wait_start)
+                    .count();
+
+            if(elapsed > 2.0)
+            {
+                std::cout << "[DriveToChargingStation] Geen echo ontvangen."
+                          << std::endl;
+
+                setOutput("connection_chargeStatus", false);
+
+                return BT::NodeStatus::FAILURE;
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+
+        std::cout << "[DriveToChargingStation] Wachten op DRIVING-TO-DOCK..."
+                  << std::endl;
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    BT::NodeStatus onRunning() override
+    {
+        rclcpp::spin_some(node_);
+
+        if(success_received_)
+        {
+            std::cout << "[DriveToChargingStation] SUCCESS" << std::endl;
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        auto elapsed =
+            std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - start_time_)
+                .count();
+
+        if(elapsed >= timeout_)
+        {
+            std::cout << "[DriveToChargingStation] TIMEOUT" << std::endl;
             return BT::NodeStatus::FAILURE;
         }
 
@@ -635,13 +1051,23 @@ public:
 
 private:
     bool success_received_;
+    bool force_charge_received_;
+
     double timeout_;
+
     std::chrono::steady_clock::time_point start_time_;
+
     rclcpp::Node::SharedPtr node_;
+
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr force_charge_sub_;
+
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_; 
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr force_charge_pub_;
 };
+
+
 
 // Als er iets misloopt met het laden wordt deze node bereikt (via GoToChargeFallback)
 // Boom moet herstarten om hier uit te geraken (bv via adminpaneel)
@@ -756,6 +1182,13 @@ public:
         sent_coord_.pose.orientation.y = qy;
         sent_coord_.pose.orientation.z = qz;
         sent_coord_.pose.orientation.w = qw;
+
+        while (pub_coord_->get_subscription_count() == 0)
+        {
+            RCLCPP_INFO(node_->get_logger(),
+                        "Waiting for subscribers on /btDriveCoord...");
+            rclcpp::sleep_for(std::chrono::milliseconds(100));
+        }
 
         pub_coord_->publish(sent_coord_);
 
@@ -906,16 +1339,30 @@ public:
         return {
             BT::InputPort<double>("timeout"),
             BT::InputPort<int>("chargingInteger"),
-            BT::InputPort<bool>("skip_drive2charging") // <-- nieuw
+            BT::InputPort<bool>("skip_drive2charging"),
+            BT::InputPort<bool>("skip_statusDriveToChargingStation") // <-- nieuw
         };
     }
 
     BT::NodeStatus onStart() override
     {
+
+
+        bool skip_status = false;
+        if (getInput("skip_statusDriveToChargingStation", skip_status))
+        {
+            if (skip_status)
+            {
+                std::cout << "[StatusDriveToChargingDock] skip_statusDriveToChargingStation = TRUE -> direct SUCCESS" << std::endl;
+                return BT::NodeStatus::SUCCESS;
+            }
+        }
+
         status_ = "";
         getInput("timeout", timeout_);
         start_time_ = std::chrono::steady_clock::now();
 
+        
         // ✅ check skip_drive2charging bij start
         bool skip = false;
         if (getInput("skip_drive2charging", skip))
@@ -1959,7 +2406,7 @@ public:
         
         std::cout << "[StopRobotCharging] regel voor setoutput chargingintegernextcycle" << std::endl;
 
-        setOutput("chargingInteger_nextCycle", counter);
+        setOutput("chargingInteger_nextCycle", 0);
 
         return counter;
     }
@@ -1978,7 +2425,7 @@ public:
         getInput("chargingInteger", charge_id);
 
         std_msgs::msg::String cmd_msg;
-        cmd_msg.data = std::to_string(charge_id) + "STOP";
+        cmd_msg.data = "0STOP";
 
         for (int i = 0; i < 3; ++i)
         {
@@ -3063,7 +3510,7 @@ public:
             counter += 1;
         }
 
-        setOutput("chargingInteger_nextCycle", counter);
+        setOutput("chargingInteger_nextCycle", 0);
         return counter;
     }
 
@@ -3283,6 +3730,9 @@ int main(int argc, char **argv)
     factory.registerNodeType<ForceSuccess>("MainFallbackForceSuccess");
     factory.registerNodeType<ForceSuccess>("BatteryForceSuccess");
 
+
+    factory.registerNodeType<RobotDriveToChargingStation>("RobotDriveToChargingStation");
+    factory.registerNodeType<RobotIsRobotAtChargingStation>("RobotIsRobotAtChargingStation");
 
     factory.registerNodeType<LoopSequence>("LoopSequence");
   

@@ -62,8 +62,35 @@
 
                             <Fallback name="GoToChargeFallback">
                                 <Sequence name="ChargingSequence">
-                                    <DriveToChargingStation timeout="20.0" chargingInteger="{chargingInteger}" skip_drive2charging="{skip_drive2charging}" bat_admin_status="{bat_admin_status}" connection_chargeStatus="{connection_chargeStatus}"/>
-                                    <StatusDriveToChargingDock timeout="200.0" chargingInteger="{chargingInteger}" skip_drive2charging="{skip_drive2charging}" />
+                                    
+                                    <RobotDriveToChargingStation
+                                        timeout="20.0"
+                                        skip_drive2charging="{skip_drive2charging}"
+                                        charging_sent_timestamp="{charging_sent_timestamp}"
+                                        bat_admin_status = "{bat_admin_status}" />
+                                        
+
+                                    <RobotIsRobotAtChargingStation
+                                        timeout="200.0"
+                                        charging_sent_timestamp="{charging_sent_timestamp}"
+                                        skip_drive2charging="{skip_drive2charging}"
+                                        drive_failed="{drive_failed}" />
+                                        
+                                    <DriveToChargingStation 
+                                        timeout="5.0" 
+                                        chargingInteger="{chargingInteger}" 
+                                        skip_drive2charging="{skip_drive2charging}" 
+                                        bat_admin_status="{bat_admin_status}" 
+                                        skip_statusDriveToChargingStation="{skip_statusDriveToChargingStation}"/>
+
+
+                                    <StatusDriveToChargingDock 
+                                        timeout="200.0" 
+                                        chargingInteger="{chargingInteger}" 
+                                        skip_drive2charging="{skip_drive2charging}"
+                                        skip_statusDriveToChargingStation="{skip_statusDriveToChargingStation}"  />
+
+                                        
                                     <IsRobotCharging timeout="200" chargingInteger="{chargingInteger}" skip_drive2charging="{skip_drive2charging}"/>
                                     <IsBatteryFull robotLocation="{robotLocation}" chargingInteger="{chargingInteger}" bat_admin_status="{bat_admin_status}" />
                                     <RobotWaitInChargingStation buttonStop = "{buttonStop}" />
