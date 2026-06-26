@@ -8,7 +8,7 @@
                 <Fallback name="AdminPanelFallback">
                     
                     <Parallel name="CheckButtonAndMainParallel" success_threshold="1" failure_threshold="1">
-                        <CheckAdminPanel/> 
+                        <CheckAdminPanel  robot_startup = "{robot_startup}"/> 
                         <Fallback name="BatteryLowFallback">
                             <Parallel name="RootParallel" success_threshold="1" failure_threshold="1">
                                 <BatteryOk robotLocationBAT="{robotLocationBAT}"
@@ -64,10 +64,12 @@
                                 <Sequence name="ChargingSequence">
                                     
                                     <RobotDriveToChargingStation
-                                        timeout="20.0"
+                                        timeout="5.0"
                                         skip_drive2charging="{skip_drive2charging}"
                                         charging_sent_timestamp="{charging_sent_timestamp}"
-                                        bat_admin_status = "{bat_admin_status}" />
+                                        bat_admin_status ="{bat_admin_status}"
+                                        connection_chargeStatus="{connection_chargeStatus}"
+                                        />
                                         
 
                                     <RobotIsRobotAtChargingStation
@@ -77,7 +79,7 @@
                                         drive_failed="{drive_failed}" />
                                         
                                     <DriveToChargingStation 
-                                        timeout="5.0" 
+                                        timeout="20.0" 
                                         chargingInteger="{chargingInteger}" 
                                         skip_drive2charging="{skip_drive2charging}" 
                                         bat_admin_status="{bat_admin_status}" 
@@ -105,13 +107,13 @@
 
                         <Sequence name="AdminSequence">
                             <CheckAdminCondition 
-                              
+                                robot_startup ="{robot_startup}"
                                 bat_admin_status="{bat_admin_status}" 
                                 chargingInteger="{chargingInteger}" 
                                 chargingInteger_nextCycle="{chargingInteger_nextCycle}"/>
 
                             <CheckButtonState 
-                                
+                                robot_startup = "{robot_startup}"
                                 buttonStop="{buttonStop}"  
                                 robotLocationBAT="{robotLocationBAT}" />
                         </Sequence>

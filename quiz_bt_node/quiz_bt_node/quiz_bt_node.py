@@ -416,6 +416,8 @@ class QuizBTNode(Node):
             self.sio.emit("robot-charging")
         elif msg.data == "RobotStarting":
             self.sio.emit("robot-startup")
+        elif msg.data == "RobotDocking":
+            self.sio.emit("robot-docking")
 
     # ---------------- CLEANUP ----------------
     def shutdown(self):

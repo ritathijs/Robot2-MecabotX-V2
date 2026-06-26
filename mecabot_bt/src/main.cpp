@@ -507,7 +507,8 @@ public:
             BT::InputPort<double>("timeout"),
             BT::InputPort<bool>("skip_drive2charging"),
             BT::OutputPort<std::string>("charging_sent_timestamp"),
-            BT::OutputPort<std::string>("bat_admin_status")
+            BT::OutputPort<std::string>("bat_admin_status"),
+            BT::OutputPort<bool>("connection_chargeStatus")
         };
     }
 
@@ -534,6 +535,8 @@ public:
 
         // Blackboard variabele zetten
         setOutput("bat_admin_status", std::string("STOP"));
+
+        setOutput("connection_chargeStatus", true); // Je moet niet kijken naar disconnect wanneer robot in laadcyclus is
 
         // ===============================
         // Charger positie uit JSON lezen
@@ -576,6 +579,12 @@ public:
         sent_coord_.pose.orientation.z = j.at("orien_z").get<double>();
         sent_coord_.pose.orientation.w = j.at("orien_w").get<double>();
 
+        while (pub_coord_->get_subscription_count() == 0)
+        {
+            RCLCPP_INFO(node_->get_logger(),
+                        "Waiting for subscribers on /btDriveCoord...");
+            rclcpp::sleep_for(std::chrono::milliseconds(100));
+        }
         pub_coord_->publish(sent_coord_);
 
         // Timestamp bewaren
@@ -1424,7 +1433,6 @@ private:
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
 };
-
 class IsRobotCharging : public BT::StatefulActionNode
 {
 public:
@@ -1446,21 +1454,24 @@ public:
                 int bt_id = 0;
                 getInput("chargingInteger", bt_id);
 
-                if(msg_id != bt_id)
+                if (msg_id != bt_id)
                     return;
 
                 event_ = event;
             });
 
-
         pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
+
+        // NEW: RPI topic publisher
+        rpi_pub_ = node_->create_publisher<std_msgs::msg::String>("/rpitopic", 10);
     }
 
     static BT::PortsList providedPorts()
     {
-        return { BT::InputPort<double>("timeout"),
-                BT::InputPort<int>("chargingInteger"),
-                BT::InputPort<bool>("skip_drive2charging")   
+        return {
+            BT::InputPort<double>("timeout"),
+            BT::InputPort<int>("chargingInteger"),
+            BT::InputPort<bool>("skip_drive2charging")
         };
     }
 
@@ -1469,9 +1480,15 @@ public:
         event_ = "";
         getInput("timeout", timeout_);
         start_time_ = std::chrono::steady_clock::now();
+
         std_msgs::msg::String msg;
         msg.data = "IsRobotCharging";
         pub_->publish(msg);
+
+        // NEW: publish RPI screen
+        std_msgs::msg::String rpi_msg;
+        rpi_msg.data = "RobotDocking";
+        rpi_pub_->publish(rpi_msg);
 
         bool skip = false;
         if (getInput("skip_drive2charging", skip))
@@ -1511,7 +1528,9 @@ public:
 
         return BT::NodeStatus::RUNNING;
     }
-    void onHalted() override {
+
+    void onHalted() override
+    {
         std::cout << "[IsRobotCharging] HALTED" << std::endl;
     }
 
@@ -1522,8 +1541,10 @@ private:
     rclcpp::Node::SharedPtr node_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
-};
 
+    // NEW
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr rpi_pub_;
+};
 
 class IsBatteryFull : public BT::StatefulActionNode
 {
@@ -2185,14 +2206,17 @@ public:
     static BT::PortsList providedPorts()
     {
         return {
-            
             BT::OutputPort<bool>("buttonStop"),
-            BT::OutputPort<std::string>("robotLocationBAT")
+            BT::OutputPort<std::string>("robotLocationBAT"),
+            BT::OutputPort<bool>("robot_startup")
         };
     }
 
     BT::NodeStatus tick() override
     {
+        // 🔹 ALTIJD FALSE SCHRIJVEN NAAR BLACKBOARD
+        setOutput("robot_startup", false);
+
         // 1. Publiceer node naam
         std_msgs::msg::String msg;
         msg.data = "CheckButtonState";
@@ -2225,15 +2249,12 @@ public:
 
         if (last_line.find("ROBOTACTIVE:true") != std::string::npos)
         {
-
             std::cout << "[RobotActiveTrue] Laatste lijn TRUE: " << std::endl;
-
             robot_active = true;
         }
         else if (last_line.find("ROBOTACTIVE:false") != std::string::npos)
         {
             std::cout << "[RobotActiveTrue] Laatste lijn FALSE: " << std::endl;
-
             robot_active = false;
         }
         else
@@ -2245,17 +2266,12 @@ public:
         // 4. Gedrag (vervanging van START/STOP button)
         if (robot_active)
         {
-            // === STARTBUTTON gedrag ===
             std::cout << "[CheckButtonState] START toestand (robot actief)" << std::endl;
-            
             setOutput("buttonStop", false);
-         
         }
         else
         {
-            // === STOPBUTTON gedrag ===
             std::cout << "[CheckButtonState] STOP toestand (robot NIET actief)" << std::endl;
-
             setOutput("buttonStop", true);
             setOutput("robotLocationBAT", std::string("FORCE-CHARGING"));
         }
@@ -3444,7 +3460,6 @@ public:
 
 
 #include <chrono>
-
 class CheckAdminCondition : public BT::StatefulActionNode
 {
 public:
@@ -3474,18 +3489,16 @@ public:
                     std::cout << "[CheckAdminCondition] ADMINPANELCLOSED ontvangen!" << std::endl;
                     admin_closed_ = true;
 
-                    // start timer
                     timer_started_ = true;
                     start_time_ = std::chrono::steady_clock::now();
                 }
-
             });
     }
 
     static BT::PortsList providedPorts()
     {
         return {
-
+            BT::InputPort<bool>("robot_startup"),
             BT::InputPort<std::string>("bat_admin_status"),
             BT::InputPort<int>("chargingInteger"),
             BT::OutputPort<int>("chargingInteger_nextCycle")
@@ -3536,6 +3549,14 @@ public:
 
     BT::NodeStatus onStart() override
     {
+        // 🔹 BLACKBOARD CHECK
+        bool robot_startup;
+        if (!getInput("robot_startup", robot_startup))
+        {
+            std::cout << "[CheckAdminCondition] robot_startup NIET gevonden -> SUCCESS" << std::endl;
+            return BT::NodeStatus::SUCCESS;
+        }
+
         admin_closed_ = false;
         manual_drive_ = false;
         timer_started_ = false;
@@ -3544,9 +3565,6 @@ public:
         msg.data = "CheckAdminCondition";
         pub_->publish(msg);
 
-        // Als bat_status stop is, zit robot niet in laadstation (hij reed er naar toe of was dit zelfs niet van plan)
-        // Er wordt 1 stop bericht gestuurd naar autocharge (wat wordt genegeerd indien het niet nodig was)
-        // En de integer voor volgende keer is +=1 gegaan
         std::string bat_status;
         if (getInput("bat_admin_status", bat_status))
         {
@@ -3562,14 +3580,10 @@ public:
         return BT::NodeStatus::RUNNING;
     }
 
-
-
     BT::NodeStatus onRunning() override
     {
         rclcpp::spin_some(node_);
 
-
-        // 🔹 Admin closed + 3 sec delay
         if (admin_closed_)
         {
             if (timer_started_)
@@ -3577,10 +3591,9 @@ public:
                 auto now = std::chrono::steady_clock::now();
                 auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time_).count();
 
-                if (elapsed >= 3)
+                if (elapsed >= 2)
                 {
                     std::cout << "[CheckAdminCondition] Admin panel closed + delay -> SUCCESS" << std::endl;
-                  
                     return BT::NodeStatus::SUCCESS;
                 }
                 else
@@ -3606,11 +3619,10 @@ private:
 
     bool admin_closed_;
     bool manual_drive_;
-
-    // 🔹 Timer vars
     bool timer_started_;
     std::chrono::steady_clock::time_point start_time_;
 };
+
 
 
 class CheckAdminPanel : public BT::StatefulActionNode
@@ -3639,13 +3651,22 @@ public:
 
     static BT::PortsList providedPorts()
     {
-        return {};
+        return {
+            BT::InputPort<bool>("robot_startup")
+        };
     }
 
     BT::NodeStatus onStart() override
     {
-        admin_panel_open_ = false;
+        // CHECK BLACKBOARD VARIABLE robot_startup
+        bool robot_startup;
+        if (!getInput("robot_startup", robot_startup))
+        {
+            std::cout << "[CheckAdminPanel] robot_startup NIET gevonden -> FAILURE" << std::endl;
+            return BT::NodeStatus::FAILURE;
+        }
 
+        admin_panel_open_ = false;
         return BT::NodeStatus::RUNNING;
     }
 
@@ -3672,7 +3693,6 @@ private:
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
     bool admin_panel_open_;
 };
-
 
 
 // -------------------------
