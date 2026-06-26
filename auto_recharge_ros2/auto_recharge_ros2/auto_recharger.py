@@ -96,7 +96,7 @@ def print_and_fixRetract(str):
     print(str)
 
 class AutoRecharger(Node):
-    def __init__(self):
+    def __init__(self, navigator):
         
         #创建节点
         super().__init__("auto_recharger")
@@ -106,7 +106,8 @@ class AutoRecharger(Node):
 
         self.must_reset = False  # VLAG VOOR HET HERSTARTEN VAN DE GEHELE CODE NA STOP BERICHT
 
-        
+        self.nav_controller = navigator
+
 
  #Statusvariabelen van de robot: type, batterijcapaciteit, batterijspanning, laadstatus, laadstroom, status van het infraroodsignaal, registratie van de houding van de robot        
         self.robot = {
@@ -202,7 +203,7 @@ class AutoRecharger(Node):
         # idem hierboven maar dan hoek
         self.diff_angle = -15
 
-        self.nav_controller =  BasicNavigator()
+        #self.nav_controller =  BasicNavigator()
  
  
         #De locatiegegevens van laadpalen uit een JSON-bestand ophalen
@@ -1142,17 +1143,18 @@ def wait_for_nav2_simple(navigator, max_retries=5):
 def main():
     rclpy.init()
     try:
+        navigator = BasicNavigator()
+
+        nav2_ok = wait_for_nav2_simple(navigator)
+
+        if not nav2_ok:
+            navigator.destroy_node()
+            rclpy.shutdown()
+            return
+
+
         while rclpy.ok():
-            autorecharger = AutoRecharger() 
-
-            # Gebruik de verbeterde activatie check
-            nav2_ok = wait_for_nav2_simple(autorecharger.nav_controller)
-
-            if not nav2_ok:
-                print_and_fixRetract(RED + "Nav2 blijft onbeschikbaar. Node wordt volledig vernietigd voor schone herstart..." + RESET)
-                autorecharger.destroy_node()
-                time.sleep(5)
-                continue
+            autorecharger = AutoRecharger(navigator) 
 
 
             print_and_fixRetract(autorecharger.tips)
@@ -1185,9 +1187,12 @@ def main():
             
             # 3. De 'Inner Loop': De actieve runtime van de robot
             should_quit_completely = False
+
+
             while rclpy.ok():
                 key = get_key(settings) 
                 autorecharger.autoRecharger(key) 
+                
                 rclpy.spin_once(autorecharger, timeout_sec=0.1)
 
                 # Als Stop_Charge() is aangeroepen, breken we de Inner Loop
@@ -1204,6 +1209,7 @@ def main():
             # Stop de motoren voor de zekerheid
             stop_msg = Twist()
             autorecharger.Cmd_vel_pub.publish(stop_msg)
+
             autorecharger.destroy_node()
 
             # Als de gebruiker Ctrl+C drukte, stoppen we de Outer Loop ook
@@ -1220,9 +1226,17 @@ def main():
         print_and_fixRetract(f"Er is een fout opgetreden: {e}")
     
     finally:
-        # Altijd de terminal herstellen en ROS netjes afsluiten
+
+        try:
+            navigator.cancelTask()
+        except:
+            pass
+
+        navigator.destroy_node()
+
         if settings is not None:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, settings)
+
         rclpy.shutdown()
 
     print('Over and out.')
