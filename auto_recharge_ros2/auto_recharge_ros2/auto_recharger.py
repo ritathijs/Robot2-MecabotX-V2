@@ -288,23 +288,24 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         print_and_fixRetract(GREEN + f"RPITOPIC -> {text}" + RESET)
 
     def write_battery_status(self, status):
-            """
-            Schrijft BATTERY-LOW of BATTERY-OK naar batstatus.txt.
-            Schrijft alleen wanneer de status veranderd is.
-            """
+        pass
+            # """
+            # Schrijft BATTERY-LOW of BATTERY-OK naar batstatus.txt.
+            # Schrijft alleen wanneer de status veranderd is.
+            # """
 
-            if status == self.last_batstatus:
-                return
+            # if status == self.last_batstatus:
+            #     return
 
-            try:
-                with open(batstatus_file, "w") as f:
-                    f.write(status)
+            # try:
+            #     with open(batstatus_file, "w") as f:
+            #         f.write(status)
 
-                self.last_batstatus = status
-                print_and_fixRetract(GREEN + f"Battery status opgeslagen: {status}" + RESET)
+            #     self.last_batstatus = status
+            #     print_and_fixRetract(GREEN + f"Battery status opgeslagen: {status}" + RESET)
 
-            except Exception as e:
-                print_and_fixRetract(RED + f"Fout bij schrijven batstatus.txt: {e}" + RESET)
+            # except Exception as e:
+            #     print_and_fixRetract(RED + f"Fout bij schrijven batstatus.txt: {e}" + RESET)
 
     
     # Stuurt msg naar auto_recharge_event (BT)
@@ -1018,7 +1019,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
         #indien robot niet aan het laden is, kijk of spanning te laag is
         if self.robot['Charging']==0:
-            if (self.robot['Type']=='Plus'and self.robot['Voltage']<10.0) or (self.robot['Type']=='Mini' and self.robot['Voltage']<10.0):
+            if (self.robot['Type']=='Plus'and self.robot['Voltage']<0.0) or (self.robot['Type']=='Mini' and self.robot['Voltage']<0.0):
                 time.sleep(1)
                 self.power_lost_count=self.power_lost_count+1 # 低电量滤波
 

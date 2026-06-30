@@ -50,6 +50,12 @@ class PublishBackPose(Node):
             1
         )
 
+        self.reset_pub = self.create_publisher(
+            String,
+            "reset_active",
+            qos_reliable
+        )
+
         self.reset_delay_timer = None
 
 
@@ -88,6 +94,16 @@ class PublishBackPose(Node):
             return "PASS"  # fallback veilig gedrag
         
 
+    def send_reset_active(self):
+
+        while self.reset_pub.get_subscription_count() == 0:
+            self.get_logger().info("Waiting for subscribers on /reset_active...")
+            time.sleep(0.1)
+
+        msg = String()
+        msg.data = "active"
+        self.reset_pub.publish(msg)
+        self.get_logger().info("Sent ACTIVE to /reset_active")
 
     def startup_callback(self):
         # Annuleer timer zodat dit maar 1 keer gebeurt
@@ -192,11 +208,13 @@ class PublishBackPose(Node):
 
             if mode == "SKIP":
                 self.get_logger().info("SKIP mode active → no XSTOP sent")
+                self.send_reset_active()
                 return
 
-            if mode == "PASS":
-                self.get_logger().info("PASS mode → sending XSTOP")
-                self.send_xstop()
+        if mode == "PASS":
+            self.get_logger().info("PASS mode → starting AprilTag localization")
+            self.send_xstop()
+            self.send_reset_active()
 
 def main(args=None):
     rclpy.init(args=args)
