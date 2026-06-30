@@ -3,11 +3,22 @@ from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from rclpy.duration import Duration
 
+
+# Terminal kleuren
+GREEN = "\033[92m"
+RED = "\033[91m"
+ORANGE = "\033[93m"
+RESET = "\033[0m"
+GRAY = "\033[90m"
+
+
 class driveMux(Node):
+
     def __init__(self):
         super().__init__('drive_mux')
 
         past_time = self.get_clock().now() - Duration(seconds=5)
+
         self.lastmessage_gui = past_time
         self.lastmessage_charge = past_time
         self.lastmessage_estop = past_time
@@ -15,76 +26,261 @@ class driveMux(Node):
         self.lastmessage_turn = past_time
         self.lastmessage_nav = past_time
 
+
+        self.last_cmd = Twist()
+        self.active_source = "NONE"
+
+
         # Subscribers
-        self.gui_sub = self.create_subscription(Twist, '/gui_cmd_vel', self.gui_callback, 10)
-        self.charge_sub = self.create_subscription(Twist, '/charge_cmd_vel', self.charge_callback, 10)
-        self.estop_sub = self.create_subscription(Twist, '/estop_cmd_vel', self.estop_callback, 10)
-        self.bump_sub = self.create_subscription(Twist, '/bump_cmd_vel', self.bump_callback, 10)
-        self.turn_sub = self.create_subscription(Twist, '/turn_cmd_vel', self.turn_callback, 10)
-        self.nav_sub = self.create_subscription(Twist, '/cmd_vel', self.nav_callback, 10)
 
-        self.pub = self.create_publisher(Twist, '/robot_cmd_vel', 10)
+        self.gui_sub = self.create_subscription(
+            Twist,
+            '/gui_cmd_vel',
+            self.gui_callback,
+            10)
 
-    # Callbacks
-    def gui_callback(self, msg):
+        self.charge_sub = self.create_subscription(
+            Twist,
+            '/charge_cmd_vel',
+            self.charge_callback,
+            10)
+
+        self.estop_sub = self.create_subscription(
+            Twist,
+            '/estop_cmd_vel',
+            self.estop_callback,
+            10)
+
+        self.bump_sub = self.create_subscription(
+            Twist,
+            '/bump_cmd_vel',
+            self.bump_callback,
+            10)
+
+        self.turn_sub = self.create_subscription(
+            Twist,
+            '/turn_cmd_vel',
+            self.turn_callback,
+            10)
+
+        self.nav_sub = self.create_subscription(
+            Twist,
+            '/cmd_vel',
+            self.nav_callback,
+            10)
+
+
+        self.pub = self.create_publisher(
+            Twist,
+            '/robot_cmd_vel',
+            10)
+
+
+        # elke seconde status tonen
+        self.timer = self.create_timer(
+            1.0,
+            self.print_status)
+
+
+    # -------------------------
+    # callbacks
+    # -------------------------
+
+    def publish_command(self, msg, source):
+
+        self.last_cmd = msg
+        self.active_source = source
+
+        self.pub.publish(msg)
+
+
+    def gui_callback(self,msg):
+
         self.lastmessage_gui = self.get_clock().now()
+
         if 6 >= self.currentPriority():
-            self.pub.publish(msg)
+            self.publish_command(msg,"GUI")
 
-    def charge_callback(self, msg):
+
+    def charge_callback(self,msg):
+
         self.lastmessage_charge = self.get_clock().now()
+
         if 5 >= self.currentPriority():
-            self.pub.publish(msg)
+            self.publish_command(msg,"CHARGE")
 
-    def estop_callback(self, msg):
+
+    def estop_callback(self,msg):
+
         self.lastmessage_estop = self.get_clock().now()
+
         if 4 >= self.currentPriority():
-            self.pub.publish(msg)
+            self.publish_command(msg,"ESTOP")
 
-    def bump_callback(self, msg):
+
+    def bump_callback(self,msg):
+
         self.lastmessage_bump = self.get_clock().now()
+
         if 3 >= self.currentPriority():
-            self.pub.publish(msg)
+            self.publish_command(msg,"BUMP")
 
-    def turn_callback(self, msg):
+
+    def turn_callback(self,msg):
+
         self.lastmessage_turn = self.get_clock().now()
+
         if 2 >= self.currentPriority():
-            self.pub.publish(msg)
+            self.publish_command(msg,"TURN")
 
-    def nav_callback(self, msg):
+
+    def nav_callback(self,msg):
+
         self.lastmessage_nav = self.get_clock().now()
-        if 1 >= self.currentPriority():
-            self.pub.publish(msg)
 
-    # Prioriteitslogica
+        if 1 >= self.currentPriority():
+            self.publish_command(msg,"NAV")
+
+
+    # -------------------------
+    # prioriteit
+    # -------------------------
+
     def currentPriority(self):
-        current_time = self.get_clock().now()
-        
-        if (current_time - self.lastmessage_gui) <= Duration(seconds=2):
+
+        now = self.get_clock().now()
+
+
+        if now - self.lastmessage_gui <= Duration(seconds=2):
             return 6
-        elif (current_time - self.lastmessage_charge) <= Duration(seconds=0.5):
+
+        elif now - self.lastmessage_charge <= Duration(seconds=0.5):
             return 5
-        elif (current_time - self.lastmessage_estop) <= Duration(seconds=0.5):
+
+        elif now - self.lastmessage_estop <= Duration(seconds=0.5):
             return 4
-        elif (current_time - self.lastmessage_bump) <= Duration(seconds=0.5):
+
+        elif now - self.lastmessage_bump <= Duration(seconds=0.5):
             return 3
-        elif (current_time - self.lastmessage_turn) <= Duration(seconds=2):
+
+        elif now - self.lastmessage_turn <= Duration(seconds=2):
             return 2
-        elif (current_time - self.lastmessage_nav) <= Duration(seconds=0.5):
+
+        elif now - self.lastmessage_nav <= Duration(seconds=0.5):
             return 1
+
         else:
             return 0
 
+
+
+    # -------------------------
+    # terminal status
+    # -------------------------
+
+    def print_status(self):
+
+        priority = self.currentPriority()
+
+
+        if self.active_source == "ESTOP":
+            color = RED
+
+        elif self.active_source in ["BUMP","CHARGE"]:
+            color = ORANGE
+
+        elif self.active_source in ["NAV","GUI","TURN"]:
+            color = GREEN
+
+        else:
+            color = GRAY
+
+
+        print("\033c", end="")  # terminal wissen
+
+
+        print(color)
+        print("========== DRIVE MUX STATUS ==========")
+        print(RESET)
+
+
+        print(
+            f"{color}Actieve bron : {self.active_source}"
+            f"{RESET}")
+
+        print(
+            f"Prioriteit   : {priority}"
+        )
+
+
+        print("\nSnelheid:")
+
+        print(
+            f" linear.x  : {self.last_cmd.linear.x:.3f} m/s")
+
+        print(
+            f" linear.y  : {self.last_cmd.linear.y:.3f} m/s")
+
+        print(
+            f" angular.z : {self.last_cmd.angular.z:.3f} rad/s")
+
+
+        print("\nBronnen:")
+
+
+        sources = [
+            ("GUI",self.lastmessage_gui,2),
+            ("CHARGE",self.lastmessage_charge,0.5),
+            ("ESTOP",self.lastmessage_estop,0.5),
+            ("BUMP",self.lastmessage_bump,0.5),
+            ("TURN",self.lastmessage_turn,2),
+            ("NAV",self.lastmessage_nav,0.5)
+        ]
+
+
+        now=self.get_clock().now()
+
+
+        for name,time,timeout in sources:
+
+            age = (now-time).nanoseconds/1e9
+
+
+            if age <= timeout:
+
+                print(
+                    f"{GREEN}{name:<8}: ACTIEF "
+                    f"({age:.2f}s){RESET}")
+
+            else:
+
+                print(
+                    f"{GRAY}{name:<8}: uit "
+                    f"({age:.2f}s){RESET}")
+
+
+        print("\n======================================")
+
+
+
 def main(args=None):
+
     rclpy.init(args=args)
+
     node = driveMux()
+
     try:
         rclpy.spin(node)
+
     except KeyboardInterrupt:
         pass
+
     finally:
+
         node.destroy_node()
         rclpy.try_shutdown()
+
+
 
 if __name__ == '__main__':
     main()

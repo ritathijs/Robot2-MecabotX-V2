@@ -101,11 +101,11 @@ def generate_launch_description():
     
     #twist_mux_node = launch_ros.actions.Node(
     #   package='twist_mux',
-    #    executable='twist_mux',
-    #    name='twist_mux',
+    #   executable='twist_mux',
+    #   name='twist_mux',
     #    parameters=['/home/wheeltec/wheeltec_ros2/src/turn_on_wheeltec_robot/param/param_mux.yaml'],
     #    remappings=[
-    #        ('cmd_vel_out', '/cmd_vel')
+    #        ('/cmd_vel_out', '/robot_cmd_vel')
     #    ]
     #)
     

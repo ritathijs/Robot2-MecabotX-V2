@@ -10,7 +10,7 @@ twist_mux:
         topic   : charge_cmd_vel
         timeout : 0.5
         priority: 220  
-      
+     
       estop:
         topic   : estop_cmd_vel
         timeout : 0.5
@@ -21,10 +21,13 @@ twist_mux:
         timeout : 0.5
         priority: 100
       
-      navigation:
-        topic   : nav_cmd_vel
+      
+      turn:
+        topic   : turn_cmd_vel
         timeout : 0.5
+        priority: 50  
+
+      navigation:
+        topic   : cmd_vel
+        timeout : 10.0
         priority: 10  
-
-
-
