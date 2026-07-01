@@ -1,11 +1,11 @@
 amcl:
   ros__parameters:
     use_sim_time: False
-    alpha1: 0.5   #里程计的旋转估计中来自旋转的预期过程噪声
-    alpha2: 0.2   #里程计的旋转估计中来自平移的预期过程噪声
-    alpha3: 0.2  #里程计的翻译估计中来自translation的预期过程噪声
-    alpha4: 0.4  #里程计的平移估计中因旋转而产生的预期过程噪声
-    alpha5: 0.2  #仅适用于 Omni 型号：translation噪音
+    alpha1: 0.45   #里程计的旋转估计中来自旋转的预期过程噪声
+    alpha2: 0.15   #里程计的旋转估计中来自平移的预期过程噪声
+    alpha3: 0.15  #里程计的翻译估计中来自translation的预期过程噪声
+    alpha4: 0.15  #里程计的平移估计中因旋转而产生的预期过程噪声
+    alpha5: 0.15  #仅适用于 Omni 型号：translation噪音
     base_frame_id: "base_footprint" #机器人底座框架 
     beam_skip_distance: 0.5         #忽略似然场模型中大多数粒子不同意的光束。考虑跳过的最大距离（米）
     beam_skip_error_threshold: 0.9  #由于收敛性不好，未匹配地图后强制进行完全更新的光束百分比
@@ -100,8 +100,8 @@ controller_server:
 
     goal_checker:
       plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.15
-      yaw_goal_tolerance: 0.2 #org 1.75
+      xy_goal_tolerance: 0.25
+      yaw_goal_tolerance: 0.4 #org 1.75
       stateful: True
 
     FollowPath:
@@ -248,7 +248,7 @@ local_costmap:
 
       camera_layer:
         plugin: "nav2_costmap_2d::VoxelLayer" # Of ObstacleLayer
-        enabled: True
+        enabled: False
         mark_threshold: 1
         max_obstacle_height: 2.0
         min_obstacle_height: 0.01
@@ -455,3 +455,4 @@ waypoint_follower:
       waypoint_pause_duration: 200 #机器人到达每个航点后休眠/等待的时间（以毫秒为单位）
 #waypoint_follower 参数参考
 #https://docs.nav2.org/configuration/packages/configuring-waypoint-follower.html?highlight=stop_on_failure  
+

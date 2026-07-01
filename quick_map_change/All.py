@@ -99,7 +99,7 @@ class MapProcessor:
         origin_x = -(ls_x * self.resolutie)
         origin_y = -((self.img_shape[1] - ls_y) * self.resolutie)
         
-        config = [("default", 0.70, 0.70), ("KEEPOUT_WORKING", 0.15, 0.10), ("KEEPOUT_SERVICE", 0.35, 0.30)]
+        config = [("default", 0.70, 0.45), ("KEEPOUT_WORKING", 0.15, 0.10), ("KEEPOUT_SERVICE", 0.35, 0.30)]
         for suffix, occ, free in config:
             naam = f"{BASIS_NAAM}_{suffix}.yaml" if suffix != "default" else f"{BASIS_NAAM}.yaml"
             with open(naam, 'w') as f:

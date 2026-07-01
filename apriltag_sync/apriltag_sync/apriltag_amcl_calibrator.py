@@ -7,6 +7,16 @@ from rclpy.node import Node
 from rclpy.time import Time
 from ament_index_python.packages import get_package_share_directory
 
+
+import cv2
+from cv_bridge import CvBridge
+from sensor_msgs.msg import Image
+
+# Als je apriltag_ros gebruikt:
+from apriltag_msgs.msg import AprilTagDetectionArray
+
+
+
 # ROS 2 Berichten
 from geometry_msgs.msg import PoseWithCovarianceStamped, PoseStamped
 from tf2_ros import TransformException, Buffer, TransformListener
@@ -39,6 +49,76 @@ class AprilTagAmclCalibrator(Node):
         self.timer = self.create_timer(0.5, self.check_for_tags)
 
         self.get_logger().info("AprilTag AMCL Calibrator succesvol opgestart met eigen namen.")
+
+
+        self.bridge = CvBridge()
+
+        self.image_sub = self.create_subscription(
+            Image,
+            '/camera/image_raw',   # pas aan naar jouw topic
+            self.image_callback,
+            10
+        )
+
+        self.annotated_pub = self.create_publisher(
+            Image,
+            '/apriltag/image_annotated',
+            10
+        )
+
+        self.tag_sub = self.create_subscription(
+            AprilTagDetectionArray,
+            '/detections',   # vaak /apriltag/detections
+            self.tag_callback,
+            10
+        )
+
+        self.latest_image = None
+        self.latest_detections = None
+
+        self.processing_hz = 1.0
+        self.timer = self.create_timer(1.0 / self.processing_hz, self.publish_annotated_image)
+
+    
+    def image_callback(self, msg: Image):
+        self.latest_image = msg
+
+    def tag_callback(self, msg: AprilTagDetectionArray):
+        self.latest_detections = msg
+
+    def publish_annotated_image(self):
+        if self.latest_image is None:
+            return
+
+        img = self.bridge.imgmsg_to_cv2(self.latest_image, desired_encoding='bgr8')
+
+        if self.latest_detections is not None:
+            for det in self.latest_detections.detections:
+                tag_id = det.id[0]
+
+                # corners (standaard apriltag_ros geeft dit)
+                pts = det.corners
+                pts = [(int(p.x), int(p.y)) for p in pts]
+
+                # bounding box tekenen
+                for i in range(4):
+                    cv2.line(img, pts[i], pts[(i+1) % 4], (0, 255, 0), 2)
+
+                # ID label boven eerste hoek
+                cv2.putText(
+                    img,
+                    f"ID: {tag_id}",
+                    pts[0],
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (0, 0, 255),
+                    2
+                )
+
+        out_msg = self.bridge.cv2_to_imgmsg(img, encoding='bgr8')
+        out_msg.header = self.latest_image.header
+        self.annotated_pub.publish(out_msg)
+
 
     def load_tag_config(self):
         """Leest de tag_locations.yaml in om namen zoals 'laadstation' te vinden."""

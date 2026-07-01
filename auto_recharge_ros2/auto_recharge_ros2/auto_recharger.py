@@ -151,6 +151,12 @@ class AutoRecharger(Node):
                     1
         )
 
+        # Schermen aanvragen
+        self.rpi_topic_pub = self.create_publisher(
+            String,
+            "rpitopic",
+            10
+        )
 
         # Verbinding met BT
         self.force_charge_sub = self.create_subscription(
@@ -237,7 +243,7 @@ class AutoRecharger(Node):
         self.Voltage_sub = self.create_subscription(Float32, "PowerVoltage", self.Voltage_callback,10)
 
         #topic waar spanningsniveau opkomt
-        self.Charging_Flag_sub = self.create_subscription(Bool, "robot_charging_flag",self.Charging_Flag_callback,10)
+        #self.Charging_Flag_sub = self.create_subscription(Bool, "robot_charging_flag",self.Charging_Flag_callback,10)
 
         #topic met laadstroom
         self.Charging_Current_sub = self.create_subscription(Float32,"robot_charging_current",  self.Charging_Current_callback,10)
@@ -274,6 +280,12 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         self.wait_server_done = 1  # serivce response is ontvangen
         response = res.result()   # ophalen van het response zelf
         self.server_set_state = response.name   # opslaan van de status (bv true of false)
+
+    def publish_rpi_event(self, text):
+        msg = String()
+        msg.data = text
+        self.rpi_topic_pub.publish(msg)
+        print_and_fixRetract(GREEN + f"RPITOPIC -> {text}" + RESET)
 
     def write_battery_status(self, status):
             """
@@ -619,33 +631,68 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
         self.robot['Voltage']=topic.data
 
-    def Charging_Flag_callback(self, topic):
-        # detecteren van starten of stoppen met laden
+    # def Charging_Flag_callback(self, topic):
+    #     # detecteren van starten of stoppen met laden
+        
 
-        '''更新机器人充电状态'''
-        # robot was niet aan het laden, maar is nu wel aan het laden
-        if(self.robot['Charging']==0 and topic.data==1):
 
-            # BT Start met opladen
-            self.publish_event("ROBOT-CHARGING")
-            print_and_fixRetract(GREEN+"Charging started!"+RESET)
-            self.hard_stop_robot() # dwingen om robot om te stoppen (wielen snelheden even 0 sturen)
+    #     '''更新机器人充电状态'''
+    #     # robot was niet aan het laden, maar is nu wel aan het laden
+    #     if(self.robot['Charging']==0 and topic.data==1):
 
-        # robot was aan het laden, maar is nu niet meer aa nhet laden
-        if(self.robot['Charging']==1 and topic.data==0):
-            print_and_fixRetract(YELLOW+"Charging disconnected!"+RESET)
-            if self.chargeflag == 1:  # we verwachten nog wel dat de robot aan het laden is
-                print_and_fixRetract(YELLOW+"Code bereikt"+RESET)
-                self.hard_stop_robot() # even terug wielen op 0 dwingen
-                self.retry_docking_if_not_charging() # robot naar voor dwingen te rijden, hij zal daarna opnieuw zijn IR laten plaatsvinden (dus een docking retry)
-        self.robot['Charging']=topic.data
+    #         # BT Start met opladen
+    #         self.publish_event("ROBOT-CHARGING")
+
+    #         # Toon scherm om aan te geven dat robot aan het laden is
+    #         self.publish_rpi_event("RobotCharging")
+
+
+    #         print_and_fixRetract(GREEN+"Charging started!"+RESET)
+    #         self.hard_stop_robot() # dwingen om robot om te stoppen (wielen snelheden even 0 sturen)
+
+    #     # robot was aan het laden, maar is nu niet meer aa nhet laden
+    #     if(self.robot['Charging']==1 and topic.data==0):
+    #         print_and_fixRetract(YELLOW+"Charging disconnected!"+RESET)
+    #         if self.chargeflag == 1:  # we verwachten nog wel dat de robot aan het laden is
+    #             print_and_fixRetract(YELLOW+"Code bereikt"+RESET)
+    #             self.hard_stop_robot() # even terug wielen op 0 dwingen
+    #             self.retry_docking_if_not_charging() # robot naar voor dwingen te rijden, hij zal daarna opnieuw zijn IR laten plaatsvinden (dus een docking retry)
+    #     self.robot['Charging']=topic.data
 
 
 
     def Charging_Current_callback(self, topic):
-        '''更新机器人充电电流数据'''
-        # laadstroom aanpassen
-        self.robot['Charging_current']=topic.data
+        """Update laadstroom en bepaal laadstatus op basis van stroom."""
+
+        previous_charging = self.robot['Charging']
+
+        # laadstroom opslaan
+        self.robot['Charging_current'] = topic.data
+
+        # bepaal laadstatus
+        current_charging = 1 if topic.data > 0.1 else 0
+
+        # overgang: niet laden -> laden
+        if previous_charging == 0 and current_charging == 1:
+
+            self.publish_event("ROBOT-CHARGING")
+            self.publish_rpi_event("RobotCharging")
+
+            print_and_fixRetract(GREEN + "Charging started!" + RESET)
+            self.hard_stop_robot()
+
+        # overgang: laden -> niet laden
+        elif previous_charging == 1 and current_charging == 0:
+
+            print_and_fixRetract(YELLOW + "Charging disconnected!" + RESET)
+
+            if self.chargeflag == 1:
+                print_and_fixRetract(YELLOW + "Code bereikt" + RESET)
+                self.hard_stop_robot()
+                self.retry_docking_if_not_charging()
+
+        # interne status updaten
+        self.robot['Charging'] = current_charging
         
 
     def update_battery_percentage(self):
@@ -873,6 +920,8 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         als robot faalt bij docken, dan proberen we opnieuw
         """
 
+        # Scherm publiceren van robotdocking
+        self.publish_rpi_event("RobotDocking")
 
         print_and_fixRetract(
                 YELLOW + "Time delay voor retry docking ingezet (verwacht stilstaan)" + RESET
@@ -1168,32 +1217,54 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 import threading
 
 def wait_for_nav2_simple(navigator, max_retries=5):
-    """
-    Eenvoudigere check zonder threads om 'generator already executing' te voorkomen.
-    We laten de navigator zelf wachten, maar doen dit binnen de hoofd-executor.
-    """
+
+    print_and_fixRetract("[NAV2] Start wait_for_nav2_simple()")
+
     for attempt in range(1, max_retries + 1):
-        print_and_fixRetract(YELLOW + f"[NAV2] Poging {attempt}/{max_retries} om te verbinden..." + RESET)
-        
-        # We gebruiken een try-except om te voorkomen dat een crash de hele loop stopt
+
+        print_and_fixRetract(
+            YELLOW + f"[NAV2] ===== Poging {attempt}/{max_retries} =====" + RESET
+        )
+
         try:
-            # We geven de navigator een kortere interne timeout als dat kan, 
-            # maar standaard wacht hij tot de services verschijnen.
+
+            print_and_fixRetract("[NAV2] Wachten op Nav2Active...")
+
+            start = time.time()
+
             navigator.waitUntilNav2Active()
-            print_and_fixRetract(GREEN + "[NAV2] Nav2 is succesvol geactiveerd!" + RESET)
+
+            elapsed = time.time() - start
+
+            print_and_fixRetract(
+                GREEN + f"[NAV2] waitUntilNav2Active() teruggekeerd na {elapsed:.1f}s" + RESET
+            )
+
             return True
+
         except Exception as e:
-            print_and_fixRetract(RED + f"[NAV2] Poging {attempt} mislukt: {e}" + RESET)
-        
+
+            print_and_fixRetract(
+                RED + f"[NAV2] Exception: {repr(e)}" + RESET
+            )
+
+        print_and_fixRetract("[NAV2] 2 seconden wachten voor volgende poging...")
         time.sleep(2)
+
+    print_and_fixRetract(RED + "[NAV2] Alle pogingen mislukt." + RESET)
+
     return False
+
 
 def main():
     rclpy.init()
     try:
         navigator = BasicNavigator()
+        print_and_fixRetract("[MAIN] BasicNavigator aangemaakt")
+
 
         nav2_ok = wait_for_nav2_simple(navigator)
+        print_and_fixRetract(f"[MAIN] wait_for_nav2_simple returned {nav2_ok}")
 
         if not nav2_ok:
             navigator.destroy_node()

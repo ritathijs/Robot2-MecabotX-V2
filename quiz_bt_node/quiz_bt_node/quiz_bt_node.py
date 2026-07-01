@@ -108,15 +108,8 @@ class QuizBTNode(Node):
 
         self.sio.on('schedule-updated', self.on_schedule_updated)
 
+        self.sio.on('drive', self.on_drive)
 
-        self.sio.on('drive-forward', lambda data=None: self.on_drive('forward'))
-        self.sio.on('drive-backward', lambda data=None: self.on_drive('backward'))
-        self.sio.on('drive-left', lambda data=None: self.on_drive('left'))
-        self.sio.on('drive-right', lambda data=None: self.on_drive('right'))
-        self.sio.on('drive-cw', lambda data=None: self.on_drive('cw'))
-        self.sio.on('drive-ccw', lambda data=None: self.on_drive('ccw'))
-        self.sio.on('drive-stop', lambda data=None: self.on_drive('stop'))
-        
         # Connect to server
         self.sio.connect(SERVER_URL, retry=True)
         self.get_logger().info(f"Connected to server at {SERVER_URL}")
@@ -135,6 +128,7 @@ class QuizBTNode(Node):
             response = requests.get(URL)
 
             # was het request succesvol?
+
             if response.status_code == 200:
                 data = response.json()
                 # indien lijst : pak eerste element, anders het hele object (redundant)
@@ -205,40 +199,43 @@ class QuizBTNode(Node):
         msg.data = message
         self.quiz_publisher.publish(msg)
         self.get_logger().info(f'Published to quiz topic: {msg.data}')
-
-
-    def on_drive(self, direction):
-
-        # wordt aangeroepen wanneer manual drive via GUI gebeurd
-
-        self.get_logger().info(f'Direction received: {direction}')
+        
+    def on_drive(self, data):
+        # Controleer of er daadwerkelijk data is binnengekomen
+        if not data:
+            return
+            
         self.last_drive_cmd_time = time.time()
         self.is_moving = True
 
         if hasattr(self, 'admin_panel_open') and self.admin_panel_open:
             self.manual_drive_since_admin_open = True
 
-
+        direction = data.get('direction', 'stop')
+        speed = float(data.get('speed', 0.0))
+        
+        self.get_logger().info(f'Direction received: {direction}, speed {speed}')
+    
         msg = Twist()
 
         if direction == 'forward':
-            msg.linear.x = 0.2
-            self.get_logger().info(f'0.2')
+            msg.linear.x = 0.15*speed
+            self.get_logger().info(f'{0.15*speed}')
         elif direction == 'backward':
-            msg.linear.x = -0.3
-            self.get_logger().info(f'0.3')
+            msg.linear.x = -0.2*speed
+            self.get_logger().info(f'{0.2*speed}')
         elif direction == 'left':
-            msg.linear.y = -0.2
-            self.get_logger().info(f'0.2')
+            msg.linear.y = -0.1*speed
+            self.get_logger().info(f'{0.1*speed}')
         elif direction == 'right':
-            msg.linear.y = 0.2
-            self.get_logger().info(f'0.2')
+            msg.linear.y = 0.1*speed
+            self.get_logger().info(f'{0.1*speed}')
         elif direction == 'cw':
-            msg.angular.z = -0.3
-            self.get_logger().info(f'0.3')
+            msg.angular.z = -0.2*speed
+            self.get_logger().info(f'{0.2*speed}')
         elif direction == 'ccw':
-            msg.angular.z = 0.3
-            self.get_logger().info(f'0.3')
+            msg.angular.z = 0.2*speed
+            self.get_logger().info(f'{0.2*speed}')
         else: # stop
             msg.linear.x = 0.0
             msg.linear.y = 0.0
@@ -353,6 +350,12 @@ class QuizBTNode(Node):
         self.get_logger().info("Admin Panel gesloten")
         self.admin_panel_open = False
 
+        if self.last_emitted_event == "robot-charging" or self.last_emitted_event == "robot-go-charge" or self.last_emitted_event == "robot-docking":
+            self.get_logger().info("Laatste event was robot-charging -> opnieuw versturen")
+            self.emit_event("robot-charging")
+        else:
+            self.get_logger().info("Laatste event was niet robot-charging -> niets versturen")
+
         # als er manual drive is gebeurd, dan kan het zijn dat robotlocatie gereset moet worden
         # hierbij moet vanalles gebeuren, zoals het loskoppelen van robot van laadstation
         # we kiezen om de ADMINPANELCLOSED 10 seconde uit te stellen om zo niet direct in BT verder te gaan
@@ -391,11 +394,7 @@ class QuizBTNode(Node):
 
     def _finalize_admin_closed(self):
         self.get_logger().info("Na vertraging adminpanelclosed")
-        if self.last_emitted_event == "robot-charging":
-            self.get_logger().info("Laatste event was robot-charging -> opnieuw versturen")
-            self.emit_event("robot-charging")
-        else:
-            self.get_logger().info("Laatste event was niet robot-charging -> niets versturen")
+
 
         self.publish_admin_message("ADMINPANELCLOSED")
         self.fetch_schedule() # bij sluiten adminpanel zeker de instellingen opvragen
@@ -435,6 +434,8 @@ class QuizBTNode(Node):
             self.safe_emit("robot-startup")
         elif msg.data == "RobotDocking":
             self.safe_emit("robot-docking")
+        elif msg.data == "RobotStartup":
+            self.safe_emit("robot-startup")
 
     # ---------------- CLEANUP ----------------
     def shutdown(self):
@@ -462,3 +463,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+

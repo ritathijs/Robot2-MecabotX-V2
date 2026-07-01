@@ -434,91 +434,96 @@ public:
         return {
             BT::InputPort<std::string>("robotLocation"),
             // Blackboard output voor andere nodes
-            BT::OutputPort<std::string>("robotLocationBAT")
+            BT::OutputPort<std::string>("robotLocationBAT"),
+            BT::InputPort<bool>("skip_drivetoworkarea")
         };
     }
 
     BT::NodeStatus tick() override
     {
-        // 1. Haal de huidige tijd en dag op
         std::time_t now = std::time(nullptr);
         std::tm *local = std::localtime(&now);
 
-        // tm_wday: 0 = Sun, 1 = Mon, 2 = Tue, 3 = Wed, 4 = Thu, 5 = Fri, 6 = Sat
-        // We mappen dit naar jouw dag-codes uit het Python script
         char day_codes[] = {'U', 'M', 'D', 'W', 'T', 'F', 'S'};
         char current_day_code = day_codes[local->tm_wday];
-        
-        // Huidige tijd in HHMM format (bijv. 14:30 -> 1430)
+
         int current_time_val = (local->tm_hour * 100) + local->tm_min;
 
-        // 2. Haal het schema op via de static helper
         auto schedule = ScheduleParser::getFullSchedule();
-        // --- DEBUG PRINTS START ---
-        std::cout << "\n--- Ingelezen Schema ---" << std::endl;
-        if (schedule.empty()) {
-            std::cout << "[WAARSCHUWING] Schema is leeg! Kan bestand niet lezen." << std::endl;
-        } else {
-            for (const auto& day : schedule) {
-                std::cout << "Dag: " << day.dayCode;
-                if (day.isActive) {
-                    std::cout << " | Status: ACTIEF | Tijd: " << day.startTime << " tot " << day.endTime << std::endl;
-                } else {
-                    std::cout << " | Status: INACTIEF" << std::endl;
-                }
-            }
-        }
+
         bool is_working_time = false;
-        for (const auto& day : schedule) {
-            if (day.dayCode == current_day_code) {
-                if (day.isActive && current_time_val >= day.startTime && current_time_val < day.endTime) {
+        for (const auto& day : schedule)
+        {
+            if (day.dayCode == current_day_code)
+            {
+                if (day.isActive &&
+                    current_time_val >= day.startTime &&
+                    current_time_val < day.endTime)
+                {
                     is_working_time = true;
                 }
-                break; // Dag gevonden, stop met zoeken
+                break;
             }
         }
 
         std_msgs::msg::String bt_msg;
         std_msgs::msg::String rpi_msg;
 
-        // 3. Afhandeling op basis van schema
+        // WORKING TIME CHECK
         if (!is_working_time)
         {
-            std::cout << "[CheckInWorkingZone] Buiten werkuren (Schedule) -> FORCE-CHARGING" << std::endl;
+            std::cout << "[CheckInWorkingZone] Buiten werkuren -> FORCE-CHARGING" << std::endl;
 
             setOutput("robotLocationBAT", std::string("FORCE-CHARGING"));
 
             bt_msg.data = "FORCE-CHARGING";
             pub_->publish(bt_msg);
 
-            // We geven SUCCESS terug omdat de conditie "afgehandeld" is (robot moet gaan laden)
             return BT::NodeStatus::SUCCESS;
         }
 
-        // Als we hier komen, is het werktijd
-        std::cout << "[CheckInWorkingZone] Binnen werkuren, resetten van FORCE-CHARGING" << std::endl;
+        std::cout << "[CheckInWorkingZone] Binnen werkuren" << std::endl;
 
         setOutput("robotLocationBAT", std::string("WORKING"));
 
         bt_msg.data = "CheckInWorkingZone-WORKING";
         pub_->publish(bt_msg);
 
-        rpi_msg.data = "RobotExplore"; // Scherm triggeren
+        rpi_msg.data = "RobotStarting";
         rpi_pub_->publish(rpi_msg);
 
 
-        // 4. Check of de fysieke locatie ook klopt
+        bool skip_drive_to_workarea = false;
+        getInput("skip_drivetoworkarea", skip_drive_to_workarea);
+
+
         std::string location;
         if (!getInput("robotLocation", location))
         {
-            std::cerr << "[CheckInWorkingZone] Geen robotLocation gevonden op blackboard!\n";
+            std::cerr << "[CheckInWorkingZone] Geen robotLocation!\n";
+            
+            if (skip_drive_to_workarea)
+            {
+                std::cout << "[CheckInWorkingZone] skip_drivetoworkarea = TRUE -> FORCE SUCCESS" << std::endl;
+                return BT::NodeStatus::SUCCESS;
+            }
+
             return BT::NodeStatus::FAILURE;
         }
 
+        // ALS AL IN WORKING AREA -> altijd SUCCESS
         if (location == "WORKING")
         {
             return BT::NodeStatus::SUCCESS;
         }
+
+                
+        if (skip_drive_to_workarea){
+            
+            std::cout << "[CheckInWorkingZone] skip_drivetoworkarea = TRUE -> FORCE SUCCESS" << std::endl;
+            return BT::NodeStatus::SUCCESS;
+        }
+
 
         return BT::NodeStatus::FAILURE;
     }
@@ -555,12 +560,15 @@ public:
             BT::OutputPort<std::string>("bat_admin_status"),
             BT::OutputPort<bool>("connection_chargeStatus"),
             BT::InputPort<bool>("skip_robotdrivechargingstation"),
+            BT::OutputPort<bool>("skip_drivetoworkarea")
 
         };
     }
 
     BT::NodeStatus onStart() override
     {
+        setOutput("skip_drivetoworkarea", false);
+
         // Eerst controleren of rijden moet worden overgeslagen
         bool skip = false;
         getInput("skip_drive2charging", skip);
@@ -2443,7 +2451,8 @@ public:
         return {
             BT::OutputPort<bool>("buttonStop"),
             BT::OutputPort<std::string>("robotLocationBAT"),
-            BT::OutputPort<bool>("robot_startup")
+            BT::OutputPort<bool>("robot_startup"),
+            BT::OutputPort<bool>("skip_drivetoworkarea")  
         };
     }
 
@@ -2451,7 +2460,9 @@ public:
     {
         // 🔹 ALTIJD FALSE SCHRIJVEN NAAR BLACKBOARD
         setOutput("robot_startup", false);
+        setOutput("skip_drivetoworkarea", false);
 
+        
         // 1. Publiceer node naam
         std_msgs::msg::String msg;
         msg.data = "CheckButtonState";
@@ -3350,11 +3361,16 @@ public:
 
     static BT::PortsList providedPorts()
     {
-        return { BT::InputPort<double>("timeout") };
+        return {
+            BT::InputPort<double>("timeout"),
+            BT::OutputPort<bool>("skip_drivetoworkarea") 
+        };
     }
 
     BT::NodeStatus onStart() override
     {
+
+        setOutput("skip_drivetoworkarea", true);
         received_ = false;
         last_msg_.clear();
 
@@ -3507,7 +3523,7 @@ public:
 
         // Publish naar RPI topic
         std_msgs::msg::String msg;
-        msg.data = "RobotExplore";
+        msg.data = "RobotStarting";
         rpi_pub_->publish(msg);
 
         // Start tijd registreren
