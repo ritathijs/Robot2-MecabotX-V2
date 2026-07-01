@@ -17,9 +17,17 @@ import socketio
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 
 from geometry_msgs.msg import Twist
+from socketio.exceptions import BadNamespaceError
 
-# URL van server waar settings (schedule) worden opgehaald
-URL = "http://192.168.137.100/cms/getSettings"
+
+# Basis serveradres
+SERVER_IP = "172.18.108.11"
+
+# Afgeleide URL's
+URL = f"http://{SERVER_IP}/cms/getSettings"
+SERVER_URL = f"http://{SERVER_IP}:80"
+
+
 
 # De systeemtijd van de pi wordt doorgestuurd naar de robot
 # Indien volgende parameter op False staat wordt de robot zijn systeemtijd NIET aangepast
@@ -110,9 +118,8 @@ class QuizBTNode(Node):
         self.sio.on('drive-stop', lambda data=None: self.on_drive('stop'))
         
         # Connect to server
-        server_ip = 'http://192.168.137.100:80'
-        self.sio.connect(server_ip, retry=True)
-        self.get_logger().info(f"Connected to server at {server_ip}")
+        self.sio.connect(SERVER_URL, retry=True)
+        self.get_logger().info(f"Connected to server at {SERVER_URL}")
 
     # ---------------- SETTINGS OPHALEN ----------------
     def fetch_schedule(self):
@@ -176,7 +183,17 @@ class QuizBTNode(Node):
     def battery_callback(self, msg):
         percentage = msg.data
         self.get_logger().info(f'Battery percentage: {percentage}%')
-        self.sio.emit("battery-update", {"percentage": percentage})
+        self.safe_emit("battery-update", {"percentage": percentage})
+
+    def safe_emit(self, event, data=None):
+        try:
+            self.sio.emit(event, data)
+        except BadNamespaceError:
+            self.get_logger().warn(
+                f"Dropped event '{event}', socket not connected."
+            )
+        except Exception as e:
+            self.get_logger().error(str(e))
 
 
     def _is_blocking(self):
@@ -205,23 +222,23 @@ class QuizBTNode(Node):
         msg = Twist()
 
         if direction == 'forward':
-            msg.linear.x = 0.15
-            self.get_logger().info(f'0.15')
+            msg.linear.x = 0.2
+            self.get_logger().info(f'0.2')
         elif direction == 'backward':
-            msg.linear.x = -0.20
-            self.get_logger().info(f'0.20')
+            msg.linear.x = -0.3
+            self.get_logger().info(f'0.3')
         elif direction == 'left':
-            msg.linear.y = -0.1
-            self.get_logger().info(f'0.1')
+            msg.linear.y = -0.2
+            self.get_logger().info(f'0.2')
         elif direction == 'right':
-            msg.linear.y = 0.1
-            self.get_logger().info(f'0.1')
+            msg.linear.y = 0.2
+            self.get_logger().info(f'0.2')
         elif direction == 'cw':
-            msg.angular.z = -0.2
-            self.get_logger().info(f'0.2')
+            msg.angular.z = -0.3
+            self.get_logger().info(f'0.3')
         elif direction == 'ccw':
-            msg.angular.z = 0.2
-            self.get_logger().info(f'0.2')
+            msg.angular.z = 0.3
+            self.get_logger().info(f'0.3')
         else: # stop
             msg.linear.x = 0.0
             msg.linear.y = 0.0
@@ -277,7 +294,7 @@ class QuizBTNode(Node):
         if self._is_blocking():
             return
         self.get_logger().info('Connected to server')
-        self.sio.emit("identification", "orin-nano-robot")
+        self.safe_emit("identification", "orin-nano-robot")
         self.publish_connection_message("CONNECT")   
         self.fetch_schedule()
 
@@ -312,7 +329,7 @@ class QuizBTNode(Node):
         self.fetch_schedule()
 
     def emit_event(self, event, data=None):
-        self.sio.emit(event, data) if data else self.sio.emit(event)
+        self.safe_emit(event, data) if data else self.safe_emit(event)
         self.last_emitted_event = event
 
     def on_admin_panel_open(self):
@@ -399,25 +416,25 @@ class QuizBTNode(Node):
         self.get_logger().info(f'Received from RPi: {msg.data}')
 
         if msg.data == "RobotExplore":
-            self.sio.emit("robot-explore")
+            self.safe_emit("robot-explore")
         elif msg.data == "RobotGoToVisitors":
-            self.sio.emit("robot-go-to-visitors")
+            self.safe_emit("robot-go-to-visitors")
         elif msg.data == "RobotArrivedAtVisitors":
-            self.sio.emit("robot-arrived-at-visitors")
+            self.safe_emit("robot-arrived-at-visitors")
         elif msg.data == "robot-arrived-at-quiz-location":
-            self.sio.emit("robot-arrived-at-quiz-location")
+            self.safe_emit("robot-arrived-at-quiz-location")
         elif msg.data == "RobotError":
-            self.sio.emit("robot-error-drive")
+            self.safe_emit("robot-error-drive")
         elif msg.data == "RobotErrorCharge":
-            self.sio.emit("robot-error-charge")
+            self.safe_emit("robot-error-charge")
         elif msg.data == "RobotGoCharge":
-            self.sio.emit("robot-go-charge")
+            self.safe_emit("robot-go-charge")
         elif msg.data == "RobotCharging":
-            self.sio.emit("robot-charging")
+            self.safe_emit("robot-charging")
         elif msg.data == "RobotStarting":
-            self.sio.emit("robot-startup")
+            self.safe_emit("robot-startup")
         elif msg.data == "RobotDocking":
-            self.sio.emit("robot-docking")
+            self.safe_emit("robot-docking")
 
     # ---------------- CLEANUP ----------------
     def shutdown(self):

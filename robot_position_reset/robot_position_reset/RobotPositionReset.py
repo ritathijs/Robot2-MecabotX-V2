@@ -12,6 +12,10 @@ class PublishBackPose(Node):
     def __init__(self):
         super().__init__('publish_back_pose')
 
+        
+        self.manual_mode_file = "/home/wheeltec/wheeltec_ros2/src/robot_position_reset/robot_position_reset/manual_mode.txt"
+
+
         # QoS voor XSTOP met reliable (1 message buffer)
         qos_reliable = QoSProfile(depth=1)
         qos_reliable.reliability = ReliabilityPolicy.RELIABLE
@@ -74,6 +78,15 @@ class PublishBackPose(Node):
         # timer voor 2 seconden te wachten, dan startup_callback uitvoeren
         self.start_timer = self.create_timer(2.0, self.startup_callback)
         self.start_timer.cancelled = False  # redundant
+
+    def check_manual_mode(self):
+        try:
+            with open(self.manual_mode_file, "r") as f:
+                return f.read().strip().upper()
+        except Exception as e:
+            self.get_logger().warn(f"Could not read manual mode file: {e}")
+            return "PASS"  # fallback veilig gedrag
+        
 
 
     def startup_callback(self):
@@ -171,11 +184,19 @@ class PublishBackPose(Node):
         self.publish_pose_multiple()
         
 
-    # berichten quiz_bt_node wanneer er manual drive is gebeurd    
     def manual_drive_callback(self, msg):
         if msg.data == "MANUAL_DRIVE_CONTROL":
-            self.get_logger().info("MANUAL_DRIVE_CONTROL received, sending XSTOP")
-            self.send_xstop()
+            mode = self.check_manual_mode()
+
+            self.get_logger().info(f"Manual drive received, mode = {mode}")
+
+            if mode == "SKIP":
+                self.get_logger().info("SKIP mode active → no XSTOP sent")
+                return
+
+            if mode == "PASS":
+                self.get_logger().info("PASS mode → sending XSTOP")
+                self.send_xstop()
 
 def main(args=None):
     rclpy.init(args=args)

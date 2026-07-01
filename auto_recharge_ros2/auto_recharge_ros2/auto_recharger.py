@@ -52,6 +52,9 @@ import os
 #存放充电桩位置的文件位置
 json_file='/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/Charger_Position.json'
 yaml_file='/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/robot_info.yaml'
+batstatus_file = "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/batstatus.txt"
+
+
 #print_and_fixRetract相关，用于打印带颜色的信息
 RESET = '\033[0m'
 RED   = '\033[1;31m'
@@ -158,7 +161,8 @@ class AutoRecharger(Node):
         )
 
         self.battery_full_sent = False
-
+        
+        self.last_batstatus = None
 
         self.force_charge_active = False  # NA START MOET EEN STOP KOMEN, EEN NIEUWE START WORDT GENEGEERD (VLAG HOOG)
 
@@ -170,6 +174,9 @@ class AutoRecharger(Node):
 
         #Aantal infraroodsignalen
         self.red_count=0
+
+        # 2de stop moet genegeerd worden
+        self.stop_processed = False
         
         #Vlag voor automatische terugkeermodus van de robot: 0: terugkeer uitgeschakeld, 1: navigatie-terugkeer, 2: terugkeer via besturing van de uitrusting
         self.chargeflag=0
@@ -268,6 +275,26 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         response = res.result()   # ophalen van het response zelf
         self.server_set_state = response.name   # opslaan van de status (bv true of false)
 
+    def write_battery_status(self, status):
+            """
+            Schrijft BATTERY-LOW of BATTERY-OK naar batstatus.txt.
+            Schrijft alleen wanneer de status veranderd is.
+            """
+
+            if status == self.last_batstatus:
+                return
+
+            try:
+                with open(batstatus_file, "w") as f:
+                    f.write(status)
+
+                self.last_batstatus = status
+                print_and_fixRetract(GREEN + f"Battery status opgeslagen: {status}" + RESET)
+
+            except Exception as e:
+                print_and_fixRetract(RED + f"Fout bij schrijven batstatus.txt: {e}" + RESET)
+
+    
     # Stuurt msg naar auto_recharge_event (BT)
     # Hij plaatst er eerst de juiste integer voor, zodat BT de juistheid kan herkenenn
     def publish_event(self, msg):
@@ -407,6 +434,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                 print_and_fixRetract(YELLOW + f"Eerste START ontvangen, sessie {session_id} wordt actief." + RESET)
                 self.charge_session_id = session_id
                 self.force_charge_active = True
+                self.stop_processed = False
                 self.start_forced_charging()
                 return
 
@@ -424,21 +452,30 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                 return
             print_and_fixRetract(YELLOW + f"Force charge START ontvangen (sessie {self.charge_session_id})." + RESET)
             self.force_charge_active = True
+            self.stop_processed = False
             self.start_forced_charging()
 
         # STOP
         elif command == "STOP":
-            if not self.force_charge_active:
-                print_and_fixRetract(YELLOW + f"STOP genegeerd: geen actieve laadsessie (sessie {self.charge_session_id})." + RESET)
+
+            if self.stop_processed:
+                print_and_fixRetract(
+                    YELLOW + f"STOP genegeerd: stop reeds uitgevoerd (sessie {self.charge_session_id})." + RESET
+                )
                 return
-            print_and_fixRetract(YELLOW + f"Force charge STOP ontvangen (sessie {self.charge_session_id})." + RESET)
+
+            print_and_fixRetract(
+                YELLOW + f"Force charge STOP ontvangen (sessie {self.charge_session_id})." + RESET
+            )
+
+            self.stop_processed = True
             self.force_charge_active = False
-            # sessie-ID resetten of verhogen na STOP
+
             self.charge_session_id += 1
             if self.charge_session_id > 9:
                 self.charge_session_id = 0
-            self.Stop_Charge(drive_forward=True)
 
+            self.Stop_Charge(drive_forward=True)
 
 
     # het publiceren van het navigatiedoel naar nav
@@ -622,18 +659,18 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         percent = max(0, min(100, percent))
 
         # alleen publiceren als het veranderd is
-        if percent != self.last_battery_percent:
+        # if percent != self.last_battery_percent:
 
-            msg = Int8()
-            msg.data = percent
+        #     msg = Int8()
+        #     msg.data = percent
 
-            for _ in range(3):
-                self.Battery_pub.publish(msg)
-                time.sleep(0.02)
+        #     for _ in range(3):
+        #         self.Battery_pub.publish(msg)
+        #         time.sleep(0.02)
 
-            self.last_battery_percent = percent
+        #     self.last_battery_percent = percent
 
-            print_and_fixRetract(f"Battery percentage: {percent}%")
+        #     print_and_fixRetract(f"Battery percentage: {percent}%")
 
 
 
@@ -932,7 +969,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
         #indien robot niet aan het laden is, kijk of spanning te laag is
         if self.robot['Charging']==0:
-            if (self.robot['Type']=='Plus'and self.robot['Voltage']<10) or (self.robot['Type']=='Mini' and self.robot['Voltage']<10):
+            if (self.robot['Type']=='Plus'and self.robot['Voltage']<10.0) or (self.robot['Type']=='Mini' and self.robot['Voltage']<10.0):
                 time.sleep(1)
                 self.power_lost_count=self.power_lost_count+1 # 低电量滤波
 
@@ -940,21 +977,28 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                 if self.power_lost_count>5 and self.lost_power_once==1:
                     self.power_lost_count=0
 
-                    #  indien vaak genoeg te laat en de robot niet aan het laden is : cancelen van doel, battery low produceren en laden initieren
+                    #  indien vaak genoeg te laaG en de robot niet aan het laden is : cancelen van doel, battery low produceren en laden initieren
                     if self.chargeflag==0:
-                        self.Pub_NavGoal_Cancel() # 取消导航
-                        # BT: batterij laag, laden moet starten
-                        self.publish_event("BATTERY-LOW")
-            
-
-                        if 'akm' in self.robot['car_mode']:
-                            self.chargeflag=2
-                        else:
-                            self.chargeflag=1
-                        self.Pub_Recharger_Flag(1) # 出现要优先开启自动回充然后再导航的情况,需要进行标志位传递
-                        self.Pub_Charger_Position()
-                        print_and_fixRetract(YELLOW+'检测到电池电量低,即将导航到充电桩进行充电.(Detects low battery level and will navigate to a charging station for charging.)'+RESET)
+                        # ROBOT HEEFT TE LAGE SPANNING : BT moet aan zet zijn, NIET DEZE CODE
+                        
                         self.lost_power_once=0
+
+            
+                        # IDEE : ZET HIER CODE DIE IN EEN FILE SCHRIJFT DAT SPANNING TE LAAG IS. BT ZAL HIERNA BEPALEN WAT DE SITUATIE IS
+                        self.write_battery_status("BATTERY-LOW")
+                    
+                    
+                        # self.Pub_NavGoal_Cancel() # 取消导航
+                        # BT: batterij laag, laden moet starten
+                        # self.publish_event("BATTERY-LOW")
+                        # if 'akm' in self.robot['car_mode']:
+                        #     self.chargeflag=2
+                        # else:
+                        #     self.chargeflag=1
+                        # self.Pub_Recharger_Flag(1) # 出现要优先开启自动回充然后再导航的情况,需要进行标志位传递
+                        # self.Pub_Charger_Position()
+                        # print_and_fixRetract(YELLOW+'检测到电池电量低,即将导航到充电桩进行充电.(Detects low battery level and will navigate to a charging station for charging.)'+RESET)
+                        # self.lost_power_once=0
     
             else:
                 self.power_lost_count=0     
@@ -1110,10 +1154,14 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                 self.last_charge_complete=0
             print_and_fixRetract(GREEN+'充电已完成.(Chrge complete.)'+RESET)#Charging complete
             
-            #BT charging gelukt
             if not self.battery_full_sent:
-                self.publish_event("BATTERY-FULL")
                 self.battery_full_sent = True
+                self.write_battery_status("BATTERY-OK")  #HIER LOGICA ZETTEN OM NAAR FILE TE SCHRIJVEN
+
+            #BT charging gelukt
+            # if not self.battery_full_sent:
+            #     self.publish_event("BATTERY-FULL")
+            #     self.battery_full_sent = True
 
         self.last_charge_complete=self.charge_complete
 

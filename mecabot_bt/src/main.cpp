@@ -281,11 +281,19 @@ public:
 
         if (last_event_ == "BATTERY-LOW")
         {
+            std::cout << "[BatteryOk] BATTERY LOW via bericht on start" << std::endl;
+
             setOutput("chargingInteger", 0);  // BATTERY-LOW bericht komt altijd met 0 voor (want telkens nieuwe sessie)
             updateSkipDrive();  // check bat_admin_status
             return BT::NodeStatus::FAILURE;
         }
 
+            if (batteryLowInFile())
+            {
+                std::cout << "[BatteryOk] BATTERY-LOW gevonden in bestand. on start" << std::endl;
+                updateSkipDrive();
+                return BT::NodeStatus::FAILURE;
+            }
         return BT::NodeStatus::RUNNING;
     }
 
@@ -299,6 +307,7 @@ public:
             int counter = updateChargingCounter();
 
 
+            std::cout << "[BatteryOk] FORCE-CHARGING detected in on running -> sending START" << std::endl;
 
 
             updateSkipDrive();  // check bat_admin_status
@@ -307,8 +316,17 @@ public:
 
         if (last_event_ == "BATTERY-LOW")
         {
+            std::cout << "[BatteryOk] BAT LOW via bericht" << std::endl;
+
             int getal = updateChargingCounter();
             updateSkipDrive();  // check bat_admin_status
+            return BT::NodeStatus::FAILURE;
+        }
+
+        if (batteryLowInFile())
+        {
+            std::cout << "[BatteryOk] BATTERY-LOW gevonden in bestand on run." << std::endl;
+            updateSkipDrive();
             return BT::NodeStatus::FAILURE;
         }
 
@@ -317,7 +335,32 @@ public:
 
     void onHalted() override {}
 
+
 private:
+
+    bool batteryLowInFile()
+    {
+
+        const std::string filePath = "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/batstatus.txt";
+        std::ifstream file(filePath);
+
+        if (!file.is_open())
+        {
+            return false;
+        }
+
+        std::string line;
+        while (std::getline(file, line))
+        {
+            if (line == "BATTERY-LOW")
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     std::string last_event_;
     rclcpp::Node::SharedPtr node_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
@@ -453,6 +496,8 @@ public:
         }
 
         // Als we hier komen, is het werktijd
+        std::cout << "[CheckInWorkingZone] Binnen werkuren, resetten van FORCE-CHARGING" << std::endl;
+
         setOutput("robotLocationBAT", std::string("WORKING"));
 
         bt_msg.data = "CheckInWorkingZone-WORKING";
@@ -508,7 +553,9 @@ public:
             BT::InputPort<bool>("skip_drive2charging"),
             BT::OutputPort<std::string>("charging_sent_timestamp"),
             BT::OutputPort<std::string>("bat_admin_status"),
-            BT::OutputPort<bool>("connection_chargeStatus")
+            BT::OutputPort<bool>("connection_chargeStatus"),
+            BT::InputPort<bool>("skip_robotdrivechargingstation"),
+
         };
     }
 
@@ -520,8 +567,19 @@ public:
 
         if (skip)
         {
-            std::cout << "[RobotDriveToChargingStation] skip_drive2charging = TRUE -> SUCCESS" << std::endl;
+            std::cout << "[RobotDriveToChargingStation] skip wegens robot al tegen laadstation" << std::endl;
             return BT::NodeStatus::SUCCESS;
+        }
+
+    
+        bool skip_robot_drive = false;
+        if (getInput("skip_robotdrivechargingstation", skip_robot_drive))
+        {
+            if (skip_robot_drive)
+            {
+                std::cout << "[RobotDriveToChargingStation] skip wegens manual drive naar station" << std::endl;
+                return BT::NodeStatus::SUCCESS;
+            }
         }
 
         std_msgs::msg::String bt_msg;
@@ -700,7 +758,9 @@ public:
             BT::InputPort<double>("timeout"),
             BT::InputPort<std::string>("charging_sent_timestamp"),
             BT::InputPort<bool>("skip_drive2charging"),
-            BT::OutputPort<bool>("drive_failed")
+            BT::OutputPort<bool>("drive_failed"),
+            BT::InputPort<bool>("skip_robotdrivechargingstation"),
+
         };
     }
 
@@ -716,6 +776,18 @@ public:
                       << std::endl;
             return BT::NodeStatus::SUCCESS;
         }
+
+        bool skip_robot_drive = false;
+        if (getInput("skip_robotdrivechargingstation", skip_robot_drive))
+        {
+            if (skip_robot_drive)
+            {
+                std::cout << "[RobotIsRobotAtChargingStation] skip_robotdrivechargingstation = TRUE -> SUCCESS"
+                        << std::endl;
+                return BT::NodeStatus::SUCCESS;
+            }
+        }
+
 
         received_success_ = false;
         received_failure_ = false;
@@ -808,6 +880,7 @@ private:
 
 
 
+
 class DriveToChargingStation : public BT::StatefulActionNode
 {
 public:
@@ -863,7 +936,7 @@ public:
                     std::cout << "[CALLBACK] DRIVING-TO-DOCK ontvangen." << std::endl;
 
                     setOutput("skip_statusDriveToChargingStation", false);
-
+                    setOutput("skip_isrobotcharging", false);
                     success_received_ = true;
                 }
                 else if(event == "DRIVE-TO-DOCK-SUCCESS")
@@ -871,8 +944,19 @@ public:
                     std::cout << "[CALLBACK] DRIVE-TO-DOCK-SUCCESS ontvangen." << std::endl;
 
                     setOutput("skip_statusDriveToChargingStation", true);
+                    setOutput("skip_isrobotcharging", false);
+
 
                     success_received_ = true;
+                }
+                else if(event == "ROBOT-CHARGING")
+                {
+                        std::cout << "[CALLBACK] ROBOT-CHARGING ontvangen." << std::endl;
+
+                        setOutput("skip_isrobotcharging", true);
+                        setOutput("skip_statusDriveToChargingStation", true);
+
+                        success_received_ = true;
                 }
             });
 
@@ -914,7 +998,8 @@ public:
             BT::OutputPort<std::string>("bat_admin_status"),
             BT::OutputPort<bool>("connection_chargeStatus"),
             BT::InputPort<bool>("skip_drive2charging"),
-            BT::OutputPort<bool>("skip_statusDriveToChargingStation")
+            BT::OutputPort<bool>("skip_statusDriveToChargingStation"),
+            BT::OutputPort<bool>("skip_isrobotcharging"),
 
         };
     }
@@ -939,7 +1024,7 @@ public:
         {
             if(skip)
             {
-                std::cout << "[DriveToChargingStation] Skip -> SUCCESS" << std::endl;
+                std::cout << "[DriveToChargingStation] Robot is al aan het laden (skip)" << std::endl;
                 return BT::NodeStatus::SUCCESS;
             }
         }
@@ -953,7 +1038,6 @@ public:
         {
             std::cout << "[DriveToChargingStation] chargingInteger ontbreekt."
                       << std::endl;
-            return BT::NodeStatus::FAILURE;
         }
 
         setOutput("bat_admin_status", "STOP");
@@ -1047,6 +1131,10 @@ public:
         if(elapsed >= timeout_)
         {
             std::cout << "[DriveToChargingStation] TIMEOUT" << std::endl;
+            
+            setOutput("skip_statusDriveToChargingStation", false);
+            setOutput("skip_isrobotcharging", false);
+
             return BT::NodeStatus::FAILURE;
         }
 
@@ -1349,7 +1437,9 @@ public:
             BT::InputPort<double>("timeout"),
             BT::InputPort<int>("chargingInteger"),
             BT::InputPort<bool>("skip_drive2charging"),
-            BT::InputPort<bool>("skip_statusDriveToChargingStation") // <-- nieuw
+            BT::InputPort<bool>("skip_statusDriveToChargingStation"), 
+            BT::InputPort<bool>("skip_isrobotcharging")
+
         };
     }
 
@@ -1362,23 +1452,36 @@ public:
         {
             if (skip_status)
             {
-                std::cout << "[StatusDriveToChargingDock] skip_statusDriveToChargingStation = TRUE -> direct SUCCESS" << std::endl;
+                std::cout << "[StatusDriveToChargingDock] skip want drive-to-dock-success is al gepasseerd" << std::endl;
                 return BT::NodeStatus::SUCCESS;
             }
         }
+
+
+        // Nieuwe check
+        bool skip_robot_charging = false;
+        if (getInput("skip_isrobotcharging", skip_robot_charging))
+        {
+            if (skip_robot_charging)
+            {
+                std::cout << "[StatusDriveToChargingDock] skip want ROBOT-CHARGING is reeds gepasseerd" << std::endl;
+                return BT::NodeStatus::SUCCESS;
+            }
+        }
+
 
         status_ = "";
         getInput("timeout", timeout_);
         start_time_ = std::chrono::steady_clock::now();
 
         
-        // ✅ check skip_drive2charging bij start
+        // check skip_drive2charging bij start
         bool skip = false;
         if (getInput("skip_drive2charging", skip))
         {
             if (skip)
             {
-                std::cout << "[StatusDriveToChargingDock] skip_drive2charging = TRUE -> direct SUCCESS" << std::endl;
+                std::cout << "[StatusDriveToChargingDock] skip want robot is reeds aan het laden" << std::endl;
                 return BT::NodeStatus::SUCCESS;
             }
             else
@@ -1433,6 +1536,8 @@ private:
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
 };
+
+
 class IsRobotCharging : public BT::StatefulActionNode
 {
 public:
@@ -1471,7 +1576,8 @@ public:
         return {
             BT::InputPort<double>("timeout"),
             BT::InputPort<int>("chargingInteger"),
-            BT::InputPort<bool>("skip_drive2charging")
+            BT::InputPort<bool>("skip_drive2charging"),
+            BT::InputPort<bool>("skip_isrobotcharging")
         };
     }
 
@@ -1495,7 +1601,7 @@ public:
         {
             if (skip)
             {
-                std::cout << "[IsRobotCharging] skip_drive2charging = TRUE -> direct SUCCESS" << std::endl;
+                std::cout << "[IsRobotCharging] skip robot reeds aan het laden" << std::endl;
                 return BT::NodeStatus::SUCCESS;
             }
             else
@@ -1504,6 +1610,17 @@ public:
             }
         }
 
+
+        // Nieuwe check
+        bool skip_robot_charging = false;
+        if (getInput("skip_isrobotcharging", skip_robot_charging))
+        {
+            if (skip_robot_charging)
+            {
+                std::cout << "[IsRobotCharging] skip want robot charging is reeds gepasseerd als bericht" << std::endl;
+                return BT::NodeStatus::SUCCESS;
+            }
+        }
         return BT::NodeStatus::RUNNING;
     }
 
@@ -1579,18 +1696,45 @@ public:
 
     }
 
+    bool batteryOkInFile()
+    {
+        const std::string filePath = "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/batstatus.txt";
+        std::ifstream file(filePath);
+
+        if (!file.is_open())
+        {
+            return false;
+        }
+
+        std::string line;
+        while (std::getline(file, line))
+        {
+            if (line == "BATTERY-OK")
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     static BT::PortsList providedPorts()
     {
-        return { BT::OutputPort<std::string>("robotLocation"),
-                 BT::InputPort<int>("chargingInteger"),
-                 BT::OutputPort<std::string>("bat_admin_status")
+        return {
+            BT::OutputPort<std::string>("robotLocation"),
+            BT::InputPort<int>("chargingInteger"),
+            BT::OutputPort<std::string>("bat_admin_status"),
+            BT::OutputPort<bool>("skip_isrobotcharging"),
+            BT::OutputPort<bool>("skip_robotdrivechargingstation")
         };
     }
 
     BT::NodeStatus onStart() override
     {
+        setOutput("skip_isrobotcharging", false);
         setOutput("robotLocation", "CHARGING");
         setOutput("bat_admin_status", "START");
+        setOutput("skip_robotdrivechargingstation", false);
 
         // Stuur bericht naar rpitopic
         std_msgs::msg::String msg;
@@ -1601,28 +1745,40 @@ public:
         bt_msg.data = "IsBatteryFull";
         pub_bt_->publish(bt_msg);
 
-        return BT::NodeStatus::SUCCESS; // altijd succes geven op dit moment voor testing 
+        // ===== NIEUW: schrijf PASS naar file =====
+        const std::string file_path =
+            "/home/wheeltec/wheeltec_ros2/src/robot_position_reset/robot_position_reset/manual_mode.txt";
 
-        std::cout << "[IsBatteryFull] RobotCharging bericht verzonden" << std::endl;
+        std::ofstream file(file_path, std::ios::out | std::ios::trunc);
+        if (file.is_open())
+        {
+            file << "PASS";
+            file.close();
+            std::cout << "[IsBatteryFull] wrote PASS to file" << std::endl;
+        }
+        else
+        {
+            std::cout << "[IsBatteryFull] FAILED to open file" << std::endl;
+        }
+        // ========================================
 
         rclcpp::spin_some(node_);
 
-        if (last_event_ == "BATTERY-FULL")
+        if (batteryOkInFile())
         {
-            std::cout << "[IsBatteryFull] CHARGING COMPLETED -> SUCCESS" << std::endl;
+            std::cout << "[IsBatteryFull] BATTERY-OK gevonden in bestand." << std::endl;
             return BT::NodeStatus::SUCCESS;
         }
 
         return BT::NodeStatus::RUNNING;
     }
-
     BT::NodeStatus onRunning() override
     {
         rclcpp::spin_some(node_);
 
-        if (last_event_ == "BATTERY-FULL")
+        if (batteryOkInFile())
         {
-            std::cout << "[IsBatteryFull] CHARGING COMPLETED -> SUCCESS" << std::endl;
+            std::cout << "[IsBatteryFull] BATTERY-OK gevonden in bestand." << std::endl;
             return BT::NodeStatus::SUCCESS;
         }
 
@@ -2189,6 +2345,85 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
 };
 
+class RobotFailedDriveToChargingStation : public BT::StatefulActionNode
+{
+public:
+    RobotFailedDriveToChargingStation(const std::string &name,
+                                      const BT::NodeConfiguration &config)
+        : BT::StatefulActionNode(name, config)
+    {
+        node_ = rclcpp::Node::make_shared("btRobotFailedDriveToChargingStation");
+
+        pub_bt_ = node_->create_publisher<std_msgs::msg::String>(
+            "/BehaviorTreeNode", 10);
+
+        pub_quiz_ = node_->create_publisher<std_msgs::msg::String>(
+            "/rpitopic", 10);
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {
+            BT::OutputPort<bool>("skip_robotdrivechargingstation")
+        };
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        // Blackboard variabele zetten
+        setOutput("skip_robotdrivechargingstation", true);
+
+        // Publiceer naam van de BT-node
+        std_msgs::msg::String bt_msg;
+        bt_msg.data = "RobotFailedDriveToChargingStation";
+        pub_bt_->publish(bt_msg);
+
+        // Publiceer scherm voor de RPi
+        std_msgs::msg::String quiz_msg;
+        quiz_msg.data = "RobotExplore";
+        pub_quiz_->publish(quiz_msg);
+
+        // ===== NIEUW: schrijf SKIP naar file =====
+        const std::string file_path =
+            "/home/wheeltec/wheeltec_ros2/src/robot_position_reset/robot_position_reset/manual_mode.txt";
+
+        std::ofstream file(file_path, std::ios::out | std::ios::trunc);
+        if (file.is_open())
+        {
+            file << "SKIP";
+            file.close();
+            std::cout << "[RobotFailedDriveToChargingStation] wrote SKIP to file" << std::endl;
+        }
+        else
+        {
+            std::cout << "[RobotFailedDriveToChargingStation] FAILED to open file" << std::endl;
+        }
+        // ========================================
+
+        std::cout << "[RobotFailedDriveToChargingStation] "
+                  << "skip_robotdrivechargingstation = TRUE"
+                  << std::endl;
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    BT::NodeStatus onRunning() override
+    {
+        rclcpp::spin_some(node_);
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override
+    {
+        std::cout << "[RobotFailedDriveToChargingStation] HALTED" << std::endl;
+    }
+
+private:
+    rclcpp::Node::SharedPtr node_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;
+};
+
 
 
 class CheckButtonState : public BT::SyncActionNode
@@ -2657,7 +2892,7 @@ public:
 
         if (elapsed >= timeout_)
         {
-            std::cout << "[BatteryCharged] Timeout reached -> SUCCESS"
+            std::cout << "[BatteryCharged] Timeout reached RETURN FROM CHARGING gezet op ROBOTLOCATIONBat -> SUCCESS"
                       << std::endl;
             setOutput("robotLocationBAT",
                   std::string("RETURN-FROM-CHARGING"));
@@ -3505,47 +3740,47 @@ public:
         };
     }
 
-    int incrementChargingCounter()
-    {
-        int counter = 0;
+    // int incrementChargingCounter()
+    // {
+    //     int counter = 0;
 
-        if (!getInput("chargingInteger", counter))
-        {
-            throw BT::RuntimeError("chargingInteger ontbreekt");
-        }
+    //     if (!getInput("chargingInteger", counter))
+    //     {
+    //         throw BT::RuntimeError("chargingInteger ontbreekt");
+    //     }
 
-        if (counter == 9)
-        {
-            counter = 0;
-        }
-        else
-        {
-            counter += 1;
-        }
+    //     if (counter == 9)
+    //     {
+    //         counter = 0;
+    //     }
+    //     else
+    //     {
+    //         counter += 1;
+    //     }
 
-        setOutput("chargingInteger_nextCycle", 0);
-        return counter;
-    }
+    //     setOutput("chargingInteger_nextCycle", 0);
+    //     return counter;
+    // }
 
-    void publishStopCommand()
-    {
-        int charge_id = 0;
+    // void publishStopCommand()
+    // {
+    //     int charge_id = 0;
 
-        if (!getInput("chargingInteger", charge_id))
-        {
-            throw BT::RuntimeError("chargingInteger ontbreekt");
-        }
+    //     if (!getInput("chargingInteger", charge_id))
+    //     {
+    //         throw BT::RuntimeError("chargingInteger ontbreekt");
+    //     }
 
-        std_msgs::msg::String cmd_msg;
-        cmd_msg.data = std::to_string(charge_id) + "STOP";
+    //     std_msgs::msg::String cmd_msg;
+    //     cmd_msg.data = std::to_string(charge_id) + "STOP";
 
-        for (int i = 0; i < 3; ++i)
-        {
-            force_charge_pub_->publish(cmd_msg);
-        }
+    //     for (int i = 0; i < 3; ++i)
+    //     {
+    //         force_charge_pub_->publish(cmd_msg);
+    //     }
 
-        std::cout << "[CheckAdminCondition] STOP gestuurd naar /force_charge" << std::endl;
-    }
+    //     std::cout << "[CheckAdminCondition] STOP gestuurd naar /force_charge" << std::endl;
+    // }
 
     BT::NodeStatus onStart() override
     {
@@ -3572,8 +3807,8 @@ public:
             {
                 std::cout << "[CheckAdminCondition] bat_admin_status = STOP" << std::endl;
 
-                incrementChargingCounter();
-                publishStopCommand();
+                //incrementChargingCounter();
+                //publishStopCommand();
             }
         }
 
@@ -3746,6 +3981,9 @@ int main(int argc, char **argv)
     factory.registerNodeType<StopRobotCharging>("StopRobotCharging");
     factory.registerNodeType<MainBTStopDrive>("MainBTStopDrive");
     factory.registerNodeType<MainBTSetErrorFlag>("MainBTSetErrorFlag");
+
+    factory.registerNodeType<RobotFailedDriveToChargingStation>("RobotFailedDriveToChargingStation");
+
 
     factory.registerNodeType<ForceSuccess>("MainFallbackForceSuccess");
     factory.registerNodeType<ForceSuccess>("BatteryForceSuccess");

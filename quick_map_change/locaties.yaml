@@ -1,0 +1,33 @@
+Laadstation:
+  pose:
+    position:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+    orientation:
+      x: 0.0
+      y: 0.0
+      z: -0.7071067811865475
+      w: 0.7071067811865476
+Werkpunt:
+  pose:
+    position:
+      x: 3.372413793103448
+      y: 15.724137931034482
+      z: 0.0
+    orientation:
+      x: 0.0
+      y: 0.0
+      z: -0.7983486481160277
+      w: 0.602195513144453
+Quizlocatie:
+  pose:
+    position:
+      x: -1.4068965517241379
+      y: 20.048275862068966
+      z: 0.0
+    orientation:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: 1.0

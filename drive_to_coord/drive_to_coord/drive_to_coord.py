@@ -43,12 +43,12 @@ behavior_tree_nodes = {
 
 	# --- Behavior Tree doelen ---
 	"IsRobotAtQuiz":				{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "once"},
-	"IsRobotAtWorkArea":			{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "once"},
+	"IsRobotAtWorkArea":			{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "once"},
 	"DriveQuizLocation":			{"keepoutfilter_on": "True",  "drive_action": "estop", "message_frequency": "once"},
 
 	# --- People Search doelen ---
 	"CheckingNearbyVisitors":	  {"keepoutfilter_on": "True",  "drive_action": "peoplesearch", "message_frequency": "always"},
-	"DriveWorkArea":				{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "always"},
+	"DriveWorkArea":				{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "always"},
 	"DriveQuizLocation":			{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "always"},
 	
 	# --- Default ---
