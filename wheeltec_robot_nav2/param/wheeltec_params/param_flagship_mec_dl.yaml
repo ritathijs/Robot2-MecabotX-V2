@@ -113,7 +113,7 @@ controller_server:
       vy_std: 0.02       #Vy 的抽样标准差
       wz_std: 0.2       #org: 0.4 Wz（角速度）的抽样标准差
       vx_max: 0.25       #org: 0.5 目标最大前进速度（米/秒）
-      vx_min: -0.1      #org: -0,5 目标最大反向速度（米/秒）
+      vx_min: 0.05      #org: -0,5 目标最大反向速度（米/秒）
       vy_max: 0.05       #org: 0.5 如果使用Omni运动模型，目标最大横向速度（m/s）
       wz_max: 0.5       #org 0.2 最大旋转速度（弧度/秒）
       ax_max: 0.5       #org 1.5
@@ -166,7 +166,7 @@ controller_server:
       PreferForwardCritic: #激励机器人前进，而不是后退
         enabled: true
         cost_power: 1
-        cost_weight: 1.5 #权重参数
+        cost_weight: 5.0 #权重参数
         threshold_to_consider: 0.5 #机器人与目标之间的距离（米）停止考虑前锋并允许目标批评家接管。
       # Option to replace Cost and use Obstacles instead
 

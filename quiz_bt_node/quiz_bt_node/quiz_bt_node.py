@@ -21,7 +21,7 @@ from socketio.exceptions import BadNamespaceError
 
 
 # Basis serveradres
-SERVER_IP = "172.18.108.11"
+SERVER_IP = "10.0.0.11"
 
 # Afgeleide URL's
 URL = f"http://{SERVER_IP}/cms/getSettings"
@@ -32,7 +32,7 @@ SERVER_URL = f"http://{SERVER_IP}:80"
 # De systeemtijd van de pi wordt doorgestuurd naar de robot
 # Indien volgende parameter op False staat wordt de robot zijn systeemtijd NIET aangepast
 # Indien volgende parameter op True  staat wordt de robot zijn systeemtijd WEL  aangepast (kan transformproblemen leveren in RVIZ)
-CHANGETIME = False
+CHANGETIME = True
 
 class QuizBTNode(Node):
     def __init__(self):

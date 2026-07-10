@@ -747,12 +747,12 @@ public:
                     {
                         received_success_ = true;
                     }
-                    else if (status_code == "05" || status_code == "07")
-                    {
-                        received_failure_ = true;
-                        std::cout << "[RobotIsRobotAtChargingStation] FAILURE ontvangen"
-                                  << std::endl;
-                    }
+                    // else if (status_code == "05" || status_code == "07")
+                    // {
+                    //     received_failure_ = true;
+                    //     std::cout << "[RobotIsRobotAtChargingStation] FAILURE ontvangen"
+                    //               << std::endl;
+                    // }
                 }
             });
 
@@ -1347,6 +1347,127 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pub_coord_;
 };
+
+class FallbackDriveToWorkArea : public BT::StatefulActionNode
+{
+public:
+    FallbackDriveToWorkArea(const std::string &name, const BT::NodeConfiguration &config)
+        : BT::StatefulActionNode(name, config)
+    {
+        // Interne ROS 2 node-naam aangepast
+        node_ = rclcpp::Node::make_shared("btFallbackDriveToWorkArea");
+
+        pub_bt_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
+        pub_coord_ = node_->create_publisher<geometry_msgs::msg::PoseStamped>("/btDriveCoord", 10);
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {
+            BT::InputPort<double>("timeout"),
+            BT::InputPort<double>("x"),
+            BT::InputPort<double>("y"),
+            BT::InputPort<double>("z"),
+            BT::InputPort<double>("qx"),
+            BT::InputPort<double>("qy"),
+            BT::InputPort<double>("qz"),
+            BT::InputPort<double>("qw"),
+            BT::OutputPort<std::string>("workarea_timestamp")
+        };
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        // Gepubliceerde BT node-naam aangepast naar FallbackDriveToWorkArea
+        std_msgs::msg::String bt_msg;
+        bt_msg.data = "FallbackDriveToWorkArea";
+        pub_bt_->publish(bt_msg);
+
+        sent_coord_.header.stamp = node_->get_clock()->now();
+        sent_coord_.header.frame_id = "map";
+        
+        double x, y, z, qx , qy, qz, qw;
+        getInput("x", x);
+        getInput("y", y);
+        getInput("z", z);
+
+        getInput("qx", qx);
+        getInput("qy", qy);
+        getInput("qz", qz);
+        getInput("qw", qw);
+
+        sent_coord_.pose.position.x = x;
+        sent_coord_.pose.position.y = y;
+        sent_coord_.pose.position.z = z;
+
+        sent_coord_.pose.orientation.x = qx;
+        sent_coord_.pose.orientation.y = qy;
+        sent_coord_.pose.orientation.z = qz;
+        sent_coord_.pose.orientation.w = qw;
+
+        while (pub_coord_->get_subscription_count() == 0)
+        {
+            RCLCPP_INFO(node_->get_logger(),
+                        "Waiting for subscribers on /btDriveCoord...");
+            rclcpp::sleep_for(std::chrono::milliseconds(100));
+        }
+
+        pub_coord_->publish(sent_coord_);
+
+        // Timestamp opslaan
+        sent_timestamp_ = std::to_string(sent_coord_.header.stamp.sec) + "." +
+                          std::to_string(sent_coord_.header.stamp.nanosec);
+
+        setOutput("workarea_timestamp", sent_timestamp_);
+
+        // Lognaam aangepast naar [FallbackDriveToWorkArea]
+        std::cout << "[FallbackDriveToWorkArea] Published coordinate at timestamp: "
+                  << sent_timestamp_ << std::endl;
+
+        // Timeout ophalen
+        if (!getInput<double>("timeout", timeout_))
+            timeout_ = 5.0;
+
+        start_time_ = std::chrono::steady_clock::now();
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    BT::NodeStatus onRunning() override
+    {
+        auto elapsed =
+            std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - start_time_)
+                .count();
+
+        if (elapsed >= timeout_)
+        {
+            // Lognaam aangepast naar [FallbackDriveToWorkArea]
+            std::cout << "[FallbackDriveToWorkArea] Timeout ("
+                      << timeout_ << "s) -> SUCCESS" << std::endl;
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override
+    {
+        // Lognaam aangepast naar [FallbackDriveToWorkArea]
+        std::cout << "[FallbackDriveToWorkArea] HALTED" << std::endl;
+    }
+
+private:
+    double timeout_;
+    std::string sent_timestamp_;
+    std::chrono::steady_clock::time_point start_time_;
+    geometry_msgs::msg::PoseStamped sent_coord_;
+
+    rclcpp::Node::SharedPtr node_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pub_coord_;
+};
+
 
 class RobotExplore : public BT::SyncActionNode
 {
@@ -2220,7 +2341,125 @@ private:
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_tracking_enable_;
 };
 
+// BT node die een doelpositie naar quiz locatie stuurt via PoseStamped (Fallback variant)
+class FallbackDriveQuizLocation : public BT::StatefulActionNode
+{
+public:
+    FallbackDriveQuizLocation(const std::string &name, const BT::NodeConfiguration &config)
+        : BT::StatefulActionNode(name, config)
+    {
+        // Interne ROS 2 node-naam aangepast
+        node_ = rclcpp::Node::make_shared("btFallbackDriveQuizLocation");
 
+        pub_bt_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
+        pub_coord_ = node_->create_publisher<geometry_msgs::msg::PoseStamped>("/btDriveCoord", 10);
+
+        pub_tracking_enable_ = node_->create_publisher<std_msgs::msg::Bool>(
+            "/tracking_enable", 10);
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {
+            BT::InputPort<double>("timeout"),
+            BT::InputPort<double>("x"),
+            BT::InputPort<double>("y"),
+            BT::InputPort<double>("z"),
+            BT::InputPort<double>("qx"),
+            BT::InputPort<double>("qy"),
+            BT::InputPort<double>("qz"),
+            BT::InputPort<double>("qw"),
+            BT::OutputPort<std::string>("sent_timestamp")
+        };
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        // Gepubliceerde BT node-naam aangepast naar FallbackDriveQuizLocation
+        std_msgs::msg::String bt_msg;
+        bt_msg.data = "FallbackDriveQuizLocation";
+        pub_bt_->publish(bt_msg);
+
+        // stop follow-me/person tracking
+        std_msgs::msg::Bool tracking_msg;
+        tracking_msg.data = false;
+        pub_tracking_enable_->publish(tracking_msg);
+
+        std::cout << "[FallbackDriveQuizLocation] Tracking DISABLED" << std::endl;
+
+        // pose opbouwen voor navigation stack
+        sent_coord_.header.stamp = node_->get_clock()->now();
+        sent_coord_.header.frame_id = "map";
+
+        double x, y, z, qx, qy, qz, qw;
+        getInput("x", x);
+        getInput("y", y);
+        getInput("z", z);
+
+        getInput("qx", qx);
+        getInput("qy", qy);
+        getInput("qz", qz);
+        getInput("qw", qw);
+
+        sent_coord_.pose.position.x = x;
+        sent_coord_.pose.position.y = y;
+        sent_coord_.pose.position.z = z;
+
+        sent_coord_.pose.orientation.x = qx;
+        sent_coord_.pose.orientation.y = qy;
+        sent_coord_.pose.orientation.z = qz;
+        sent_coord_.pose.orientation.w = qw;
+
+        pub_coord_->publish(sent_coord_);
+
+        // timestamp voor tracking van deze navigation request
+        sent_timestamp_ = std::to_string(sent_coord_.header.stamp.sec) + "." +
+                          std::to_string(sent_coord_.header.stamp.nanosec);
+
+        setOutput("sent_timestamp", sent_timestamp_);
+
+        std::cout << "[FallbackDriveQuizLocation] Published coordinate at timestamp: "
+                  << sent_timestamp_ << std::endl;
+
+        if (!getInput<double>("timeout", timeout_))
+            timeout_ = 5.0;
+
+        start_time_ = std::chrono::steady_clock::now();
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    BT::NodeStatus onRunning() override
+    {
+        auto elapsed = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - start_time_).count();
+
+        if (elapsed >= timeout_)
+        {
+            std::cout << "[FallbackDriveQuizLocation] Timeout (" << timeout_ << "s) -> SUCCESS" << std::endl;
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override
+    {
+        std::cout << "[FallbackDriveQuizLocation] HALTED" << std::endl;
+    }
+
+private:
+    double timeout_;
+    std::string sent_timestamp_;
+    std::chrono::steady_clock::time_point start_time_;
+    geometry_msgs::msg::PoseStamped sent_coord_;
+
+    rclcpp::Node::SharedPtr node_;
+
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pub_coord_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_tracking_enable_;
+};
 
 
 class IsRobotAtQuiz : public BT::StatefulActionNode
@@ -2261,10 +2500,10 @@ public:
                 {
                     if (status_code == "04")
                         received_success_ = true;
-                    else if (status_code == "05" ||  status_code == "07"){
-                        received_failure_ = true;
-                        std::cout << "FAILURE ONTVANGEN";
-                    }
+                    // else if (status_code == "05" ||  status_code == "07"){
+                    //     received_failure_ = true;
+                    //     std::cout << "FAILURE ONTVANGEN";
+                    // }
                    
                 }
             });
@@ -2352,6 +2591,134 @@ private:
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
 };
+
+class FallbackIsRobotAtQuiz : public BT::StatefulActionNode
+{
+public:
+    FallbackIsRobotAtQuiz(const std::string &name, const BT::NodeConfiguration &config)
+        : BT::StatefulActionNode(name, config), timeout_(10.0)
+    {
+        // Interne ROS 2 node-naam aangepast
+        node_ = rclcpp::Node::make_shared("btFallbackIsRobotAtQuiz");
+
+        sub_ = node_->create_subscription<std_msgs::msg::String>(
+            "/drive_to_coord_status", 10,
+            [this](std_msgs::msg::String::SharedPtr msg)
+            {
+                std::string data = msg->data;
+                std::cout << "[FallbackIsRobotAtQuiz] Ontvangen bericht: " << data << std::endl;
+
+                // Split op '-'
+                std::vector<std::string> parts;
+                std::stringstream ss(data);
+                std::string segment;
+                while (std::getline(ss, segment, '-'))
+                {
+                    parts.push_back(segment);
+                }
+
+                if (parts.size() < 2)
+                    return;
+
+                std::string status_code = parts[0];
+                std::string recv_timestamp = parts[1];
+
+                // Alleen eerste 10 cijfers van timestamp vergelijken
+                std::string expected_prefix = sent_timestamp_.substr(0, 10);
+                std::string recv_prefix = recv_timestamp.substr(0, 10);
+
+                if (recv_prefix == expected_prefix)
+                {
+                    if (status_code == "04")
+                    {
+                        received_success_ = true;
+                    }
+                    // else if (status_code == "05" || status_code == "07")
+                    // {
+                    //     received_failure_ = true;
+                    //     std::cout << "[FallbackIsRobotAtQuiz] FAILURE ONTVANGEN" << std::endl;
+                    // }
+                }
+            });
+
+        pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {
+            BT::InputPort<double>("timeout"),
+            BT::InputPort<std::string>("sent_timestamp"), // Timestamp uit blackboard
+            BT::OutputPort<bool>("drive_failed")
+        };
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        received_success_ = false;
+        received_failure_ = false;
+        start_time_ = std::chrono::steady_clock::now();
+
+        if (!getInput<double>("timeout", timeout_))
+            timeout_ = 10.0;
+
+        if (!getInput<std::string>("sent_timestamp", sent_timestamp_))
+            std::cout << "[FallbackIsRobotAtQuiz] Geen timestamp ontvangen van blackboard!" << std::endl;
+        else
+            std::cout << "[FallbackIsRobotAtQuiz] Verwachte timestamp = " << sent_timestamp_ << std::endl;
+
+        // Gepubliceerde BT node-naam aangepast naar FallbackIsRobotAtQuiz
+        std_msgs::msg::String msg;
+        msg.data = "FallbackIsRobotAtQuiz";
+        pub_->publish(msg);
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    BT::NodeStatus onRunning() override
+    {
+        rclcpp::spin_some(node_);
+        auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start_time_).count();
+
+        if (received_success_)
+        {
+            std::cout << "[FallbackIsRobotAtQuiz] Successtatus ontvangen -> SUCCESS" << std::endl;
+            setOutput("drive_failed", false);
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        if (received_failure_)
+        {
+            std::cout << "[FallbackIsRobotAtQuiz] Faalstatus ontvangen -> FAILURE" << std::endl;
+            return BT::NodeStatus::FAILURE;
+        }
+
+        if (elapsed >= timeout_)
+        {
+            std::cout << "[FallbackIsRobotAtQuiz] Timeout (" << timeout_ << "s) -> FAILURE" << std::endl;
+            return BT::NodeStatus::FAILURE;
+        }
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override
+    {
+        std::cout << "[FallbackIsRobotAtQuiz] HALTED" << std::endl;
+    }
+
+private:
+    double timeout_;
+    bool received_success_;
+    bool received_failure_;
+    std::chrono::steady_clock::time_point start_time_;
+    std::string sent_timestamp_;
+
+    rclcpp::Node::SharedPtr node_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+};
+
 
 class RobotFailedDriveToChargingStation : public BT::StatefulActionNode
 {
@@ -2973,11 +3340,11 @@ public:
                     {
                         received_success_ = true;
                     }
-                    else if (status_code == "05" || status_code == "07")
-                    {
-                        received_failure_ = true;
-                        std::cout << "[IsRobotAtWorkArea] FAILURE ONTVANGEN" << std::endl;
-                    }
+                    // else if (status_code == "05" || status_code == "07")
+                    // {
+                    //     received_failure_ = true;
+                    //     std::cout << "[IsRobotAtWorkArea] FAILURE ONTVANGEN" << std::endl;
+                    // }
                 }
             });
 
@@ -3062,6 +3429,142 @@ private:
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
 };
+
+class FallbackIsRobotAtWorkArea : public BT::StatefulActionNode
+{
+public:
+    FallbackIsRobotAtWorkArea(const std::string &name, const BT::NodeConfiguration &config)
+        : BT::StatefulActionNode(name, config), timeout_(10.0)
+    {
+        // Interne ROS 2 node-naam aangepast
+        node_ = rclcpp::Node::make_shared("btFallbackIsRobotAtWorkArea");
+
+        sub_ = node_->create_subscription<std_msgs::msg::String>(
+            "/drive_to_coord_status", 10,
+            [this](std_msgs::msg::String::SharedPtr msg)
+            {
+                std::string data = msg->data;
+                std::cout << "[FallbackIsRobotAtWorkArea] Ontvangen bericht: " << data << std::endl;
+
+                if (data.size() >= 7 && data.substr(0, 7) == "12-0000")
+                {
+                    received_failure_ = true;
+                    std::cout << "[FallbackIsRobotAtWorkArea] FAILURE door 12-0000 prefix" << std::endl;
+                    return;
+                }
+
+                std::vector<std::string> parts;
+                std::stringstream ss(data);
+                std::string segment;
+                while (std::getline(ss, segment, '-'))
+                {
+                    parts.push_back(segment);
+                }
+
+                if (parts.size() < 2)
+                    return;
+
+                std::string status_code = parts[0];
+                std::string recv_timestamp = parts[1];
+
+                std::string expected_prefix = sent_timestamp_.substr(0, 10);
+                std::string recv_prefix = recv_timestamp.substr(0, 10);
+
+                if (recv_prefix == expected_prefix)
+                {
+                    if (status_code == "04")
+                    {
+                        received_success_ = true;
+                    }
+                    // else if (status_code == "05" || status_code == "07")
+                    // {
+                    //     received_failure_ = true;
+                    //     std::cout << "[FallbackIsRobotAtWorkArea] FAILURE ONTVANGEN" << std::endl;
+                    // }
+                }
+            });
+
+        pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {
+            BT::InputPort<double>("timeout"),
+            BT::InputPort<std::string>("workarea_timestamp"),
+            BT::OutputPort<bool>("drive_failed")
+        };
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        received_success_ = false;
+        received_failure_ = false;
+        start_time_ = std::chrono::steady_clock::now();
+
+        if (!getInput<double>("timeout", timeout_))
+            timeout_ = 10.0;
+
+        if (!getInput<std::string>("workarea_timestamp", sent_timestamp_))
+            std::cout << "[FallbackIsRobotAtWorkArea] Geen timestamp ontvangen van blackboard!" << std::endl;
+        else
+            std::cout << "[FallbackIsRobotAtWorkArea] Verwachte timestamp = " << sent_timestamp_ << std::endl;
+
+        // Gepubliceerde BT node-naam aangepast naar FallbackIsRobotAtWorkArea
+        std_msgs::msg::String msg;
+        msg.data = "FallbackIsRobotAtWorkArea";
+        pub_->publish(msg);
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    BT::NodeStatus onRunning() override
+    {
+        rclcpp::spin_some(node_);
+
+        auto elapsed = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - start_time_).count();
+
+        if (received_success_)
+        {
+            std::cout << "[FallbackIsRobotAtWorkArea] Successtatus ontvangen -> SUCCESS" << std::endl;
+            setOutput("drive_failed", false);
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        if (received_failure_)
+        {
+            std::cout << "[FallbackIsRobotAtWorkArea] Faalstatus ontvangen -> FAILURE" << std::endl;
+            return BT::NodeStatus::FAILURE;
+        }
+
+        if (elapsed >= timeout_)
+        {
+            std::cout << "[FallbackIsRobotAtWorkArea] Timeout (" 
+                      << timeout_ << "s) -> FAILURE" << std::endl;
+            return BT::NodeStatus::FAILURE;
+        }
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override
+    {
+        std::cout << "[FallbackIsRobotAtWorkArea] HALTED" << std::endl;
+    }
+
+private:
+    double timeout_;
+    bool received_success_;
+    bool received_failure_;
+    std::chrono::steady_clock::time_point start_time_;
+    std::string sent_timestamp_;
+
+    rclcpp::Node::SharedPtr node_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+};
+
 
 
 class RobotRotationFollowMe : public BT::StatefulActionNode
@@ -3988,6 +4491,12 @@ int main(int argc, char **argv)
 
     factory.registerNodeType<CheckNetworkError>("CheckNetworkError");
     factory.registerNodeType<CheckAdminPanel>("CheckAdminPanel");
+
+    factory.registerNodeType<FallbackDriveQuizLocation>("FallbackDriveQuizLocation");
+    factory.registerNodeType<FallbackIsRobotAtQuiz>("FallbackIsRobotAtQuiz");
+
+    factory.registerNodeType<FallbackDriveToWorkArea>("FallbackDriveToWorkArea");
+    factory.registerNodeType<FallbackIsRobotAtWorkArea>("FallbackIsRobotAtWorkArea");
 
     factory.registerNodeType<CheckAdminCondition>("CheckAdminCondition");
     factory.registerNodeType<CheckButtonState>("CheckButtonState");

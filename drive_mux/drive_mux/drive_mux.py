@@ -2,7 +2,7 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from rclpy.duration import Duration
-
+from std_msgs.msg import String
 
 # Terminal kleuren
 GREEN = "\033[92m"
@@ -10,6 +10,8 @@ RED = "\033[91m"
 ORANGE = "\033[93m"
 RESET = "\033[0m"
 GRAY = "\033[90m"
+
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 
 
 class driveMux(Node):
@@ -27,11 +29,25 @@ class driveMux(Node):
         self.lastmessage_nav = past_time
 
 
+        docking_qos = QoSProfile(depth=1)
+        docking_qos.reliability = ReliabilityPolicy.RELIABLE
+        docking_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+
+
         self.last_cmd = Twist()
         self.active_source = "NONE"
+        self.infrared_docking_active = False
 
 
         # Subscribers
+
+
+        self.docking_sub = self.create_subscription(
+            String,
+            '/infrared_docking_status',
+            self.docking_callback,
+            docking_qos
+        )
 
         self.gui_sub = self.create_subscription(
             Twist,
@@ -122,6 +138,10 @@ class driveMux(Node):
 
         self.lastmessage_bump = self.get_clock().now()
 
+        # Tijdens IR docking bumper negeren
+        if self.infrared_docking_active:
+            return
+
         if 3 >= self.currentPriority():
             self.publish_command(msg,"BUMP")
 
@@ -142,6 +162,39 @@ class driveMux(Node):
             self.publish_command(msg,"NAV")
 
 
+    def docking_callback(self,msg):
+
+        command = msg.data.strip().upper()
+
+        if command == "DOCKING_ENABLED":
+
+            if self.infrared_docking_active:
+                return   # dubbele enable negeren
+
+            self.infrared_docking_active = True
+
+            print(
+                ORANGE +
+                "IR docking actief: bumper blokkering UIT" +
+                RESET
+            )
+
+
+        elif command == "DOCKING_DISABLED":
+
+            if not self.infrared_docking_active:
+                return   # dubbele disable negeren
+
+            self.infrared_docking_active = False
+
+            print(
+                GREEN +
+                "IR docking klaar: bumper blokkering AAN" +
+                RESET
+            )
+
+
+
     # -------------------------
     # prioriteit
     # -------------------------
@@ -160,9 +213,13 @@ class driveMux(Node):
         elif now - self.lastmessage_estop <= Duration(seconds=0.5):
             return 4
 
-        elif now - self.lastmessage_bump <= Duration(seconds=0.5):
+        elif (
+            not self.infrared_docking_active
+            and now - self.lastmessage_bump <= Duration(seconds=0.5)
+        ):
             return 3
-
+        
+        
         elif now - self.lastmessage_turn <= Duration(seconds=2):
             return 2
 
