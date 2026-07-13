@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+
+<library path="custom_zone_filter">
+
+<class
+name="custom_zone_filter/CustomZoneFilter"
+type="custom_zone_filter::CustomZoneFilter"
+base_class_type="nav2_costmap_2d::Layer">
+
+<description>
+Custom black white grey zone filter
+</description>
+
+</class>
+
+</library>

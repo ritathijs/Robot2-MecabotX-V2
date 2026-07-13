@@ -113,7 +113,7 @@ controller_server:
       vy_std: 0.02       #Vy 的抽样标准差
       wz_std: 0.2       #org: 0.4 Wz（角速度）的抽样标准差
       vx_max: 0.25       #org: 0.5 目标最大前进速度（米/秒）
-      vx_min: 0.05      #org: -0,5 目标最大反向速度（米/秒）
+      vx_min: -0.02      #org: -0,5 目标最大反向速度（米/秒）
       vy_max: 0.05       #org: 0.5 如果使用Omni运动模型，目标最大横向速度（m/s）
       wz_max: 0.5       #org 0.2 最大旋转速度（弧度/秒）
       ax_max: 0.5       #org 1.5
@@ -219,11 +219,16 @@ local_costmap:
       #testfootprint: "[ [-0.488, -0.503], [-0.488, 0.503], [0.488, 0.503], [0.488, -0.503] ]"
       footprint: "[ [-0.288, -0.303], [-0.288, 0.303],[0.288,0.303],[0.288, -0.303] ]"
       footprint_padding: 0.2
-      plugins: ["voxel_layer", "camera_layer", "inflation_layer"] #插件包括:{“体素层”，“膨胀层”}
+      plugins: ["voxel_layer", "camera_layer", "inflation_layer", "keepout_filter"] #插件包括:{“体素层”，“膨胀层”}
       inflation_layer:                             #膨胀层参数
         plugin: "nav2_costmap_2d::InflationLayer"  #膨胀层插件。
         cost_scaling_factor: 3.5                   #org: 3成本缩放因子，决定障碍物成本随距离的递减速度。
         inflation_radius: 0.8                     #testwaarden tot nu 0.55; org: 0.35 膨胀半径       
+        
+      keepout_filter:
+        plugin: "nav2_costmap_2d::KeepoutFilter"
+        enabled: true
+        filter_info_topic: "/costmap_filter_info"
         
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"      #体素层插件。

@@ -91,6 +91,15 @@ class QuizBTNode(Node):
             10
         )
 
+
+        self.reboot_subscription = self.create_subscription(
+            String,
+            '/reboot_command',
+            self.reboot_callback,
+            10
+        )
+        
+
         # Socket.IO client
         self.sio = socketio.Client()
 
@@ -109,6 +118,7 @@ class QuizBTNode(Node):
         self.sio.on('schedule-updated', self.on_schedule_updated)
 
         self.sio.on('drive', self.on_drive)
+        self.sio.on('reboot', self.on_reboot)
 
         # Connect to server
         self.sio.connect(SERVER_URL, retry=True)
@@ -199,6 +209,24 @@ class QuizBTNode(Node):
         msg.data = message
         self.quiz_publisher.publish(msg)
         self.get_logger().info(f'Published to quiz topic: {msg.data}')
+
+    def on_reboot(self):
+        self.get_logger().warning("Reboot command ontvangen! Jetson gaat herstarten...")
+
+        try:
+            # eerst netjes stoppen met rijden
+            msg = Twist()
+            msg.linear.x = 0.0
+            msg.linear.y = 0.0
+            msg.angular.z = 0.0
+            self.gui_cmd_vel_publisher.publish(msg)
+
+            # reboot uitvoeren
+            subprocess.run(["sudo", "reboot"], check=True)
+
+        except Exception as e:
+            self.get_logger().error(f"Reboot mislukt: {e}")
+
         
     def on_drive(self, data):
         # Controleer of er daadwerkelijk data is binnengekomen
@@ -391,6 +419,16 @@ class QuizBTNode(Node):
             self._admin_timer = None
 
         self._finalize_admin_closed()
+
+
+    def reboot_callback(self, msg):
+        self.get_logger().warning(f"SIMULATIE Reboot topic ontvangen: {msg.data}")
+
+        if msg.data == "REBOOT":
+            self.get_logger().warning("Jetson reboot wordt uitgevoerd!")
+            self.on_reboot()
+
+
 
     def _finalize_admin_closed(self):
         self.get_logger().info("Na vertraging adminpanelclosed")

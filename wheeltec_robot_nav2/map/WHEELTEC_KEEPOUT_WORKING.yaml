@@ -5,3 +5,7 @@ origin: [-40.4, -51.6, 0]
 negate: 0
 occupied_thresh: 0.15
 free_thresh: 0.1
+
+
+
+

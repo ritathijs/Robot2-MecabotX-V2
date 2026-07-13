@@ -150,7 +150,6 @@ class AutoRecharger(Node):
         self.charge_xstop_sub = self.create_subscription(
                     String,
                     '/charge_XSTOP',
-
                     self.charge_xstop_callback,
                     1
         )
@@ -174,11 +173,11 @@ class AutoRecharger(Node):
         docking_qos.reliability = ReliabilityPolicy.RELIABLE
         docking_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
 
-        self.Docking_Status_pub = self.create_publisher(
-            String,
-            '/infrared_docking_status',
-            docking_qos
-        )
+        # self.Docking_Status_pub = self.create_publisher(
+        #     String,
+        #     '/infrared_docking_status',
+        #     docking_qos
+        # )
         
 
 
@@ -244,7 +243,6 @@ class AutoRecharger(Node):
         #创建充电桩位置标记话题发布者
         self.Charger_marker_pub   = self.create_publisher(MarkerArray,'/goal_marker',   10) 
 
-
         #创建自动回充任务是否开启标志位话题发布者
         self.Recharger_Flag_pub = self.create_publisher(Int8,"robot_recharge_flag",  5)
 
@@ -306,23 +304,23 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
 
 
-    def publish_docking_status(self, status):
+    # def publish_docking_status(self, status):
 
-        if not self.wait_for_docking_status_subscriber(timeout=5.0):
-            print_and_fixRetract(
-                RED + "Docking status niet verstuurd: geen ontvanger." + RESET
-            )
-            return
+    #     if not self.wait_for_docking_status_subscriber(timeout=5.0):
+    #         print_and_fixRetract(
+    #             RED + "Docking status niet verstuurd: geen ontvanger." + RESET
+    #         )
+    #         return
 
 
-        msg = String()
-        msg.data = status
+    #     msg = String()
+    #     msg.data = status
 
-        self.Docking_Status_pub.publish(msg)
+    #     self.Docking_Status_pub.publish(msg)
 
-        print_and_fixRetract(
-            CYAN + f"Docking status -> {status}" + RESET
-        )
+    #     print_and_fixRetract(
+    #         CYAN + f"Docking status -> {status}" + RESET
+    #     )
 
     def write_battery_status(self, status):
         pass
@@ -604,7 +602,6 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         marker_shape.color.b = 0.0 #字符颜色B(蓝色)通道
         marker_shape.color.a = 1.0 #字符透明度
         markerArray.markers.append(marker_shape) #添加元素进数组
-
         
         marker_string = Marker() #创建marker对象
         marker_string.id = 1 #必须赋值id
@@ -714,7 +711,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         # overgang: niet laden -> laden
         if previous_charging == 0 and current_charging == 1:
 
-            self.publish_docking_status("DOCKING_DISABLED")
+            # self.publish_docking_status("DOCKING_DISABLED")
             self.publish_event("ROBOT-CHARGING")
             self.publish_rpi_event("RobotCharging")
 
@@ -724,7 +721,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         # overgang: laden -> niet laden
         elif previous_charging == 1 and current_charging == 0:
             
-            self.publish_docking_status("DOCKING_DISABLED")
+            # self.publish_docking_status("DOCKING_DISABLED")
             print_and_fixRetract(YELLOW + "Charging disconnected!" + RESET)
 
             if self.chargeflag == 1:
@@ -961,7 +958,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         als robot faalt bij docken, dan proberen we opnieuw
         """
         
-        self.publish_docking_status("DOCKING_DISABLED")
+        # self.publish_docking_status("DOCKING_DISABLED")
 
 
         # Scherm publiceren van robotdocking
@@ -986,7 +983,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         # Stop opnieuw
         self.Cmd_vel_pub.publish(Twist())
 
-        self.publish_docking_status("DOCKING_ENABLED")
+        # self.publish_docking_status("DOCKING_ENABLED")
 
 
         # Start opnieuw IR-zoekactie
@@ -999,34 +996,34 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         self.Cmd_vel_pub.publish(rotate)
 
 
-    def wait_for_docking_status_subscriber(self, timeout=10.0):
-        """
-        Wacht totdat minstens één subscriber verbonden is met
-        /infrared_docking_status.
-        """
+    # def wait_for_docking_status_subscriber(self, timeout=10.0):
+    #     """
+    #     Wacht totdat minstens één subscriber verbonden is met
+    #     /infrared_docking_status.
+    #     """
 
-        start_time = time.time()
+    #     start_time = time.time()
 
-        while self.count_subscribers('/infrared_docking_status') == 0:
+    #     while self.count_subscribers('/infrared_docking_status') == 0:
 
-            if time.time() - start_time > timeout:
-                print_and_fixRetract(
-                    RED + "Geen subscriber gevonden voor infrared_docking_status!" + RESET
-                )
-                return False
+    #         if time.time() - start_time > timeout:
+    #             print_and_fixRetract(
+    #                 RED + "Geen subscriber gevonden voor infrared_docking_status!" + RESET
+    #             )
+    #             return False
 
-            print_and_fixRetract(
-                YELLOW + "Wachten op subscriber voor infrared_docking_status..." + RESET
-            )
+    #         print_and_fixRetract(
+    #             YELLOW + "Wachten op subscriber voor infrared_docking_status..." + RESET
+    #         )
 
-            rclpy.spin_once(self, timeout_sec=0.1)
-            time.sleep(0.1)
+    #         rclpy.spin_once(self, timeout_sec=0.1)
+    #         time.sleep(0.1)
 
-        print_and_fixRetract(
-            GREEN + "Subscriber voor infrared_docking_status gevonden." + RESET
-        )
+    #     print_and_fixRetract(
+    #         GREEN + "Subscriber voor infrared_docking_status gevonden." + RESET
+    #     )
 
-        return True
+    #     return True
 
 
 
@@ -1043,7 +1040,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         if self.red_count >= 3:
             self.Pub_NavGoal_Cancel()
             self.chargeflag = 1
-            self.publish_docking_status("DOCKING_ENABLED")
+            # self.publish_docking_status("DOCKING_ENABLED")
             self.Pub_Recharger_Flag()
             print_and_fixRetract(
                 'Geforceerd laden: sterke IR gedetecteerd, direct docken.'
@@ -1087,7 +1084,6 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
         #forceer via keys te stoppen
         elif key=='e' or key=='E':
-
             print_and_fixRetract('停止寻找充电桩或停止充电.(Stop finding charging pile or charging.)')
             self.Stop_Charge(drive_forward=True)
 
@@ -1170,7 +1166,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                             print("发现红外信号,开启对接功能.")
                             print("INFRAROOD GEDETECTEERD, KOPPELINGSFUNCTIE INGESCHAKELD.")
                             self.chargeflag=1
-                            self.publish_docking_status("DOCKING_ENABLED")
+                            # self.publish_docking_status("DOCKING_ENABLED")
                             self.Pub_Recharger_Flag()
                         else:
                             print('GEEN INFRAROOD GEVONDEN, BEGIN MET RONDDRAAIEN OM TE ZOEKEN')  # NL
@@ -1207,7 +1203,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                             self.Pub_NavGoal_Cancel()
                             if self.robot['RED']==1:
                                 self.chargeflag=1
-                                self.publish_docking_status("DOCKING_ENABLED")
+                                # self.publish_docking_status("DOCKING_ENABLED")
                                 self.Pub_Recharger_Flag()
                             else:
                                 # We zien niets, dus we moeten gaan zoeken!
@@ -1364,7 +1360,6 @@ def main():
             # Initialiseer chassis instellingen
             tmp_sec = Int8()
             tmp_sec.data = 1
-
             tmp_vel = Twist()
             autorecharger.robot_security_off_pub.publish(tmp_sec)
             autorecharger.Cmd_vel_pub.publish(tmp_vel)
