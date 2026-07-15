@@ -41,9 +41,9 @@
                                             
                                             <LoopSequence name="LoopSequence">
                                                 <Sequence name="FollowMeSequence">
-                                                    <StartDrivingToPeople timeout="2.0" robot_rotate="{robot_rotate}"/>
-                                                    <CheckingNearbyVisitors distance_max="1.7" timer="50" zero_limit="8" robot_rotate="{robot_rotate}" />
-                                                    <RobotRotationFollowMe robot_rotate="{robot_rotate}" explore_timestamp="{explore_timestamp}" delta_seconds="250" />
+                                                    <StartDrivingToPeople timeout="2.0" explore_timestamp="{explore_timestamp}" delta_seconds ="250" robot_rotate = "{robot_rotate}"/>
+                                                    <CheckingNearbyVisitors  timer="50"  robot_rotate="{robot_rotate}" />
+                                                    <RobotRotationFollowMe distance_max="1.8" zero_limit="40" timer="60" />
                                                     <ArrivedAtVisitors robot_rotate="{robot_rotate}" timeout="10.0"/>
                                                 </Sequence>
                                             </LoopSequence>

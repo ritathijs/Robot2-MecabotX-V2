@@ -27,6 +27,7 @@ class driveMux(Node):
         self.lastmessage_bump = past_time
         self.lastmessage_turn = past_time
         self.lastmessage_nav = past_time
+        self.lastmessage_search = past_time
 
 
         docking_qos = QoSProfile(depth=1)
@@ -40,7 +41,6 @@ class driveMux(Node):
 
 
         # Subscribers
-
 
         self.docking_sub = self.create_subscription(
             String,
@@ -85,6 +85,12 @@ class driveMux(Node):
             self.nav_callback,
             10)
 
+        self.search_sub = self.create_subscription(
+            Twist,
+            '/search_cmd_vel',
+            self.search_callback,
+            10)
+
 
         self.pub = self.create_publisher(
             Twist,
@@ -92,10 +98,10 @@ class driveMux(Node):
             10)
 
 
-        # elke seconde status tonen
         self.timer = self.create_timer(
             1.0,
             self.print_status)
+
 
 
     # -------------------------
@@ -110,12 +116,14 @@ class driveMux(Node):
         self.pub.publish(msg)
 
 
+
     def gui_callback(self,msg):
 
         self.lastmessage_gui = self.get_clock().now()
 
         if 6 >= self.currentPriority():
             self.publish_command(msg,"GUI")
+
 
 
     def charge_callback(self,msg):
@@ -126,6 +134,7 @@ class driveMux(Node):
             self.publish_command(msg,"CHARGE")
 
 
+
     def estop_callback(self,msg):
 
         self.lastmessage_estop = self.get_clock().now()
@@ -134,16 +143,17 @@ class driveMux(Node):
             self.publish_command(msg,"ESTOP")
 
 
+
     def bump_callback(self,msg):
 
         self.lastmessage_bump = self.get_clock().now()
 
-        # Tijdens IR docking bumper negeren
         if self.infrared_docking_active:
             return
 
         if 3 >= self.currentPriority():
             self.publish_command(msg,"BUMP")
+
 
 
     def turn_callback(self,msg):
@@ -154,12 +164,23 @@ class driveMux(Node):
             self.publish_command(msg,"TURN")
 
 
+
     def nav_callback(self,msg):
 
         self.lastmessage_nav = self.get_clock().now()
 
         if 1 >= self.currentPriority():
             self.publish_command(msg,"NAV")
+
+
+
+    def search_callback(self,msg):
+
+        self.lastmessage_search = self.get_clock().now()
+
+        if 0.5 >= self.currentPriority():
+            self.publish_command(msg,"SEARCH")
+
 
 
     def docking_callback(self,msg):
@@ -169,7 +190,7 @@ class driveMux(Node):
         if command == "DOCKING_ENABLED":
 
             if self.infrared_docking_active:
-                return   # dubbele enable negeren
+                return
 
             self.infrared_docking_active = True
 
@@ -183,7 +204,7 @@ class driveMux(Node):
         elif command == "DOCKING_DISABLED":
 
             if not self.infrared_docking_active:
-                return   # dubbele disable negeren
+                return
 
             self.infrared_docking_active = False
 
@@ -218,13 +239,15 @@ class driveMux(Node):
             and now - self.lastmessage_bump <= Duration(seconds=0.5)
         ):
             return 3
-        
-        
+
         elif now - self.lastmessage_turn <= Duration(seconds=2):
             return 2
 
         elif now - self.lastmessage_nav <= Duration(seconds=0.5):
             return 1
+
+        elif now - self.lastmessage_search <= Duration(seconds=0.5):
+            return 0.5
 
         else:
             return 0
@@ -246,14 +269,14 @@ class driveMux(Node):
         elif self.active_source in ["BUMP","CHARGE"]:
             color = ORANGE
 
-        elif self.active_source in ["NAV","GUI","TURN"]:
+        elif self.active_source in ["NAV","GUI","TURN","SEARCH"]:
             color = GREEN
 
         else:
             color = GRAY
 
 
-        print("\033c", end="")  # terminal wissen
+        print("\033c", end="")
 
 
         print(color)
@@ -291,7 +314,8 @@ class driveMux(Node):
             ("ESTOP",self.lastmessage_estop,0.5),
             ("BUMP",self.lastmessage_bump,0.5),
             ("TURN",self.lastmessage_turn,2),
-            ("NAV",self.lastmessage_nav,0.5)
+            ("NAV",self.lastmessage_nav,0.5),
+            ("SEARCH",self.lastmessage_search,0.5)
         ]
 
 
