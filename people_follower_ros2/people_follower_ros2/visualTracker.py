@@ -13,7 +13,12 @@ from cv_bridge import CvBridge
 from ultralytics import YOLO
 from sensor_msgs.msg import Image
 from turn_on_wheeltec_robot.msg import Position as PositionMsg
+
 from geometry_msgs.msg import PoseStamped
+from tf2_ros import Buffer, TransformListener
+from tf2_geometry_msgs import do_transform_pose_stamped
+
+
 from std_msgs.msg import Float32
 from rclpy.qos import DurabilityPolicy, ReliabilityPolicy
 
@@ -126,6 +131,12 @@ class PeopleFollowerNode(Node):
         # Relative coordinates (x,y,z) in camera frame as PointStamped
         # Distance-only topic as Float32 (meters)
         self.pub_rel_point = self.create_publisher(PoseStamped, '/peoplesearchcoord', QoSProfile(depth=10))
+
+                # TF2 setup voor camera_frame -> map transformatie
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+
+
 
         qos = QoSProfile(depth=1)
         qos.reliability = ReliabilityPolicy.RELIABLE
@@ -265,24 +276,62 @@ class PeopleFollowerNode(Node):
 
         if elapsed >= self.coord_pub_period:  
             pose = PoseStamped()
+
+            # Originele camera pose
             pose.header = rgb_msg.header
-            # eventueel expliciet frame_id zetten:
-            # pose.header.frame_id = 'camera_link'  
 
-            pose.pose.position.x = float(rel_x)   # meters, +X right
-            pose.pose.position.y = float(rel_y)   # meters, +Y down
-            pose.pose.position.z = float(rel_z)   # meters, +Z forward
+            # Zorg dat frame klopt met TF tree
+            pose.header.frame_id = 'camera_color_optical_frame'
 
-            # Geen oriëntatie info → identity quaternion
+            pose.pose.position.x = float(rel_x)
+            pose.pose.position.y = float(rel_y)
+            pose.pose.position.z = float(rel_z)
+
+            # Oriëntatie van optical frame
             pose.pose.orientation.x = 0.0
-            pose.pose.orientation.y = -1.0 #Stond op -1.0
+            pose.pose.orientation.y = -1.0
             pose.pose.orientation.z = 0.0
             pose.pose.orientation.w = 1.0
 
-            self.pub_rel_point.publish(pose)  
-            self.pub_distance.publish(Float32(data=float(dist_m)))  
 
-            self.last_coord_pub_time = now  
+            # -------------------------------------------------------
+            # Transformeer zelf naar map voordat Nav2 hem ziet
+            # -------------------------------------------------------
+            try:
+
+                transform = self.tf_buffer.lookup_transform(
+                    'map',
+                    pose.header.frame_id,
+                    rclpy.time.Time()
+                )
+
+                pose_map = do_transform_pose_stamped(
+                    pose,
+                    transform
+                )
+
+                # Nieuwe timestamp zodat Nav2 geen oude camera tijd ziet
+                pose_map.header.stamp = self.get_clock().now().to_msg()
+
+                # Frame moet expliciet map zijn
+                pose_map.header.frame_id = 'map'
+
+                self.pub_rel_point.publish(pose_map)
+
+            except Exception as e:
+
+                self.get_logger().warn(
+                    f'TF transform camera -> map mislukt: {e}'
+                )
+
+                return
+
+
+            self.pub_distance.publish(
+                Float32(data=float(dist_m))
+            )
+
+            self.last_coord_pub_time = now
         # ------------------------------------------------------------------
 
         # Quick debug 
