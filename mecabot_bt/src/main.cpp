@@ -3842,7 +3842,7 @@ public:
 
         // Publiceer scherm voor de RPi
         std_msgs::msg::String quiz_msg;
-        quiz_msg.data = "RobotExplore";
+        quiz_msg.data = "RobotFailedDriveToCharging";
         pub_quiz_->publish(quiz_msg);
 
         // ===== NIEUW: schrijf SKIP naar file =====

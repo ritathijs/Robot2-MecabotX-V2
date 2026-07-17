@@ -90,7 +90,7 @@ class AprilTagAbsolutePose(Node):
 
         self.timer = self.create_timer(0.1, self.timer_callback)
 
-        with open("/home/wheeltec/wheeltec_ros2/src/april_tabloo/tags.json") as f:
+        with open("/home/wheeltec/wheeltec_ros2/src/mecabot_bt/trees/tags.json") as f:
             data = json.load(f)
 
         self.tag_x = float(data["p_x"])

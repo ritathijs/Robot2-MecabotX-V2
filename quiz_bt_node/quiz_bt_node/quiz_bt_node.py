@@ -500,6 +500,8 @@ class QuizBTNode(Node):
             self.safe_emit("robot-docking")
         elif msg.data == "RobotStartup":
             self.safe_emit("robot-startup")
+        elif msg.data == "RobotFailedDriveToCharging":
+            self.safe_emit("robot-lost-charging")
 
     # ---------------- CLEANUP ----------------
     def shutdown(self):
