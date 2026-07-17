@@ -253,12 +253,11 @@ class PeopleFollowerNode(Node):
         if self.invert_y:
             angle_y = -angle_y
 
-        # ------------------------------------------------------------------
-        # Optional relative coordinates in camera frame (meters).
-        rel_x = dist_m * math.tan(angle_x)  # +X right
-        rel_y = dist_m * math.tan(angle_y)  # +Y down
-        rel_z = dist_m                      # +Z forward
-        # ------------------------------------------------------------------
+        goal_distance = max(dist_m - 0.5, 0.0)
+
+        rel_x = goal_distance * math.tan(angle_x)  # +X right
+        rel_y = goal_distance * math.tan(angle_y)  # +Y down
+        rel_z = goal_distance                      # +Z forward
 
         # Distance output units
         distance_out = dist_m * 1000.0 if self.dist_mm_out else dist_m

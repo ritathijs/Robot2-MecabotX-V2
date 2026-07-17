@@ -1,4 +1,4 @@
 {
-    "battery_low_voltage": 1.0,
-    "battery_ok_voltage": 15.0
+    "battery_low_voltage": 0,
+    "battery_ok_voltage": 5.0
 }

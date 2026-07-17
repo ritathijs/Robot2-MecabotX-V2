@@ -41,10 +41,13 @@
                                             
                                             <LoopSequence name="LoopSequence">
                                                 <Sequence name="FollowMeSequence">
-                                                    <StartDrivingToPeople timeout="2.0" explore_timestamp="{explore_timestamp}" delta_seconds ="250" robot_rotate = "{robot_rotate}"/>
-                                                    <CheckingNearbyVisitors  timer="50"  robot_rotate="{robot_rotate}" />
-                                                    <RobotRotationFollowMe distance_max="1.8" zero_limit="40" timer="60" />
-                                                    <ArrivedAtVisitors robot_rotate="{robot_rotate}" timeout="10.0"/>
+                                                    <StartDrivingToPeople explore_timestamp="{explore_timestamp}" delta_seconds ="250" robot_needs_rotation = "{robot_needs_rotation}"/>
+                                                    <CheckingNearbyVisitors  visitor_code ="{visitor_code}" robot_needs_rotation = "{robot_needs_rotation}"
+ timer="50"   />
+                                                    <RobotRotationFollowMe visitor_code ="{visitor_code}" robot_needs_rotation = "{robot_needs_rotation}"
+ distance_max="1.8" zero_limit="40" timer="60" />
+                                                    <ArrivedAtVisitors  visitor_code ="{visitor_code}" robot_needs_rotation = "{robot_needs_rotation}"
+ timeout="10.0"/>
                                                 </Sequence>
                                             </LoopSequence>
                                             
@@ -79,6 +82,10 @@
                                             <RobotDriveToChargingStation timeout="5.0" skip_drive2charging="{skip_drive2charging}" skip_robotdrivechargingstation="{skip_robotdrivechargingstation}" charging_sent_timestamp="{charging_sent_timestamp}" bat_admin_status="{bat_admin_status}" connection_chargeStatus="{connection_chargeStatus}" skip_drivetoworkarea="{skip_drivetoworkarea}" />
                                             <RobotIsRobotAtChargingStation timeout="200.0" charging_sent_timestamp="{charging_sent_timestamp}" skip_drive2charging="{skip_drive2charging}" skip_robotdrivechargingstation="{skip_robotdrivechargingstation}" drive_failed="{drive_failed}" />
                                         </Sequence>
+                                        <Sequence name="FallbackDriveToChargingCoordinateSequence">
+                                            <FallbackDriveToChargingStation timeout="5.0"  charging_sent_timestamp="{charging_sent_timestamp}" bat_admin_status="{bat_admin_status}" connection_chargeStatus ="{connection_chargeStatus}"/>
+                                            <FallbackIsRobotAtChargingStation timeout="200.0" charging_sent_timestamp="{charging_sent_timestamp}" drive_failed="{drive_failed}" />
+                                        </Sequence>
                                         <RobotFailedDriveToChargingStation skip_robotdrivechargingstation="{skip_robotdrivechargingstation}" />
                                     </Fallback>
                                     <DriveToChargingStation timeout="20.0" chargingInteger="{chargingInteger}" skip_drive2charging="{skip_drive2charging}" bat_admin_status="{bat_admin_status}" skip_isrobotcharging="{skip_isrobotcharging}" skip_statusDriveToChargingStation="{skip_statusDriveToChargingStation}" />
@@ -93,7 +100,6 @@
                             </Fallback>
                         </Fallback> 
                     </Parallel>
-
                     <Sequence name="AdminSequence">
                         <CheckAdminCondition robot_startup ="{robot_startup}" bat_admin_status="{bat_admin_status}" chargingInteger="{chargingInteger}" chargingInteger_nextCycle="{chargingInteger_nextCycle}"/>
                         <CheckButtonState robot_startup = "{robot_startup}" buttonStop="{buttonStop}" robotLocationBAT="{robotLocationBAT}" skip_drivetoworkarea="{skip_drivetoworkarea}" />

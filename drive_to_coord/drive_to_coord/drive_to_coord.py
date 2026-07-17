@@ -36,9 +36,10 @@ behavior_tree_nodes = {
 
 
 	"RobotDriveToChargingStation":	{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "always"},
-	"RobotIsRobotAtChargingStation":   {"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "once"},
+	"RobotIsRobotAtChargingStation":   {"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "always"},
 
-
+	"FallbackDriveToChargingStation":	{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "always"},
+	"FallbackIsRobotAtChargingStation":   {"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "always"},
 
 	"CheckingNearbyVisitors":	{"keepoutfilter_on": "True", "drive_action": "release", "message_frequency": "once"},
 
@@ -49,10 +50,10 @@ behavior_tree_nodes = {
 	"DriveQuizLocation":			{"keepoutfilter_on": "True",  "drive_action": "estop", "message_frequency": "once"},
 
 	"FallbackDriveToWorkArea":			{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "always"},
-	"FallbackIsRobotAtWorkArea":			{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "once"},
+	"FallbackIsRobotAtWorkArea":			{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "always"},
 
 	"FallbackDriveQuizLocation":			{"keepoutfilter_on": "True",  "drive_action": "estop", "message_frequency": "once"},
-	"FallbackIsRobotAtQuiz":			{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "once"},
+	"FallbackIsRobotAtQuiz":			{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "always"},
 
 
 
@@ -79,6 +80,9 @@ class DriveToCoord(Node):
 		self.last_peoplesearchcoord = None
 		
 		self.current_goals = []
+		self.last_goal_stamp = None
+		self.last_goal_send_time = self.get_clock().now()
+		
 		self.needs_action = False
 		
 		self.keepoutfilter_state = None
@@ -224,12 +228,21 @@ class DriveToCoord(Node):
 			self.publish_status(12, msg)
 			return
 		
-		# Voorkom IndexError door eerst te checken of de lijst niet leeg is
-		if self.current_goals:
-			# Let op: we moeten .goal.pose aanspreken omdat .pose in het Goal() bericht zit
-			if self.current_goals[-1].goal.pose.header.stamp == coordinate.header.stamp:
-				self.get_logger().info("Zelfde coördinaat en timestamp als huidige goal, geen nieuwe goal verzonden.")
+		now = self.get_clock().now()
+
+		# Nieuwe timestamp?
+		if self.last_goal_stamp != coordinate.header.stamp:
+			self.last_goal_stamp = coordinate.header.stamp
+			self.last_goal_send_time = now
+
+		# Zelfde timestamp -> alleen elke 5 seconden opnieuw sturen
+		else:
+			elapsed = (now - self.last_goal_send_time).nanoseconds / 1e9
+
+			if elapsed < 5.0:
 				return
+
+			self.last_goal_send_time = now
 
 		goal_msg = NavigateToPose.Goal()
 		goal_msg.pose = coordinate

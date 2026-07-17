@@ -74,6 +74,7 @@ class QuizBTNode(Node):
         # Logica om bij te houden of laatst verstuurde event robot-charge is om bij adminpanelclosed juist bericht te sturen
         self.last_emitted_event = None
 
+        self.quiz_location_suffix = ""
 
         # Berichten van BT om schermen aan te vragen
         self.subscription = self.create_subscription(
@@ -344,9 +345,21 @@ class QuizBTNode(Node):
     def on_drive_to_quiz_location(self):
         if self._is_blocking():
             return
-        self.get_logger().info("Drive to quiz location")
-        self.publish_quiz_message("drive_to_quiz_location")
 
+        event = "drive_to_quiz_location"
+
+        if self.quiz_location_suffix:
+            event += self.quiz_location_suffix
+            self.get_logger().info(
+                f"Drive to quiz location met suffix: {self.quiz_location_suffix}"
+            )
+
+            # reset zodat volgende keer weer normaal begint
+            self.quiz_location_suffix = ""
+
+        self.publish_quiz_message(event)
+
+        
     def on_schedule_updated(self):
         if self._is_blocking():
             return
@@ -456,8 +469,21 @@ class QuizBTNode(Node):
             self.safe_emit("robot-explore")
         elif msg.data == "RobotGoToVisitors":
             self.safe_emit("robot-go-to-visitors")
-        elif msg.data == "RobotArrivedAtVisitors":
+        
+        
+        elif msg.data.startswith("RobotArrivedAtVisitors"):
+            suffix = msg.data.replace("RobotArrivedAtVisitors", "")
+
+            # Controleer of suffix formaat A8 is (1 hoofdletter + 1 cijfer)
+            if len(suffix) == 2 and suffix[0].isupper() and suffix[1].isdigit():
+                self.quiz_location_suffix = suffix
+                self.get_logger().info(
+                    f"Quiz locatie suffix opgeslagen: {self.quiz_location_suffix}"
+                )
+
             self.safe_emit("robot-arrived-at-visitors")
+
+
         elif msg.data == "robot-arrived-at-quiz-location":
             self.safe_emit("robot-arrived-at-quiz-location")
         elif msg.data == "RobotError":

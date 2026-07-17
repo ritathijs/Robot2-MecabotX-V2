@@ -704,7 +704,230 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pub_coord_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;
 };
+class FallbackDriveToChargingStation : public BT::StatefulActionNode
+{
+public:
 
+    FallbackDriveToChargingStation(const std::string &name,
+                                   const BT::NodeConfiguration &config)
+        : BT::StatefulActionNode(name, config)
+    {
+        node_ = rclcpp::Node::make_shared("btFallbackDriveToChargingStation");
+
+        pub_bt_ = node_->create_publisher<std_msgs::msg::String>(
+            "/BehaviorTreeNode", 10);
+
+        pub_coord_ = node_->create_publisher<geometry_msgs::msg::PoseStamped>(
+            "/btDriveCoord", 10);
+
+        // Raspberry Pi topic
+        pub_quiz_ = node_->create_publisher<std_msgs::msg::String>(
+            "/rpitopic", 10);
+    }
+
+
+    static BT::PortsList providedPorts()
+    {
+        return {
+            BT::InputPort<double>("timeout"),
+
+            BT::OutputPort<std::string>("charging_sent_timestamp"),
+            BT::OutputPort<std::string>("bat_admin_status"),
+            BT::OutputPort<bool>("connection_chargeStatus")
+        };
+    }
+
+
+    BT::NodeStatus onStart() override
+    {
+
+        std_msgs::msg::String bt_msg;
+        bt_msg.data = "FallbackDriveToChargingStation";
+        pub_bt_->publish(bt_msg);
+
+
+        // Raspberry Pi informeren
+        std_msgs::msg::String quiz_msg;
+        quiz_msg.data = "RobotGoCharge";
+        pub_quiz_->publish(quiz_msg);
+
+
+        // Blackboard statussen
+        setOutput("bat_admin_status", std::string("STOP"));
+
+        // Niet controleren op disconnect tijdens laadcyclus
+        setOutput("connection_chargeStatus", true);
+
+
+
+                // ===============================
+                // Pose uit BT XML lezen
+                // ===============================
+        // ===============================
+        // Charger positie uit JSON lezen
+        // ===============================
+
+        std::string filePath =
+            "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/Charger_Position.json";
+
+        std::ifstream file(filePath);
+
+        if (!file.is_open())
+        {
+            std::cerr
+                << "[FallbackDriveToChargingStation] Kan JSON niet openen: "
+                << filePath
+                << std::endl;
+
+            return BT::NodeStatus::FAILURE;
+        }
+
+        json j;
+
+        try
+        {
+            file >> j;
+        }
+        catch (const std::exception &e)
+        {
+            std::cerr
+                << "[FallbackDriveToChargingStation] JSON parse fout: "
+                << e.what()
+                << std::endl;
+
+            return BT::NodeStatus::FAILURE;
+        }
+
+        sent_coord_.header.stamp = node_->get_clock()->now();
+        sent_coord_.header.frame_id = "map";
+
+        sent_coord_.pose.position.x = j.at("p_x").get<double>();
+        sent_coord_.pose.position.y = j.at("p_y").get<double>();
+        sent_coord_.pose.position.z = 0.0;
+
+        sent_coord_.pose.orientation.x = 0.0;
+        sent_coord_.pose.orientation.y = 0.0;
+        sent_coord_.pose.orientation.z = j.at("orien_z").get<double>();
+        sent_coord_.pose.orientation.w = j.at("orien_w").get<double>();
+
+
+
+        while (pub_coord_->get_subscription_count() == 0)
+        {
+            RCLCPP_INFO(
+                node_->get_logger(),
+                "Waiting for subscribers on /btDriveCoord...");
+
+            rclcpp::sleep_for(
+                std::chrono::milliseconds(100));
+        }
+
+
+
+        pub_coord_->publish(sent_coord_);
+
+
+
+        sent_timestamp_ =
+            std::to_string(sent_coord_.header.stamp.sec)
+            + "."
+            +
+            std::to_string(sent_coord_.header.stamp.nanosec);
+
+
+
+        setOutput(
+            "charging_sent_timestamp",
+            sent_timestamp_);
+
+
+
+        std::cout
+            << "[FallbackDriveToChargingStation] Published charger coordinate "
+            << "timestamp: "
+            << sent_timestamp_
+            << std::endl;
+
+
+
+        if (!getInput<double>("timeout", timeout_))
+        {
+            timeout_ = 5.0;
+        }
+
+
+
+        start_time_ =
+            std::chrono::steady_clock::now();
+
+
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+
+
+    BT::NodeStatus onRunning() override
+    {
+
+        auto elapsed =
+            std::chrono::duration<double>(
+                std::chrono::steady_clock::now()
+                -
+                start_time_)
+                .count();
+
+
+
+        if (elapsed >= timeout_)
+        {
+            std::cout
+                << "[FallbackDriveToChargingStation] Timeout ("
+                << timeout_
+                << "s) -> SUCCESS"
+                << std::endl;
+
+
+            return BT::NodeStatus::SUCCESS;
+        }
+
+
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+
+
+    void onHalted() override
+    {
+        std::cout
+            << "[FallbackDriveToChargingStation] HALTED"
+            << std::endl;
+    }
+
+
+
+private:
+
+    double timeout_;
+
+    std::string sent_timestamp_;
+
+    std::chrono::steady_clock::time_point start_time_;
+
+
+    geometry_msgs::msg::PoseStamped sent_coord_;
+
+
+    rclcpp::Node::SharedPtr node_;
+
+
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
+
+    rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pub_coord_;
+
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;
+};
 
 class RobotIsRobotAtChargingStation : public BT::StatefulActionNode
 {
@@ -1281,6 +1504,9 @@ public:
 
         pub_bt_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
         pub_coord_ = node_->create_publisher<geometry_msgs::msg::PoseStamped>("/btDriveCoord", 10);
+
+        // Publisher om een klein stukje vooruit te rijden
+        pub_cmd_vel_ = node_->create_publisher<geometry_msgs::msg::Twist>("gui_cmd_vel", 10);
     }
 
     static BT::PortsList providedPorts()
@@ -1305,12 +1531,11 @@ public:
         bt_msg.data = "DriveWorkArea";
         pub_bt_->publish(bt_msg);
 
-
         sent_coord_.header.stamp = node_->get_clock()->now();
         sent_coord_.header.frame_id = "map";
 
-        
-        double x, y, z, qx , qy, qz, qw;
+        double x, y, z, qx, qy, qz, qw;
+
         getInput("x", x);
         getInput("y", y);
         getInput("z", z);
@@ -1319,7 +1544,6 @@ public:
         getInput("qy", qy);
         getInput("qz", qz);
         getInput("qw", qw);
-
 
         sent_coord_.pose.position.x = x;
         sent_coord_.pose.position.y = y;
@@ -1340,13 +1564,46 @@ public:
         pub_coord_->publish(sent_coord_);
 
         // Timestamp opslaan
-        sent_timestamp_ = std::to_string(sent_coord_.header.stamp.sec) + "." +
-                          std::to_string(sent_coord_.header.stamp.nanosec);
+        sent_timestamp_ =
+            std::to_string(sent_coord_.header.stamp.sec) + "." +
+            std::to_string(sent_coord_.header.stamp.nanosec);
 
         setOutput("workarea_timestamp", sent_timestamp_);
 
         std::cout << "[DriveWorkArea] Published coordinate at timestamp: "
                   << sent_timestamp_ << std::endl;
+
+        // ----------------------------------------------------------
+        // Rijd een klein stukje vooruit (~0.5 meter)
+        // ----------------------------------------------------------
+
+        while (pub_cmd_vel_->get_subscription_count() == 0)
+        {
+            RCLCPP_INFO(node_->get_logger(),
+                        "Waiting for subscribers on gui_cmd_vel...");
+            rclcpp::sleep_for(std::chrono::milliseconds(100));
+        }
+
+        geometry_msgs::msg::Twist cmd;
+        cmd.linear.x = 0.25;   // rustige snelheid
+        cmd.angular.z = 0.0;
+
+        auto drive_start = std::chrono::steady_clock::now();
+
+        while (std::chrono::duration<double>(
+                   std::chrono::steady_clock::now() - drive_start)
+                   .count() < 2.0)
+        {
+            pub_cmd_vel_->publish(cmd);
+            rclcpp::spin_some(node_);
+            rclcpp::sleep_for(std::chrono::milliseconds(100));
+        }
+
+        // Stop de robot
+        geometry_msgs::msg::Twist stop_cmd;
+        pub_cmd_vel_->publish(stop_cmd);
+
+        // ----------------------------------------------------------
 
         // Timeout ophalen
         if (!getInput<double>("timeout", timeout_))
@@ -1376,6 +1633,10 @@ public:
 
     void onHalted() override
     {
+        // Zorg ervoor dat de robot zeker stopt
+        geometry_msgs::msg::Twist stop_cmd;
+        pub_cmd_vel_->publish(stop_cmd);
+
         std::cout << "[DriveWorkArea] HALTED" << std::endl;
     }
 
@@ -1386,9 +1647,12 @@ private:
     geometry_msgs::msg::PoseStamped sent_coord_;
 
     rclcpp::Node::SharedPtr node_;
+
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pub_coord_;
+    rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr pub_cmd_vel_;
 };
+
 
 class FallbackDriveToWorkArea : public BT::StatefulActionNode
 {
@@ -1970,57 +2234,154 @@ private:
 
 };
 
+#include <fstream>
+#include <fstream>
+#include <random>
+#include <fstream>
+#include <random>
+#include <cctype>
+
 class CheckingNearbyVisitors : public BT::StatefulActionNode
 {
 public:
+
     CheckingNearbyVisitors(const std::string &name,
                            const BT::NodeConfiguration &config)
-        : BT::StatefulActionNode(name, config)
+        : BT::StatefulActionNode(name, config),
+          received_drive_to_quiz_(false)
     {
         node_ = rclcpp::Node::make_shared("btCheckingNearbyVisitors");
 
         pub_ = node_->create_publisher<std_msgs::msg::String>(
             "/BehaviorTreeNode", 10);
 
-        search_pub_ =
-            node_->create_publisher<geometry_msgs::msg::Twist>(
-                "/search_cmd_vel", 10);
+        pub_quiz_screen_ = node_->create_publisher<std_msgs::msg::String>(
+            "/rpitopic", 10);
 
+        search_pub_ = node_->create_publisher<geometry_msgs::msg::Twist>(
+            "/search_cmd_vel", 10);
+
+        // -----------------------------
+        // Target distance subscriber
+        // -----------------------------
         rclcpp::QoS qos(1);
         qos.reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE);
         qos.durability(RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL);
 
-        sub_ =
-            node_->create_subscription<std_msgs::msg::Float32>(
-                "/target_distance",
-                qos,
-                [this](std_msgs::msg::Float32::SharedPtr msg)
+        sub_ = node_->create_subscription<std_msgs::msg::Float32>(
+            "/target_distance",
+            qos,
+            [this](std_msgs::msg::Float32::SharedPtr msg)
+            {
+                latest_value_ = msg->data;
+            });
+
+        // -----------------------------
+        // Quiz knop subscriber
+        // -----------------------------
+        rclcpp::QoS quiz_qos(1);
+        quiz_qos.reliable();
+        quiz_qos.durability(RMW_QOS_POLICY_DURABILITY_VOLATILE);
+
+        sub_quiz_ = node_->create_subscription<std_msgs::msg::String>(
+            "/quiz",
+            quiz_qos,
+            [this](std_msgs::msg::String::SharedPtr msg)
+            {
+                std::string expected =
+                    "drive_to_quiz_location" + visitor_code_;
+
+                if(msg->data == expected)
                 {
-                    latest_value_ = msg->data;
-                });
+                    std::cout
+                    << "[CheckingNearbyVisitors] Received correct quiz code: "
+                    << msg->data
+                    << std::endl;
+
+                    received_drive_to_quiz_ = true;
+
+                    std::ofstream file(
+                    "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/quizknop.txt");
+
+                    if(file.is_open())
+                    {
+                        file << "GEDRUKT";
+                        file.close();
+                    }
+                }
+                else
+                {
+                    std::cout
+                    << "[CheckingNearbyVisitors] Wrong quiz code received: "
+                    << msg->data
+                    << std::endl;
+                }
+
+            });
     }
 
     static BT::PortsList providedPorts()
     {
-        return {
-            BT::InputPort<double>("timer")
-            ;
+        return
+        {
+            BT::InputPort<double>("timer"),
+            BT::OutputPort<std::string>("visitor_code"),
+            BT::OutputPort<bool>("robot_needs_rotation")
+        };
     }
 
     BT::NodeStatus onStart() override
     {
         latest_value_ = 999.0;
+        received_drive_to_quiz_ = false;
 
-        start_time_ = std::chrono::steady_clock::now();
-        rotation_start_time_ = std::chrono::steady_clock::now();
+        // standaard: volgende nodes uitvoeren
+        setOutput("robot_needs_rotation", true);
 
+        // Nieuwe random code maken
+        visitor_code_ = generateRandomCode();
+
+        // Output ports vullen
+        setOutput("visitor_code", visitor_code_);
+
+        start_time_ =
+            std::chrono::steady_clock::now();
+
+        rotation_start_time_ =
+            std::chrono::steady_clock::now();
+
+        {
+            std::ofstream file(
+            "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/quizknop.txt");
+
+            if(file.is_open())
+            {
+                file << "LOS";
+                file.close();
+            }
+        }
 
         std_msgs::msg::String msg;
         msg.data = "CheckingNearbyVisitors";
         pub_->publish(msg);
 
-        std::cout << "[CheckingNearbyVisitors] START SEARCH"
-                  << std::endl;
+        // Scherm bericht met code
+        std_msgs::msg::String screen_msg;
+
+        screen_msg.data =
+            "RobotArrivedAtVisitors" + visitor_code_;
+
+        pub_quiz_screen_->publish(screen_msg);
+
+        std::cout
+        << "[CheckingNearbyVisitors] Screen trigger sent: "
+        << screen_msg.data
+        << std::endl;
+
+        std::cout
+        << "[CheckingNearbyVisitors] Visitor code: "
+        << visitor_code_
+        << std::endl;
 
         return BT::NodeStatus::RUNNING;
     }
@@ -2029,6 +2390,22 @@ public:
     {
         rclcpp::spin_some(node_);
 
+        //--------------------------------------------------------
+        // Quiz knop correct ingedrukt -> volgende nodes skippen
+        //--------------------------------------------------------
+        if(received_drive_to_quiz_)
+        {
+            stopRotation();
+
+            setOutput("robot_needs_rotation", false);
+
+            std::cout
+            << "[CheckingNearbyVisitors] QUIZ BUTTON CORRECT -> SUCCESS"
+            << std::endl;
+
+            return BT::NodeStatus::SUCCESS;
+        }
+
         double timer = 30.0;
         getInput("timer", timer);
 
@@ -2036,65 +2413,71 @@ public:
         // Roteren
         //--------------------------------------------------------
         geometry_msgs::msg::Twist cmd;
+
         cmd.linear.x = 0.0;
-        cmd.angular.z = 0.15;
+        cmd.angular.z = 0.25;
+
         search_pub_->publish(cmd);
 
         //--------------------------------------------------------
-        // Persoon gezien -> onmiddellijk stoppen en SUCCESS
+        // Persoon gezien
         //--------------------------------------------------------
-        if (latest_value_ != 999.0 && latest_value_ > 0.0)
+        if(latest_value_ != 999.0 &&
+           latest_value_ > 0.0)
         {
             stopRotation();
 
-            std::cout
-                << "[CheckingNearbyVisitors] PERSON DETECTED -> SUCCESS"
-                << std::endl;
+            setOutput("robot_needs_rotation", true);
 
+            std::cout
+            << "[CheckingNearbyVisitors] PERSON DETECTED -> SUCCESS"
+            << std::endl;
 
             return BT::NodeStatus::SUCCESS;
         }
 
         //--------------------------------------------------------
-        // Kwartrotatie voltooid -> SUCCESS
+        // Kwartrotatie klaar
         //--------------------------------------------------------
         auto rotation_elapsed =
-            std::chrono::duration<double>(
-                std::chrono::steady_clock::now() -
-                rotation_start_time_)
-                .count();
+        std::chrono::duration<double>(
+            std::chrono::steady_clock::now()
+            - rotation_start_time_)
+            .count();
 
         double quarter_rotation_time = 38;
 
-        if (rotation_elapsed >= quarter_rotation_time)
+        if(rotation_elapsed >= quarter_rotation_time)
         {
             stopRotation();
 
-            std::cout
-                << "[CheckingNearbyVisitors] QUARTER ROTATION COMPLETE"
-                << std::endl;
+            setOutput("robot_needs_rotation", true);
 
+            std::cout
+            << "[CheckingNearbyVisitors] QUARTER ROTATION COMPLETE"
+            << std::endl;
 
             return BT::NodeStatus::SUCCESS;
         }
 
         //--------------------------------------------------------
-        // Totale timeout (veiligheid)
+        // Timeout
         //--------------------------------------------------------
         auto elapsed =
-            std::chrono::duration<double>(
-                std::chrono::steady_clock::now() -
-                start_time_)
-                .count();
+        std::chrono::duration<double>(
+            std::chrono::steady_clock::now()
+            - start_time_)
+            .count();
 
-        if (elapsed >= timer)
+        if(elapsed >= timer)
         {
             stopRotation();
 
-            std::cout
-                << "[CheckingNearbyVisitors] TIMEOUT"
-                << std::endl;
+            setOutput("robot_needs_rotation", true);
 
+            std::cout
+            << "[CheckingNearbyVisitors] TIMEOUT"
+            << std::endl;
 
             return BT::NodeStatus::SUCCESS;
         }
@@ -2107,194 +2490,504 @@ public:
         stopRotation();
 
         std::cout
-            << "[CheckingNearbyVisitors] HALTED"
-            << std::endl;
+        << "[CheckingNearbyVisitors] HALTED"
+        << std::endl;
     }
 
 private:
+
+    std::string generateRandomCode()
+    {
+        static std::random_device rd;
+        static std::mt19937 gen(rd());
+
+        std::uniform_int_distribution<int> letter_dist(0,25);
+        std::uniform_int_distribution<int> number_dist(0,9);
+
+        char letter =
+            'A' + letter_dist(gen);
+
+        int number =
+            number_dist(gen);
+
+        return std::string(1, letter)
+               + std::to_string(number);
+    }
+
     void stopRotation()
     {
         geometry_msgs::msg::Twist stop;
+
         stop.linear.x = 0.0;
         stop.angular.z = 0.0;
+
         search_pub_->publish(stop);
     }
 
 private:
+
     rclcpp::Node::SharedPtr node_;
 
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
-
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_screen_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr search_pub_;
 
     rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr sub_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_quiz_;
 
     float latest_value_ = 999.0;
 
+    bool received_drive_to_quiz_;
+
+    std::string visitor_code_;
+
     std::chrono::steady_clock::time_point start_time_;
     std::chrono::steady_clock::time_point rotation_start_time_;
-};
-
-
-
-
- // BT node die bepaalt of robot de visitors bereikt heeft via afstand + trigger event
+}; 
+#include <fstream>
+#include <string>
+// BT node die bepaalt of robot de visitors bereikt heeft via afstand + trigger event
 class ArrivedAtVisitors : public BT::StatefulActionNode
 {
 public:
-    ArrivedAtVisitors(const std::string &name, const BT::NodeConfiguration &config)
+
+    ArrivedAtVisitors(const std::string &name,
+                      const BT::NodeConfiguration &config)
         : BT::StatefulActionNode(name, config),
           timeout_(15.0),
           received_drive_to_quiz_(false),
           overlimit_count_(0),
           follow_value_(0.0)
     {
+
         node_ = rclcpp::Node::make_shared("btArrivedAtVisitors");
 
+
         pub_bt_ = node_->create_publisher<std_msgs::msg::String>(
-            "/BehaviorTreeNode", 10);
+            "/BehaviorTreeNode",
+            10);
 
-        // NIEUW: publisher voor scherm/RPi
-        pub_quiz_screen_ = node_->create_publisher<std_msgs::msg::String>(
-            "/rpitopic", 10);
 
-        // volgt afstand tot persoon/target
-        sub_follow_ = node_->create_subscription<std_msgs::msg::Float32>(
-            "/target_distance",
-            10,
-            [this](std_msgs::msg::Float32::SharedPtr msg)
-            {
-                follow_value_ = msg->data;
-            });
+        pub_quiz_screen_ =
+            node_->create_publisher<std_msgs::msg::String>(
+                "/rpitopic",
+                10);
+
+
+
+        sub_follow_ =
+            node_->create_subscription<std_msgs::msg::Float32>(
+                "/target_distance",
+                10,
+                [this](std_msgs::msg::Float32::SharedPtr msg)
+                {
+                    follow_value_ = msg->data;
+                });
+
+
 
         rclcpp::QoS qos(1);
         qos.reliable();
+        qos.durability(
+            RMW_QOS_POLICY_DURABILITY_VOLATILE);
 
-        // externe trigger dat robot effectief op quiz locatie is aangekomen
-        sub_quiz_ = node_->create_subscription<std_msgs::msg::String>(
-            "/quiz",
-            qos,
-            [this](std_msgs::msg::String::SharedPtr msg)
-            {
-                if (msg->data == "drive_to_quiz_location")
+
+
+        sub_quiz_ =
+            node_->create_subscription<std_msgs::msg::String>(
+                "/quiz",
+                qos,
+                [this](std_msgs::msg::String::SharedPtr msg)
                 {
-                    std::cout << "[ArrivedAtVisitors] Received 'drive_to_quiz_location'" << std::endl;
-                    received_drive_to_quiz_ = true;
-                }
-            });
+
+                    std::string expected_message =
+                        "drive_to_quiz_location" + visitor_code_;
+
+
+                    if(msg->data == expected_message)
+                    {
+
+                        std::cout
+                            << "[ArrivedAtVisitors] Correct quiz code received: "
+                            << msg->data
+                            << std::endl;
+
+
+                        received_drive_to_quiz_ = true;
+
+
+                        std::ofstream file(
+                            "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/quizknop.txt");
+
+
+                        if(file.is_open())
+                        {
+                            file << "GEDRUKT";
+                            file.close();
+                        }
+
+                    }
+                    else
+                    {
+
+                        std::cout
+                            << "[ArrivedAtVisitors] Wrong quiz message ignored: "
+                            << msg->data
+                            << std::endl;
+
+                    }
+
+                });
     }
+
+
+
+
 
     static BT::PortsList providedPorts()
     {
         return {
-            BT::InputPort<double>("timeout")
+            BT::InputPort<double>("timeout"),
+            BT::InputPort<std::string>("visitor_code"),
+            BT::OutputPort<bool>("robot_needs_rotation")
         };
     }
+
+
+
+
+
 
     BT::NodeStatus onStart() override
     {
 
+        visitor_code_.clear();
+
+
+        if(getInput("visitor_code", visitor_code_))
+        {
+
+            std::cout
+                << "[ArrivedAtVisitors] Visitor code received: "
+                << visitor_code_
+                << std::endl;
+
+        }
+
+
+
+        //--------------------------------------------------------
+        // standaard: volgende nodes mogen draaien
+        //--------------------------------------------------------
+
+        setOutput("robot_needs_rotation", true);
+
+
+
+
+
+
+        //--------------------------------------------------------
+        // Eerst controleren of knop al gedrukt was
+        //--------------------------------------------------------
+
+        {
+
+            std::ifstream file(
+                "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/quizknop.txt");
+
+
+            if(file.is_open())
+            {
+
+                std::string status;
+
+                std::getline(file,status);
+
+                file.close();
+
+
+
+                if(status == "GEDRUKT")
+                {
+
+                    std::cout
+                        << "[ArrivedAtVisitors] quizknop.txt = GEDRUKT -> SUCCESS"
+                        << std::endl;
+
+
+                    // volgende nodes skippen
+                    setOutput("robot_needs_rotation", false);
+
+
+                    return BT::NodeStatus::SUCCESS;
+                }
+
+            }
+        }
+
+
+
+
+
+
         overlimit_count_ = 0;
+
         received_drive_to_quiz_ = false;
+
         follow_value_ = 0.0;
 
-        if (!getInput<double>("timeout", timeout_))
+
+
+
+
+        if(!getInput<double>("timeout", timeout_))
         {
             timeout_ = 15.0;
         }
 
-        start_time_ = std::chrono::steady_clock::now();
 
-        // Publish naar BehaviorTreeNode
+
+
+
+        start_time_ =
+            std::chrono::steady_clock::now();
+
+
+
+
+
+
         std_msgs::msg::String msg_bt_;
+
         msg_bt_.data = "ArrivedAtVisitors";
+
         pub_bt_->publish(msg_bt_);
 
-        // NIEUW: scherm tonen
+
+
+
+
+
         std_msgs::msg::String screen_msg;
-        screen_msg.data = "RobotArrivedAtVisitors";
+
+
+        screen_msg.data =
+            "RobotArrivedAtVisitors" + visitor_code_;
+
+
         pub_quiz_screen_->publish(screen_msg);
 
-        std::cout << "[ArrivedAtVisitors] Screen trigger sent: RobotArrivedAtVisitors" << std::endl;
 
-        std::cout << "[ArrivedAtVisitors] START (timeout="
-                  << timeout_ << "s)" << std::endl;
+
+
+
+        std::cout
+            << "[ArrivedAtVisitors] START timeout="
+            << timeout_
+            << " visitor_code="
+            << visitor_code_
+            << std::endl;
+
+
+
+
+
 
         return BT::NodeStatus::RUNNING;
     }
+
+
+
+
+
+
+
+
 
     BT::NodeStatus onRunning() override
     {
+
         rclcpp::spin_some(node_);
 
-        // status wordt continu gepubliceerd voor debugging
+
+
+
         std_msgs::msg::String msg_bt_;
+
         msg_bt_.data = "ArrivedAtVisitors";
+
         pub_bt_->publish(msg_bt_);
 
-        // directe success trigger via extern event
-        if (received_drive_to_quiz_)
+
+
+
+
+
+        //--------------------------------------------------------
+        // Correct quiz bericht ontvangen
+        // -> volgende nodes skippen
+        //--------------------------------------------------------
+
+        if(received_drive_to_quiz_)
         {
-            std::cout << "[ArrivedAtVisitors] 'drive_to_quiz_location' ontvangen -> SUCCESS" << std::endl;
+
+            setOutput("robot_needs_rotation", false);
+
+
+            std::cout
+                << "[ArrivedAtVisitors] Correct quiz code -> SUCCESS"
+                << std::endl;
+
+
+
             return BT::NodeStatus::SUCCESS;
         }
 
-        // filter: detectie van "te ver weg" over meerdere samples
-        if (follow_value_ > 3.0)
+
+
+
+
+
+
+        //--------------------------------------------------------
+        // Filter afstand
+        //--------------------------------------------------------
+
+        if(follow_value_ > 3.0)
         {
+
             overlimit_count_++;
+
         }
         else
         {
+
             overlimit_count_ = 0;
+
         }
 
-        // robuuste failure als meerdere opeenvolgende metingen te ver zijn
-        if (overlimit_count_ >= 5)
+
+
+
+
+
+        if(overlimit_count_ >= 5)
         {
-            std::cout << "[ArrivedAtVisitors] 5 metingen > 3.0 -> FAILURE" << std::endl;
+
+            setOutput("robot_needs_rotation", true);
+
+
+            std::cout
+                << "[ArrivedAtVisitors] 5 measurements > 3.0 -> FAILURE"
+                << std::endl;
+
+
 
             return BT::NodeStatus::FAILURE;
+
         }
 
-        // timeout fallback
-        auto elapsed = std::chrono::duration<double>(
-                           std::chrono::steady_clock::now() - start_time_)
-                           .count();
 
-        if (elapsed >= timeout_)
+
+
+
+
+
+
+
+        //--------------------------------------------------------
+        // Timeout
+        //--------------------------------------------------------
+
+        auto elapsed =
+            std::chrono::duration<double>(
+                std::chrono::steady_clock::now()
+                -
+                start_time_)
+            .count();
+
+
+
+
+
+        if(elapsed >= timeout_)
         {
-            std::cout << "[ArrivedAtVisitors] Timeout (" << elapsed
-                      << "s) -> FAILURE" << std::endl;
+
+            setOutput("robot_needs_rotation", true);
+
+
+            std::cout
+                << "[ArrivedAtVisitors] Timeout "
+                << elapsed
+                << "s -> FAILURE"
+                << std::endl;
+
+
 
             return BT::NodeStatus::FAILURE;
+
         }
+
+
+
+
 
         return BT::NodeStatus::RUNNING;
     }
 
+
+
+
+
+
+
+
     void onHalted() override
     {
-        std::cout << "[ArrivedAtVisitors] HALTED" << std::endl;
+
+        std::cout
+            << "[ArrivedAtVisitors] HALTED"
+            << std::endl;
+
     }
 
+
+
+
+
+
+
 private:
+
+
     double timeout_;
+
     bool received_drive_to_quiz_;
+
     int overlimit_count_;
+
     float follow_value_;
+
+
+    std::string visitor_code_;
+
 
     std::chrono::steady_clock::time_point start_time_;
 
+
     rclcpp::Node::SharedPtr node_;
+
 
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
 
-    // NIEUW
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_screen_;
 
+
     rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr sub_follow_;
+
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_quiz_;
+
 };
 
 
@@ -2665,6 +3358,325 @@ private:
     rclcpp::Node::SharedPtr node_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+};
+
+class FallbackIsRobotAtChargingStation : public BT::StatefulActionNode
+{
+public:
+
+    FallbackIsRobotAtChargingStation(
+        const std::string &name,
+        const BT::NodeConfiguration &config)
+        : BT::StatefulActionNode(name, config),
+          timeout_(10.0),
+          received_success_(false),
+          received_failure_(false)
+    {
+
+        node_ = rclcpp::Node::make_shared(
+            "btFallbackIsRobotAtChargingStation");
+
+
+        sub_ = node_->create_subscription<std_msgs::msg::String>(
+            "/drive_to_coord_status",
+            10,
+            [this](std_msgs::msg::String::SharedPtr msg)
+            {
+
+                std::string data = msg->data;
+
+
+                std::cout
+                    << "[FallbackIsRobotAtChargingStation] Ontvangen bericht: "
+                    << data
+                    << std::endl;
+
+
+
+                std::vector<std::string> parts;
+
+                std::stringstream ss(data);
+
+                std::string segment;
+
+
+                while (std::getline(ss, segment, '-'))
+                {
+                    parts.push_back(segment);
+                }
+
+
+
+                if (parts.size() < 2)
+                {
+                    return;
+                }
+
+
+
+                std::string status_code = parts[0];
+
+                std::string recv_timestamp = parts[1];
+
+
+
+                // Alleen eerste 10 cijfers vergelijken
+                std::string expected_prefix =
+                    sent_timestamp_.substr(0, 10);
+
+
+                std::string recv_prefix =
+                    recv_timestamp.substr(0, 10);
+
+
+
+                if (recv_prefix == expected_prefix)
+                {
+
+                    if (status_code == "04")
+                    {
+                        received_success_ = true;
+
+
+                        std::cout
+                            << "[FallbackIsRobotAtChargingStation] "
+                            << "Correcte laadstation aankomst ontvangen"
+                            << std::endl;
+                    }
+
+                }
+
+            });
+
+
+
+        pub_ = node_->create_publisher<std_msgs::msg::String>(
+            "/BehaviorTreeNode",
+            10);
+    }
+
+
+
+    static BT::PortsList providedPorts()
+    {
+        return {
+
+            BT::InputPort<double>("timeout"),
+
+            BT::InputPort<std::string>(
+                "charging_sent_timestamp"),
+
+            BT::OutputPort<bool>(
+                "drive_failed")
+        };
+    }
+
+
+
+
+    BT::NodeStatus onStart() override
+    {
+
+        received_success_ = false;
+
+        received_failure_ = false;
+
+
+
+        start_time_ =
+            std::chrono::steady_clock::now();
+
+
+
+        if (!getInput<double>("timeout", timeout_))
+        {
+            timeout_ = 10.0;
+        }
+
+
+
+
+        if (!getInput<std::string>(
+                "charging_sent_timestamp",
+                sent_timestamp_))
+        {
+
+            std::cout
+                << "[FallbackIsRobotAtChargingStation] "
+                << "Geen timestamp ontvangen van blackboard!"
+                << std::endl;
+
+        }
+        else
+        {
+
+            std::cout
+                << "[FallbackIsRobotAtChargingStation] "
+                << "Verwachte timestamp = "
+                << sent_timestamp_
+                << std::endl;
+
+        }
+
+
+
+
+        std_msgs::msg::String msg;
+
+        msg.data =
+            "FallbackIsRobotAtChargingStation";
+
+        pub_->publish(msg);
+
+
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+
+
+
+
+    BT::NodeStatus onRunning() override
+    {
+
+        rclcpp::spin_some(node_);
+
+
+
+        auto elapsed =
+            std::chrono::duration<double>(
+                std::chrono::steady_clock::now()
+                -
+                start_time_)
+                .count();
+
+
+
+
+
+        if (received_success_)
+        {
+
+            std::cout
+                << "[FallbackIsRobotAtChargingStation] "
+                << "Successtatus ontvangen -> SUCCESS"
+                << std::endl;
+
+
+
+            setOutput(
+                "drive_failed",
+                false);
+
+
+
+            return BT::NodeStatus::SUCCESS;
+
+        }
+
+
+
+
+
+        if (received_failure_)
+        {
+
+            std::cout
+                << "[FallbackIsRobotAtChargingStation] "
+                << "Faalstatus ontvangen -> FAILURE"
+                << std::endl;
+
+
+
+            setOutput(
+                "drive_failed",
+                true);
+
+
+
+            return BT::NodeStatus::FAILURE;
+
+        }
+
+
+
+
+
+        if (elapsed >= timeout_)
+        {
+
+            std::cout
+                << "[FallbackIsRobotAtChargingStation] Timeout ("
+                << timeout_
+                << "s) -> FAILURE"
+                << std::endl;
+
+
+
+            setOutput(
+                "drive_failed",
+                true);
+
+
+
+            return BT::NodeStatus::FAILURE;
+
+        }
+
+
+
+
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+
+
+
+
+    void onHalted() override
+    {
+
+        std::cout
+            << "[FallbackIsRobotAtChargingStation] HALTED"
+            << std::endl;
+
+    }
+
+
+
+
+
+private:
+
+
+    double timeout_;
+
+
+    bool received_success_;
+
+    bool received_failure_;
+
+
+
+    std::chrono::steady_clock::time_point start_time_;
+
+
+
+    std::string sent_timestamp_;
+
+
+
+    rclcpp::Node::SharedPtr node_;
+
+
+
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
+
+
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+
 };
 
 class FallbackIsRobotAtQuiz : public BT::StatefulActionNode
@@ -3096,10 +4108,10 @@ public:
     int incrementChargingCounter() {
         int counter = 0;
 
-        if (!getInput("chargingInteger", counter))
-        {
-            throw BT::RuntimeError("chargingInteger ontbreekt");
-        }
+        // if (!getInput("chargingInteger", counter))
+        // {
+        //     throw BT::RuntimeError("chargingInteger ontbreekt");
+        // }
 
         if (counter == 9){
             counter = 0;
@@ -3110,7 +4122,7 @@ public:
         
         std::cout << "[StopRobotCharging] regel voor setoutput chargingintegernextcycle" << std::endl;
 
-        setOutput("chargingInteger_nextCycle", 0);
+        //setOutput("chargingInteger_nextCycle", 0);
 
         return counter;
     }
@@ -3679,21 +4691,41 @@ private:
 };
 
 
+#include <fstream>
+#include <string>
+
+#include <fstream>
 class RobotRotationFollowMe : public BT::StatefulActionNode
 {
 public:
+
     RobotRotationFollowMe(const std::string &name,
                           const BT::NodeConfiguration &config)
-        : BT::StatefulActionNode(name, config)
+        : BT::StatefulActionNode(name, config),
+          received_drive_to_quiz_(false)
     {
         node_ = rclcpp::Node::make_shared("bt_robot_rotation_follow_me");
 
+
         pub_bt_ = node_->create_publisher<std_msgs::msg::String>(
-            "/BehaviorTreeNode", 10);
+            "/BehaviorTreeNode",
+            10);
+
+
 
         rclcpp::QoS qos(1);
         qos.reliability(RMW_QOS_POLICY_RELIABILITY_RELIABLE);
         qos.durability(RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL);
+
+
+
+        rclcpp::QoS quiz_qos(1);
+        quiz_qos.reliable();
+        quiz_qos.durability(RMW_QOS_POLICY_DURABILITY_VOLATILE);
+
+
+
+
 
         sub_distance_ =
             node_->create_subscription<std_msgs::msg::Float32>(
@@ -3704,56 +4736,271 @@ public:
                     latest_distance_ = msg->data;
                     new_measurement_ = true;
                 });
+
+
+
+
+
+
+
+        // -------------------------------------------------
+        // Quiz knop subscriber
+        // -------------------------------------------------
+
+        sub_quiz_ =
+            node_->create_subscription<std_msgs::msg::String>(
+                "/quiz",
+                quiz_qos,
+                [this](std_msgs::msg::String::SharedPtr msg)
+                {
+
+                    std::string expected_message =
+                        "drive_to_quiz_location" + visitor_code_;
+
+
+
+                    if(msg->data == expected_message)
+                    {
+                        std::cout
+                            << "[RobotRotationFollowMe] Correct quiz code received: "
+                            << msg->data
+                            << std::endl;
+
+
+                        received_drive_to_quiz_ = true;
+
+
+
+                        std::ofstream file(
+                            "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/quizknop.txt");
+
+
+                        if(file.is_open())
+                        {
+                            file << "GEDRUKT";
+                            file.close();
+                        }
+                    }
+                    else
+                    {
+                        std::cout
+                            << "[RobotRotationFollowMe] Wrong quiz message ignored: "
+                            << msg->data
+                            << std::endl;
+                    }
+
+                });
     }
+
+
+
+
+
+
 
     static BT::PortsList providedPorts()
     {
         return {
             BT::InputPort<double>("distance_max"),
             BT::InputPort<double>("timer"),
-            BT::InputPort<int>("zero_limit")};
+            BT::InputPort<int>("zero_limit"),
+            BT::InputPort<std::string>("visitor_code"),
+            
+            BT::OutputPort<bool>("robot_needs_rotation")
+        };
     }
+
+
+
+
+
+
+
 
     BT::NodeStatus onStart() override
     {
+
+        //--------------------------------------------------------
+        // Visitor code ophalen via InputPort
+        //--------------------------------------------------------
+
+        visitor_code_.clear();
+
+
+        if(getInput("visitor_code", visitor_code_))
+        {
+            std::cout
+                << "[RobotRotationFollowMe] Visitor code received from port: "
+                << visitor_code_
+                << std::endl;
+        }
+        else
+        {
+            std::cout
+                << "[RobotRotationFollowMe] WARNING: No visitor_code received"
+                << std::endl;
+        }
+
+
+
+
+
+
+        //--------------------------------------------------------
+        // Controle vorige knop
+        //--------------------------------------------------------
+
+        {
+            std::ifstream file(
+                "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/quizknop.txt");
+
+
+            if(file.is_open())
+            {
+                std::string status;
+
+                std::getline(file,status);
+
+                file.close();
+
+
+
+                if(status == "GEDRUKT")
+                {
+                    std::cout
+                        << "[RobotRotationFollowMe] quizknop.txt = GEDRUKT -> SUCCESS"
+                        << std::endl;
+
+                    setOutput("robot_needs_rotation", false);
+
+
+                    return BT::NodeStatus::SUCCESS;
+                }
+            }
+        }
+
+
+
+
+
+
         latest_distance_ = 0.0;
+
         new_measurement_ = false;
+
         consecutive_zero_count_ = 0;
 
+        received_drive_to_quiz_ = false;
+
+
+
+        setOutput("robot_needs_rotation", true);
+
         getInput("distance_max", distance_max_);
+
         getInput("timer", wait_duration_);
+
         getInput("zero_limit", zero_limit_);
 
-        start_time_ = std::chrono::steady_clock::now();
+
+
+
+
+        start_time_ =
+            std::chrono::steady_clock::now();
+
+
+
+
+
 
         std_msgs::msg::String bt_msg;
+
         bt_msg.data = "RobotRotationFollowMe";
+
         pub_bt_->publish(bt_msg);
+
+
+
+
+
 
         std::cout
             << "[RobotRotationFollowMe] START"
-            << " distance_max=" << distance_max_
-            << " timer=" << wait_duration_
-            << " zero_limit=" << zero_limit_
+            << " distance_max="
+            << distance_max_
+            << " timer="
+            << wait_duration_
+            << " zero_limit="
+            << zero_limit_
+            << " visitor_code="
+            << visitor_code_
             << std::endl;
+
+
+
+
 
         return BT::NodeStatus::RUNNING;
     }
 
+
+
+
+
+
+
+
+
     BT::NodeStatus onRunning() override
     {
+
         rclcpp::spin_some(node_);
 
+
+
+
+
         //--------------------------------------------------------
-        // Nieuwe meting verwerken
+        // Correct quiz bericht ontvangen
         //--------------------------------------------------------
-        if (new_measurement_)
+
+        if(received_drive_to_quiz_)
         {
+
+            std::cout
+                << "[RobotRotationFollowMe] Correct quiz button -> SUCCESS"
+                << std::endl;
+
+
+            setOutput("robot_needs_rotation", false);
+
+            return BT::NodeStatus::SUCCESS;
+        }
+
+
+
+
+
+
+
+        //--------------------------------------------------------
+        // Nieuwe afstandsmeting
+        //--------------------------------------------------------
+
+        if(new_measurement_)
+        {
+
             new_measurement_ = false;
 
-            if (latest_distance_ == 0.0)
+
+
+            if(latest_distance_ == 0.0)
             {
+
                 consecutive_zero_count_++;
+
+
 
                 std::cout
                     << "[RobotRotationFollowMe] Zero measurement "
@@ -3762,47 +5009,70 @@ public:
                     << zero_limit_
                     << std::endl;
 
-                if (consecutive_zero_count_ >= zero_limit_)
+
+
+
+
+                if(consecutive_zero_count_ >= zero_limit_)
                 {
+
                     std::cout
                         << "[RobotRotationFollowMe] Zero limit reached -> FAILURE"
                         << std::endl;
 
+                    setOutput("robot_needs_rotation", true);
+
                     return BT::NodeStatus::FAILURE;
                 }
+
             }
+
             else
             {
-                // Geldige meting -> reset zero teller
+
                 consecutive_zero_count_ = 0;
 
-                if (latest_distance_ < distance_max_)
+
+
+                if(latest_distance_ < distance_max_)
                 {
+
                     std::cout
                         << "[RobotRotationFollowMe] Person found at "
                         << latest_distance_
                         << " m -> SUCCESS"
                         << std::endl;
 
+
+                    setOutput("robot_needs_rotation", true);
+
                     return BT::NodeStatus::SUCCESS;
                 }
+
             }
+
         }
 
         //--------------------------------------------------------
         // Timeout
         //--------------------------------------------------------
+
         auto elapsed =
             std::chrono::duration<double>(
-                std::chrono::steady_clock::now() -
+                std::chrono::steady_clock::now()
+                -
                 start_time_)
-                .count();
+            .count();
 
-        if (elapsed >= wait_duration_)
+        if(elapsed >= wait_duration_)
         {
+
             std::cout
                 << "[RobotRotationFollowMe] Timer expired -> FAILURE"
                 << std::endl;
+
+
+            setOutput("robot_needs_rotation", true);
 
             return BT::NodeStatus::FAILURE;
         }
@@ -3818,25 +5088,39 @@ public:
     }
 
 private:
+
     rclcpp::Node::SharedPtr node_;
-
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
-
     rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr sub_distance_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_quiz_;
 
     float latest_distance_ = 0.0;
     bool new_measurement_ = false;
-
     int consecutive_zero_count_ = 0;
 
     double distance_max_ = 1.7;
+
+
     double wait_duration_ = 50.0;
+
+
     int zero_limit_ = 8;
+
+
+
+
+    bool received_drive_to_quiz_ = false;
+
+
+
+    // Code ontvangen via InputPort
+    std::string visitor_code_;
+
+
+
 
     std::chrono::steady_clock::time_point start_time_;
 };
-
-
 /*/
 class MDTurnAround : public BT::StatefulActionNode
 {
@@ -3946,7 +5230,8 @@ public:
 
 
         rclcpp::QoS qos(1);
-        qos.reliable(); 
+        qos.reliable();
+        qos.durability(RMW_QOS_POLICY_DURABILITY_VOLATILE);
         // Subscriber om te luisteren naar quizstatus
         sub_ = node_->create_subscription<std_msgs::msg::String>(
             "/quiz", qos,
@@ -4168,13 +5453,26 @@ private:
 // =======================================================
 
 
+
+#include <rclcpp/rclcpp.hpp>
+#include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/bool.hpp>
+
+
+#include <rclcpp/rclcpp.hpp>
+#include <std_msgs/msg/string.hpp>
+#include <std_msgs/msg/bool.hpp>
+#include <geometry_msgs/msg/twist.hpp>
+
+#include <thread>
+#include <chrono>
+
 class StartDrivingToPeople : public BT::StatefulActionNode
 {
 public:
     StartDrivingToPeople(const std::string &name,
                          const BT::NodeConfiguration &config)
-        : BT::StatefulActionNode(name, config),
-          timeout_(5.0)
+        : BT::StatefulActionNode(name, config)
     {
         node_ = rclcpp::Node::make_shared("btStartDrivingToPeople");
 
@@ -4186,43 +5484,79 @@ public:
 
         pub_tracking_enable_ = node_->create_publisher<std_msgs::msg::Bool>(
             "/tracking_enable", 10);
+
+        pub_cmd_vel_ = node_->create_publisher<geometry_msgs::msg::Twist>(
+            "/gui_cmd_vel", 10);
     }
 
     static BT::PortsList providedPorts()
     {
         return {
-            BT::InputPort<double>("timeout"),
             BT::InputPort<std::string>("explore_timestamp"),
-            BT::InputPort<int>("delta_seconds")};
+            BT::InputPort<int>("delta_seconds"),
+            BT::InputPort<bool>("robot_needs_rotation")};
     }
 
     BT::NodeStatus onStart() override
     {
-        // Reset zodat een nieuwe zoekcyclus opnieuw zonder rotatie start
-
-
-        getInput("timeout", timeout_);
-
-        start_time_ = std::chrono::steady_clock::now();
-
-        // Publish naar BehaviorTreeNode
-        std_msgs::msg::String bt_msg;
-        bt_msg.data = "StartDrivingToPeople";
-        pub_bt_->publish(bt_msg);
-
-        // Publish naar RPi
         std_msgs::msg::String quiz_msg;
         quiz_msg.data = "RobotExplore";
         pub_quiz_->publish(quiz_msg);
 
+        // =====================================================
+        // Indien nodig eerst een kwartslag draaien
+        // =====================================================
+        bool robot_needs_rotation = false;
+
+        if (getInput("robot_needs_rotation", robot_needs_rotation) &&
+            robot_needs_rotation)
+        {
+            std::cout << "[StartDrivingToPeople] Performing quarter rotation..."
+                      << std::endl;
+
+            geometry_msgs::msg::Twist twist;
+            twist.angular.z = 0.3; // lage rotatiesnelheid
+
+            rclcpp::Rate rate(20);
+
+            // ongeveer 90° draaien
+            // 0.3 rad/s gedurende ±5.2 s ≈ 1.57 rad
+            for (int i = 0; i < 104; i++)
+            {
+                pub_cmd_vel_->publish(twist);
+                rate.sleep();
+            }
+
+            // Stoppen
+            twist.angular.z = 0.0;
+            pub_cmd_vel_->publish(twist);
+
+            std::cout << "[StartDrivingToPeople] Quarter rotation finished"
+                      << std::endl;
+        }
+
+        // =====================================================
+        // Publish naar BehaviorTreeNode
+        // =====================================================
+        std_msgs::msg::String bt_msg;
+        bt_msg.data = "StartDrivingToPeople";
+        pub_bt_->publish(bt_msg);
+
+        // =====================================================
+        // Publish naar RPi
+        // =====================================================
+
+
+        // =====================================================
         // Tracking inschakelen
+        // =====================================================
         std_msgs::msg::Bool tracking_msg;
         tracking_msg.data = true;
         pub_tracking_enable_->publish(tracking_msg);
 
         std::cout << "[StartDrivingToPeople] Tracking ENABLED" << std::endl;
-        std::cout << "[StartDrivingToPeople] Started driving to people, timeout="
-                  << timeout_ << "s" << std::endl;
+        std::cout << "[StartDrivingToPeople] Started driving to people"
+                  << std::endl;
 
         return BT::NodeStatus::RUNNING;
     }
@@ -4263,7 +5597,6 @@ public:
                             << ") -> restart_tree=true"
                             << std::endl;
 
-                        // Laat de boom opnieuw starten
                         config().blackboard->set("restart_tree", true);
 
                         return BT::NodeStatus::FAILURE;
@@ -4280,50 +5613,37 @@ public:
         }
 
         // =====================================================
-        // Eigen timeout
+        // Klaar?
         // =====================================================
-        auto elapsed =
-            std::chrono::duration<double>(
-                std::chrono::steady_clock::now() - start_time_)
-                .count();
 
-        if (elapsed >= timeout_)
-        {
-            std::cout
-                << "[StartDrivingToPeople] Timeout reached -> SUCCESS"
-                << std::endl;
 
-            return BT::NodeStatus::SUCCESS;
-        }
+        return BT::NodeStatus::SUCCESS;
 
-        return BT::NodeStatus::RUNNING;
+
+
     }
 
     void onHalted() override
     {
-        // Tracking uitschakelen
         std_msgs::msg::Bool tracking_msg;
         tracking_msg.data = false;
         pub_tracking_enable_->publish(tracking_msg);
+
+        geometry_msgs::msg::Twist stop;
+        pub_cmd_vel_->publish(stop);
 
         std::cout << "[StartDrivingToPeople] Tracking DISABLED" << std::endl;
         std::cout << "[StartDrivingToPeople] HALTED" << std::endl;
     }
 
 private:
-    double timeout_;
-    std::chrono::steady_clock::time_point start_time_;
-
     rclcpp::Node::SharedPtr node_;
 
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_tracking_enable_;
+    rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr pub_cmd_vel_;
 };
-
-
-
-
 
 
 
@@ -4671,6 +5991,11 @@ int main(int argc, char **argv)
 
     factory.registerNodeType<RobotDriveToChargingStation>("RobotDriveToChargingStation");
     factory.registerNodeType<RobotIsRobotAtChargingStation>("RobotIsRobotAtChargingStation");
+
+    factory.registerNodeType<FallbackIsRobotAtChargingStation>("FallbackIsRobotAtChargingStation");
+
+    factory.registerNodeType<FallbackDriveToChargingStation>("FallbackDriveToChargingStation");
+
 
     factory.registerNodeType<LoopSequence>("LoopSequence");
   
