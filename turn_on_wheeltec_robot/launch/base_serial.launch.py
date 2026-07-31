@@ -21,7 +21,7 @@ def generate_launch_description():
                 'odom_frame_id': 'odom_combined',
                 'cmd_vel': 'cmd_vel',
                 'akm_cmd_vel': 'none',
-                'product_number': 0,
+                'product_number': 0,  #RT mecanum robot heeft product_number=0
                 'odom_x_scale': 1.0,
                 'odom_y_scale': 1.0,
                 'odom_z_scale_positive': 1.0,

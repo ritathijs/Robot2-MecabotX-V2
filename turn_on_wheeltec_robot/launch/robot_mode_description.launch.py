@@ -69,14 +69,14 @@ def generate_launch_description():
         condition=IfCondition(top_akm_bs),
         actions=[
         generate_robot_node('top_akm_bs_robot.urdf','top_akm_bs'),
-        generate_static_transform_publisher_node(['0.23979 ', '0.00017', '0.15302'], ['0', '0', '0'], 'base_footprint', 'laser'),
+        generate_static_transform_publisher_node(['0.23979', '0.00017', '0.15302'], ['0', '0', '0'], 'base_footprint', 'laser'),
         generate_static_transform_publisher_node(['0.3124', '0.00004', '0.1347'], ['0', '0', '0'], 'base_footprint', 'camera_link'),        
     ]) 
     top_akm_dl_ = GroupAction(
         condition=IfCondition(top_akm_dl),
         actions=[
         generate_robot_node('top_akm_dl_robot.urdf','top_akm_dl'),
-        generate_static_transform_publisher_node(['0.25033 ', '0.00182', '0.1504'], ['0', '0', '0'], 'base_footprint', 'laser'),
+        generate_static_transform_publisher_node(['0.25033', '0.00182', '0.1504'], ['0', '0', '0'], 'base_footprint', 'laser'),
         generate_static_transform_publisher_node(['0.32039', '0.00164', '0.13208'], ['0', '0', '0'], 'base_footprint', 'camera_link'),     
     ])  
     #mec  7 lidar is ls_lidar,change the parameter from 3.14 to 0
@@ -84,14 +84,14 @@ def generate_launch_description():
         condition=IfCondition(senior_mec_bs),
         actions=[
         generate_robot_node('senior_mec_robot.urdf','senior_mec_bs'),
-        generate_static_transform_publisher_node(['0.09113 ', '0.00067', '0.11102'], ['0', '0', '0'], 'base_footprint', 'laser'),
+        generate_static_transform_publisher_node(['0.09113', '0.00067', '0.11102'], ['0', '0', '0'], 'base_footprint', 'laser'),
         generate_static_transform_publisher_node(['0.16083', '0.00075', '0.0897'], ['0', '0', '0'], 'base_footprint', 'camera_link'),      
     ]) 
     senior_mec_dl_ = GroupAction(
         condition=IfCondition(senior_mec_dl),
         actions=[
         generate_robot_node('senior_mec_dl_robot.urdf','senior_mec_dl'),
-        generate_static_transform_publisher_node(['0.15699 ', '0.00002', '0.14652'], ['0', '0', '0'], 'base_footprint', 'laser'),
+        generate_static_transform_publisher_node(['0.15699', '0.00002', '0.14652'], ['0', '0', '0'], 'base_footprint', 'laser'),
         generate_static_transform_publisher_node(['0.2316', '0.00025', '0.1282'], ['0', '0', '0'], 'base_footprint', 'camera_link'),    
     ]) 
     top_mec_bs_ = GroupAction(
@@ -102,10 +102,10 @@ def generate_launch_description():
         generate_static_transform_publisher_node(['0.2089', '0.00025', '0.1082'], ['0', '0', '0'], 'base_footprint', 'camera_link'),     
     ]) 
     top_mec_dl_ = GroupAction(
-        condition=IfCondition(top_mec_bs),
+        condition=IfCondition(top_mec_dl),  #RT: stond op bs en moet dl zijn. Geen impact want wordt niet gebruikt.
         actions=[
         generate_robot_node('top_mec_dl_robot.urdf','top_mec_dl'),
-        generate_static_transform_publisher_node(['0.14499 ', '0.00002', '0.18652'], ['0', '0', '0'], 'base_footprint', 'laser'),
+        generate_static_transform_publisher_node(['0.14499', '0.00002', '0.18652'], ['0', '0', '0'], 'base_footprint', 'laser'),
         generate_static_transform_publisher_node(['0.2286', '0.0003', '0.1682'], ['0', '0', '0'], 'base_footprint', 'camera_link'),  
     ])     
     mec_EightDrive_robot_ = GroupAction(

@@ -12,6 +12,7 @@
 #include <fstream>
 #include <vector>
 
+#include "httplib.h"         // Lokaal gedownload in je map (gebruikt " ")
 
 #include <fstream>
 #include <nlohmann/json.hpp>
@@ -19,6 +20,54 @@ using json = nlohmann::json;
 
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 using namespace std::chrono_literals;
+
+
+// Deze functie accepteert een lijst met veldnamen en geeft een JSON-object terug
+json retrieveRobotStatus(const std::vector<std::string>& fields) {
+    json result = json::object(); // Maak standaard een leeg JSON-object aan
+
+    // 1. Bouw de komma-gescheiden string op van de gevraagde velden
+    std::string fieldsQuery = "";
+    for (size_t i = 0; i < fields.size(); ++i) {
+        fieldsQuery += fields[i];
+        if (i < fields.size() - 1) {
+            fieldsQuery += ",";
+        }
+    }
+
+    // 2. Maak de client aan
+    httplib::Client cli("http://10.0.0.11");
+
+    // 3. Bouw de exacte URL met de dynamische query
+    std::string path = "/robot-status/get-robot-status";
+    if (!fieldsQuery.empty()) {
+        path += "?fields=" + fieldsQuery;
+    }
+
+    // 4. Doe het GET-verzoek
+    auto res = cli.Get(path.c_str());
+
+    if (res && res->status == 200) {
+        try {
+            json responseObj = json::parse(res->body);
+
+            // 5. Controleer of de API succes meldt en of er een 'data' object is
+            if (responseObj.contains("succes") && responseObj["succes"] == true &&
+                responseObj.contains("data")) {
+                
+                // Geef de inhoud van "data" terug (hier zitten jouw gevraagde velden in)
+                result = responseObj["data"];
+            }
+        } catch (const json::parse_error& e) {
+            std::cerr << "Fout bij het parsen van de JSON: " << e.what() << std::endl;
+        }
+    } else {
+        std::string errorMsg = res ? std::to_string(res->status) : "Netwerk/Verbindingsfout";
+        std::cerr << "Fout bij het ophalen van instellingen: HTTP " << errorMsg << std::endl;
+    }
+
+    return result;
+}
 
 
 
@@ -449,11 +498,11 @@ public:
 
         int current_time_val = (local->tm_hour * 100) + local->tm_min;
 
-        auto schedule = ScheduleParser::getFullSchedule();
+        //auto schedule = ScheduleParser::getFullSchedule();
 
-        bool is_working_time = false;
-        for (const auto& day : schedule)
-        {
+        bool is_working_time = true;      //RT aangepast
+       /* for (const auto& day : schedule)
+       {
             if (day.dayCode == current_day_code)
             {
                 if (day.isActive &&
@@ -465,7 +514,7 @@ public:
                 break;
             }
         }
-
+       */
         std_msgs::msg::String bt_msg;
         std_msgs::msg::String rpi_msg;
 
@@ -482,19 +531,19 @@ public:
             return BT::NodeStatus::SUCCESS;
         }
 
-        std::cout << "[CheckInWorkingZone] Binnen werkuren" << std::endl;
+        std::cout << "[CheckInWorkingZone] Een robot werkt altijd!" << std::endl;
 
         setOutput("robotLocationBAT", std::string("WORKING"));
 
         bt_msg.data = "CheckInWorkingZone-WORKING";
         pub_->publish(bt_msg);
 
-        rpi_msg.data = "RobotStarting";
+        rpi_msg.data = "RobotStarting";    //RT na te kijken want Starting kan ongewenst zijn na het laden als hijzelf naar de docking is gereden en nog "Actief" staat
         rpi_pub_->publish(rpi_msg);
 
 
         bool skip_drive_to_workarea = false;
-        getInput("skip_drivetoworkarea", skip_drive_to_workarea);
+        getInput("skip_drivetoworkarea", skip_drive_to_workarea);  
 
 
         std::string location;
@@ -3923,6 +3972,7 @@ public:
         pub_->publish(msg);
 
         // 2. Lees laatste lijn van file
+        /*
         std::string file_path = "/home/wheeltec/wheeltec_ros2/src/quiz_bt_node/schedule.txt";
         std::ifstream file(file_path);
 
@@ -3961,7 +4011,18 @@ public:
         {
             std::cerr << "[CheckButtonState] Onbekend formaat!" << std::endl;
             return BT::NodeStatus::FAILURE;
+        }*/
+        
+        // Haal de data op (let op de accolades voor de vector)
+        json statusData = retrieveRobotStatus({"robotActive"});
+
+        bool robot_active = false; // Fallback waarde
+        if (statusData.contains("robotActive") && !statusData["robotActive"].is_null()) {
+            robot_active = statusData["robotActive"].get<bool>();
         }
+
+        std::cout << "Werk/Slaap status van de robot opgehaald uit DB: " 
+          << (robot_active ? "true" : "false") << std::endl;
 
         // 4. Gedrag (vervanging van START/STOP button)
         if (robot_active)
@@ -5924,6 +5985,76 @@ private:
 };
 
 
+/* RT: we willen de robot ook kunnen opstarten aan de april TAG.
+
+class CheckAprilTagLocalization : public BT::StatefulActionNode
+{
+public:
+    CheckAprilTagLocalization(const std::string &name, const BT::NodeConfiguration &config)
+        : BT::StatefulActionNode(name, config)
+    {
+        node_ = rclcpp::Node::make_shared("bt_apriltag_check");
+
+        sub_ = node_->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
+            "/initialpose", 10,
+            [this](geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg)
+            {
+                last_pose_ = *msg;
+                initial_pose_received_ = true;
+            });
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {
+            BT::OutputPort<std::string>("robotLocationBAT"),
+            BT::OutputPort<std::string>("robotLocation")
+        };
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        initial_pose_received_ = false;
+        start_time_ = node_->now();
+        return BT::NodeStatus::RUNNING;
+    }
+
+    BT::NodeStatus onRunning() override
+    {
+        rclcpp::spin_some(node_);
+
+        // 1. Tag gezien → SUCCESS
+        if (initial_pose_received_)
+        {
+            setOutput("robotLocationBAT", "WORKING");
+            setOutput("robotLocation", "WORKING");
+            initial_pose_received_ = false;
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        // 2. Timeout → FAILURE
+        auto elapsed = node_->now() - start_time_;
+        if (elapsed.seconds() > 5.0)
+        {
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        // 3. Nog bezig → RUNNING
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override {}
+
+private:
+    rclcpp::Node::SharedPtr node_;
+    rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr sub_;
+    geometry_msgs::msg::PoseWithCovarianceStamped last_pose_;
+    bool initial_pose_received_ = false;
+    rclcpp::Time start_time_;
+};
+
+*/
+
 // -------------------------
 // MAIN
 // -------------------------
@@ -5998,11 +6129,14 @@ int main(int argc, char **argv)
 
 
     factory.registerNodeType<LoopSequence>("LoopSequence");
+    //factory.registerNodeType<CheckAprilTagLocalization>("CheckAprilTagLocalization");
+
   
 
 
     // laad boom uit XML
     auto tree = factory.createTreeFromFile("src/mecabot_bt/trees/behavior_tree.xml");
+    
 
     tree.rootBlackboard()->set("restart_tree", false);
 
@@ -6047,4 +6181,7 @@ int main(int argc, char **argv)
     rclcpp::shutdown();
     return 0;
 }
+
+
+
 

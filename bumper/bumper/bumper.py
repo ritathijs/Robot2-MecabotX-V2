@@ -2,6 +2,7 @@ import rclpy
 from rclpy.node import Node
 import Jetson.GPIO as GPIO
 from geometry_msgs.msg import Twist
+from std_msgs.msg import String
 
 PINS = [7, 15, 31, 32]
 DIR = {"A": 15, "L": 32, "V": 7, "R": 31}  # Definieer Voor, Achter, Links, Rechts
@@ -13,6 +14,7 @@ class GPIOReaderNode(Node):
         super().__init__('gpio_reader_node')
         
         self.bumper_cmd_vel_pub = self.create_publisher(Twist, '/bump_cmd_vel', 1)
+        self.bumper_status_pub = self.create_publisher(String, '/bump_status', 1)
         
         self.action = "Free"
         
@@ -25,6 +27,7 @@ class GPIOReaderNode(Node):
             GPIO.setup(pin, GPIO.IN)
         
         self.timer = self.create_timer(0.2, self.detect)
+        self.timer_publisher = self.create_timer(4, self.publishStates)
 
     def detect(self):
         states = {pin: GPIO.input(pin) for pin in PINS}
@@ -58,6 +61,25 @@ class GPIOReaderNode(Node):
 
             if 1 not in states.values():
                 self.action = "Free"
+                
+    def publishStates(self):
+        # Draai links en rechts om zodat je vanuit het standpunt van de gebruiker kijkt
+        richting_namen = {"V": "vooraan ⬇️", "A": "achteraan ⬆️", "L": "rechts ➡️", "R": "links ⬅️"}
+        states = {pin: GPIO.input(pin) for pin in PINS}
+        
+        ingedrukte_bumpers = []
+        msg = String()
+        
+        for letter, pin in DIR.items():
+            if states[pin] == 1:
+                ingedrukte_bumpers.append(richting_namen[letter])
+                
+        if len(ingedrukte_bumpers) == 0:
+            msg.data = "De bumper is niet ingedrukt"
+        else:
+            msg.data = f"Bumper ingedrukt: {', '.join(ingedrukte_bumpers)}"
+        
+        self.bumper_status_pub.publish(msg)
 
 
     def cancelTimer_10s(self):

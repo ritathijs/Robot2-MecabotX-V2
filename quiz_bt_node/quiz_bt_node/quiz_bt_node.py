@@ -8,6 +8,7 @@ import subprocess
 from rclpy.node import Node
 from std_msgs.msg import String
 from std_msgs.msg import Int8
+from std_msgs.msg import Float32
 
 
 # Socket.IO client voor communicatie met server
@@ -24,7 +25,7 @@ from socketio.exceptions import BadNamespaceError
 SERVER_IP = "10.0.0.11"
 
 # Afgeleide URL's
-URL = f"http://{SERVER_IP}/cms/getSettings"
+URL = f"http://{SERVER_IP}/robot-status/get-robot-status"
 SERVER_URL = f"http://{SERVER_IP}:80"
 
 
@@ -81,22 +82,23 @@ class QuizBTNode(Node):
             String,
             'rpitopic',
             self.rpi_callback,
-            10
+            1
         )
 
         # Berichten van autochargecode om batterijpercentage te krijgen
+        self.battery_level = None
         self.battery_subscription = self.create_subscription(
-            Int8,
-            '/battery_percentage',
+            Float32,
+            '/BatteryAverageVoltage',
             self.battery_callback,
             10
         )
 
-
-        self.reboot_subscription = self.create_subscription(
+       
+        self.bump_status_subscription = self.create_subscription(
             String,
-            '/reboot_command',
-            self.reboot_callback,
+            '/bump_status',
+            self.bump_status_callback,
             10
         )
         
@@ -111,21 +113,25 @@ class QuizBTNode(Node):
         self.sio.on('quiz_inactive', self.on_quiz_inactive)
         self.sio.on('drive_to_quiz_location', self.on_drive_to_quiz_location)
         
+        self.sio.on('robot-stop-for-x-time', self.on_robot_stop_for_x_time)
+        
         self.sio.on('admin-panel-open', self.on_admin_panel_open)
         self.sio.on('time-updated', self.on_time_updated)
 
         self.sio.on('admin-panel-closed', self.on_admin_panel_closed)
 
         self.sio.on('schedule-updated', self.on_schedule_updated)
+        
+        self.sio.on('robot-get-battery-percentage', self.robot_get_battery_percentage)
 
         self.sio.on('drive', self.on_drive)
-        self.sio.on('reboot', self.on_reboot)
 
         # Connect to server
         self.sio.connect(SERVER_URL, retry=True)
         self.get_logger().info(f"Connected to server at {SERVER_URL}")
 
     # ---------------- SETTINGS OPHALEN ----------------
+    
     def fetch_schedule(self):
         # mapping van de dagnamen uit de server naar het 1 letter formaat dat in de schedule.txt staat
         day_map = {
@@ -184,11 +190,6 @@ class QuizBTNode(Node):
         except Exception as e:
             self.get_logger().error(f"Schedule update error: {e}")
 
-    # ---------------- BATTERY ----------------
-    def battery_callback(self, msg):
-        percentage = msg.data
-        self.get_logger().info(f'Battery percentage: {percentage}%')
-        self.safe_emit("battery-update", {"percentage": percentage})
 
     def safe_emit(self, event, data=None):
         try:
@@ -210,25 +211,8 @@ class QuizBTNode(Node):
         msg.data = message
         self.quiz_publisher.publish(msg)
         self.get_logger().info(f'Published to quiz topic: {msg.data}')
-
-    def on_reboot(self):
-        self.get_logger().warning("Reboot command ontvangen! Jetson gaat herstarten...")
-
-        try:
-            # eerst netjes stoppen met rijden
-            msg = Twist()
-            msg.linear.x = 0.0
-            msg.linear.y = 0.0
-            msg.angular.z = 0.0
-            self.gui_cmd_vel_publisher.publish(msg)
-
-            # reboot uitvoeren
-            subprocess.run(["sudo", "reboot"], check=True)
-
-        except Exception as e:
-            self.get_logger().error(f"Reboot mislukt: {e}")
-
         
+       
     def on_drive(self, data):
         # Controleer of er daadwerkelijk data is binnengekomen
         if not data:
@@ -287,6 +271,34 @@ class QuizBTNode(Node):
             self.gui_cmd_vel_publisher.publish(msg)
 
             self.is_moving = False
+            
+            
+    # ---------------- BATTERY UPDATE -----------------
+    
+    def robot_get_battery_percentage(self, message=None):
+        
+        if self.battery_level != None:
+            battery_val = round(self.battery_level, 2)
+        else:
+            battery_val = None
+            
+        self.safe_emit('robot-update-battery-percentage', {
+            "battery": battery_val,
+            "batteryLow": 22.0,  # Threshold voor oranje
+            "batteryHigh": 23.0  # Threshold voor groen
+        })
+          
+        self.get_logger().info(f"Batterij doorgestuurd: {getattr(self, 'battery_level', 0)}Volts")
+    
+    def battery_callback(self, msg):
+        self.battery_level = msg.data
+    
+    # ---------------- BUMPER PUBLISHER ----------------
+    def bump_status_callback(self, status):
+        self.get_logger().info(f'bumperstatus: {status.data}')
+        self.safe_emit('robot-bumper-status', {
+            "msg": status.data
+        })
 
     # ---------------- ADMIN PUBLISHER ----------------
     def publish_admin_message(self, message):
@@ -308,12 +320,12 @@ class QuizBTNode(Node):
     def on_time_updated(self, time_str):
         if not(CHANGETIME):
             return
-        try:
+        #try:
          # zet in instellingen automatisch dag en tijdsbepaling over internet uit indien je de tijd wilt zien updaten
-            subprocess.run(["sudo", "date", "-s", time_str], check=True)
-            print("Systeemtijd succesvol aangepast.")
-        except subprocess.CalledProcessError as e:
-            print(f"Fout bij het aanpassen van de tijd: {e}")
+            # subprocess.run(["sudo", "date", "-s", time_str], check=True)
+            #print("Systeemtijd succesvol aangepast.")
+        #except subprocess.CalledProcessError as e:
+            #print(f"Fout bij het aanpassen van de tijd: {e}")
 
     # ---------------- SOCKET EVENTS ----------------
     def on_connect(self):
@@ -336,6 +348,12 @@ class QuizBTNode(Node):
         self.get_logger().info("Quiz finished")
         self.publish_quiz_message("quiz-finished")
 
+    def on_robot_stop_for_x_time(self, data):
+        self.get_logger().info("Hier zou de robot moeten stoppen voor max 30 seconden. Waarschijnlijk wordt tijdens 30 seconden quiz getrigger of adminpaneel geopend")
+        stop_time = data.get('time') 
+        self.get_logger().info(f"data.time ({stop_time} milliseconden) kan hiervoor gebruikt worden.")
+        # self.publish_quiz_message("stop_for_x_time")
+        
     def on_quiz_inactive(self):
         if self._is_blocking():
             return

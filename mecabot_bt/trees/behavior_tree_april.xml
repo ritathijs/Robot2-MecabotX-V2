@@ -1,0 +1,446 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<root BTCPP_format="3"
+      main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <Fallback name="TopFallback">
+      <Parallel name="NetworkAndMainParallel"
+                failure_threshold="1"
+                success_threshold="1">
+        <CheckNetworkError connection_chargeStatus="{connection_chargeStatus}"/>
+        <Fallback name="AdminPanelFallback">
+          <Parallel name="CheckButtonAndMainParallel"
+                    failure_threshold="1"
+                    success_threshold="1">
+            <CheckAdminPanel robot_startup="{robot_startup}"/>
+            <Fallback name="BatteryLowFallback">
+              <Parallel name="RootParallel"
+                        failure_threshold="1"
+                        success_threshold="1">
+                <BatteryOk robotLocationBAT="{robotLocationBAT}"
+                           chargingInteger="{chargingInteger}"
+                           chargingInteger_nextCycle="{chargingInteger_nextCycle}"
+                           bat_admin_status="{bat_admin_status}"
+                           skip_drive2charging="{skip_drive2charging}"/>
+                <ForceSuccess name="MainFallbackForceSuccess">
+                  <Fallback name="MainFallback">
+                    <Sequence name="MainSequence">
+                      <CheckAprilTagLocalization robotLocationBAT="{robotLocationBAT}"
+                                                 robotLocation="{robotLocation}"/>
+                      <Fallback name="CheckWorkingZone">
+                        <CheckInWorkingZone robotLocationBAT="{robotLocationBAT}"
+                                            skip_drivetoworkarea="{skip_drivetoworkarea}"/>
+                        <Fallback name="DriveToWorkAreaMasterFallback">
+                          <Sequence name="GoToWorkAreaSequence">
+                            <DriveWorkArea timeout="3.0"
+                                           x="-1.3658989667892456"
+                                           y="-1.4719496965408325"
+                                           z="0.0"
+                                           qx="0.0"
+                                           qy="0.0"
+                                           qz="0.371473234987957"
+                                           qw="0.9284436631737987"
+                                           workarea_timestamp="{workarea_timestamp}"/>
+                            <IsRobotAtWorkArea timeout="200.0"
+                                               workarea_timestamp="{workarea_timestamp}"
+                                               drive_failed="{drive_failed}"/>
+                          </Sequence>
+                          <Sequence name="FallbackGoToWorkAreaSequence">
+                            <FallbackDriveToWorkArea timeout="3.0"
+                                                     x=" -4.064824104309082"
+                                                     y="1.6677558422088623"
+                                                     z="0.0"
+                                                     qx="0.0"
+                                                     qy="0.0"
+                                                     qz="0.03214270147272485"
+                                                     qw="0.9994832898763417"
+                                                     workarea_timestamp="{workarea_timestamp}"/>
+                            <FallbackIsRobotAtWorkArea timeout="100.0"
+                                                       workarea_timestamp="{workarea_timestamp}"
+                                                       drive_failed="{drive_failed}"/>
+                          </Sequence>
+                        </Fallback>
+                      </Fallback>
+                      <RobotExplore robotLocation="{robotLocation}"
+                                    explore_timestamp="{explore_timestamp}"/>
+                      <LoopSequence>
+                        <Sequence name="FollowMeSequence">
+                          <StartDrivingToPeople explore_timestamp="{explore_timestamp}"
+                                                delta_seconds="250"
+                                                robot_needs_rotation="{robot_needs_rotation}"/>
+                          <CheckingNearbyVisitors visitor_code="{visitor_code}"
+                                                  robot_needs_rotation="{robot_needs_rotation}"
+                                                  timer="50"/>
+                          <RobotRotationFollowMe visitor_code="{visitor_code}"
+                                                 robot_needs_rotation="{robot_needs_rotation}"
+                                                 distance_max="1.8"
+                                                 zero_limit="40"
+                                                 timer="60"/>
+                          <ArrivedAtVisitors visitor_code="{visitor_code}"
+                                             robot_needs_rotation="{robot_needs_rotation}"
+                                             timeout="10.0"/>
+                        </Sequence>
+                      </LoopSequence>
+                      <Fallback name="DriveToQuizMasterFallback">
+                        <Sequence name="GoToQuizSequence">
+                          <DriveQuizLocation timeout="2.5"
+                                             x="-1.3658989667892456"
+                                             y="-1.4719496965408325"
+                                             z="0.0"
+                                             qx="0.0"
+                                             qy="0.0"
+                                             qz="0.371473234987957"
+                                             qw="0.9284436631737987"
+                                             sent_timestamp="{quiz_timestamp}"/>
+                          <IsRobotAtQuiz timeout="60.0"
+                                         sent_timestamp="{quiz_timestamp}"
+                                         drive_failed="{drive_failed}"/>
+                        </Sequence>
+                        <Sequence name="FallbackGoToQuizSequence">
+                          <FallbackDriveQuizLocation timeout="2.5"
+                                                     x=" -4.064824104309082"
+                                                     y="1.6677558422088623"
+                                                     z="0.0"
+                                                     qx="0.0"
+                                                     qy="0.0"
+                                                     qz="0.03214270147272485"
+                                                     qw="0.9994832898763417"
+                                                     sent_timestamp="{quiz_timestamp}"/>
+                          <FallbackIsRobotAtQuiz timeout="60.0"
+                                                 sent_timestamp="{quiz_timestamp}"
+                                                 drive_failed="{drive_failed}"/>
+                        </Sequence>
+                      </Fallback>
+                      <RobotAtQuiz robotLocation="{robotLocation}"/>
+                      <WaitQuizToEnd timeout="300.0"
+                                     skip_drivetoworkarea="{skip_drivetoworkarea}"/>
+                    </Sequence>
+                    <Sequence name="MainSTOPSequence">
+                      <MainBTStopDrive drive_failed="{drive_failed}"/>
+                      <MainBTSetErrorFlag drive_failed="{drive_failed}"/>
+                    </Sequence>
+                  </Fallback>
+                </ForceSuccess>
+              </Parallel>
+              <Fallback name="GoToChargeFallback">
+                <Sequence name="ChargingSequence">
+                  <Fallback name="DriveToChargingFallback">
+                    <Sequence name="DriveToChargingSequence">
+                      <RobotDriveToChargingStation timeout="5.0"
+                                                   skip_drive2charging="{skip_drive2charging}"
+                                                   skip_robotdrivechargingstation="{skip_robotdrivechargingstation}"
+                                                   charging_sent_timestamp="{charging_sent_timestamp}"
+                                                   bat_admin_status="{bat_admin_status}"
+                                                   connection_chargeStatus="{connection_chargeStatus}"
+                                                   skip_drivetoworkarea="{skip_drivetoworkarea}"/>
+                      <RobotIsRobotAtChargingStation timeout="200.0"
+                                                     charging_sent_timestamp="{charging_sent_timestamp}"
+                                                     skip_drive2charging="{skip_drive2charging}"
+                                                     skip_robotdrivechargingstation="{skip_robotdrivechargingstation}"
+                                                     drive_failed="{drive_failed}"/>
+                    </Sequence>
+                    <Sequence name="FallbackDriveToChargingCoordinateSequence">
+                      <FallbackDriveToChargingStation timeout="5.0"
+                                                      charging_sent_timestamp="{charging_sent_timestamp}"
+                                                      bat_admin_status="{bat_admin_status}"
+                                                      connection_chargeStatus="{connection_chargeStatus}"/>
+                      <FallbackIsRobotAtChargingStation timeout="200.0"
+                                                        charging_sent_timestamp="{charging_sent_timestamp}"
+                                                        drive_failed="{drive_failed}"/>
+                    </Sequence>
+                    <RobotFailedDriveToChargingStation skip_robotdrivechargingstation="{skip_robotdrivechargingstation}"/>
+                  </Fallback>
+                  <DriveToChargingStation timeout="20.0"
+                                          chargingInteger="{chargingInteger}"
+                                          skip_drive2charging="{skip_drive2charging}"
+                                          bat_admin_status="{bat_admin_status}"
+                                          skip_isrobotcharging="{skip_isrobotcharging}"
+                                          skip_statusDriveToChargingStation="{skip_statusDriveToChargingStation}"/>
+                  <StatusDriveToChargingDock timeout="200.0"
+                                             chargingInteger="{chargingInteger}"
+                                             skip_drive2charging="{skip_drive2charging}"
+                                             skip_isrobotcharging="{skip_isrobotcharging}"
+                                             skip_statusDriveToChargingStation="{skip_statusDriveToChargingStation}"/>
+                  <IsRobotCharging timeout="200"
+                                   chargingInteger="{chargingInteger}"
+                                   skip_drive2charging="{skip_drive2charging}"
+                                   skip_isrobotcharging="{skip_isrobotcharging}"/>
+                  <IsBatteryFull robotLocation="{robotLocation}"
+                                 chargingInteger="{chargingInteger}"
+                                 bat_admin_status="{bat_admin_status}"
+                                 skip_isrobotcharging="{skip_isrobotcharging}"
+                                 skip_robotdrivechargingstation="{skip_robotdrivechargingstation}"/>
+                  <RobotWaitInChargingStation buttonStop="{buttonStop}"/>
+                  <StopRobotCharging chargingInteger="{chargingInteger}"
+                                     chargingInteger_nextCycle="{chargingInteger_nextCycle}"/>
+                  <BatteryCharged timeout="5"
+                                  connection_chargeStatus="{connection_chargeStatus}"
+                                  robotLocationBAT="{robotLocationBAT}"
+                                  bat_admin_status="{bat_admin_status}"/>
+                </Sequence>
+                <BatteryStopDrive/>
+              </Fallback>
+            </Fallback>
+          </Parallel>
+          <Sequence name="AdminSequence">
+            <CheckAdminCondition robot_startup="{robot_startup}"
+                                 bat_admin_status="{bat_admin_status}"
+                                 chargingInteger="{chargingInteger}"
+                                 chargingInteger_nextCycle="{chargingInteger_nextCycle}"/>
+            <CheckButtonState robot_startup="{robot_startup}"
+                              buttonStop="{buttonStop}"
+                              robotLocationBAT="{robotLocationBAT}"
+                              skip_drivetoworkarea="{skip_drivetoworkarea}"/>
+          </Sequence>
+        </Fallback>
+      </Parallel>
+      <ConnectionLost/>
+    </Fallback>
+  </BehaviorTree>
+
+  <!-- Description of Node Models (used by Groot) -->
+  <TreeNodesModel>
+    <Action ID="ArrivedAtVisitors"
+            editable="true">
+      <input_port name="visitor_code"/>
+      <input_port name="robot_needs_rotation"/>
+      <input_port name="timeout"/>
+    </Action>
+    <Action ID="BatteryCharged"
+            editable="true">
+      <input_port name="timeout"/>
+      <input_port name="connection_chargeStatus"/>
+      <input_port name="robotLocationBAT"/>
+      <input_port name="bat_admin_status"/>
+    </Action>
+    <Condition ID="BatteryOk">
+      <input_port name="robotLocationBAT"/>
+      <input_port name="chargingInteger"/>
+      <input_port name="chargingInteger_nextCycle"/>
+      <input_port name="bat_admin_status"/>
+      <output_port name="skip_drive2charging"/>
+    </Condition>
+    <Action ID="BatteryStopDrive"
+            editable="true"/>
+    <Action ID="CheckAdminCondition"
+            editable="true">
+      <input_port name="robot_startup"/>
+      <input_port name="bat_admin_status"/>
+      <input_port name="chargingInteger"/>
+      <input_port name="chargingInteger_nextCycle"/>
+    </Action>
+    <Action ID="CheckAdminPanel"
+            editable="true">
+      <input_port name="robot_startup"/>
+    </Action>
+    <Action ID="CheckButtonState"
+            editable="true">
+      <input_port name="robot_startup"/>
+      <input_port name="buttonStop"/>
+      <input_port name="robotLocationBAT"/>
+      <input_port name="skip_drivetoworkarea"/>
+    </Action>
+    <Condition ID="CheckInWorkingZone">
+      <input_port name="robotLocationBAT"/>
+      <output_port name="skip_drivetoworkarea"/>
+    </Condition>
+    <Action ID="CheckNetworkError"
+            editable="true">
+      <input_port name="connection_chargeStatus"/>
+    </Action>
+    <Action ID="CheckingNearbyVisitors"
+            editable="true">
+      <input_port name="visitor_code"/>
+      <input_port name="robot_needs_rotation"/>
+      <input_port name="timer"/>
+    </Action>
+    <Action ID="ConnectionLost"
+            editable="true"/>
+    <Action ID="DriveQuizLocation"
+            editable="true">
+      <input_port name="timeout"/>
+      <input_port name="x"/>
+      <input_port name="y"/>
+      <input_port name="z"/>
+      <input_port name="qx"/>
+      <input_port name="qy"/>
+      <input_port name="qz"/>
+      <input_port name="qw"/>
+      <input_port name="sent_timestamp"/>
+    </Action>
+    <Action ID="DriveToChargingStation"
+            editable="true">
+      <input_port name="timeout"/>
+      <input_port name="chargingInteger"/>
+      <input_port name="skip_drive2charging"/>
+      <input_port name="bat_admin_status"/>
+      <input_port name="skip_isrobotcharging"/>
+      <input_port name="skip_statusDriveToChargingStation"/>
+    </Action>
+    <Action ID="DriveWorkArea"
+            editable="true">
+      <input_port name="timeout"/>
+      <input_port name="x"/>
+      <input_port name="y"/>
+      <input_port name="z"/>
+      <input_port name="qx"/>
+      <input_port name="qy"/>
+      <input_port name="qz"/>
+      <input_port name="qw"/>
+      <input_port name="workarea_timestamp"/>
+    </Action>
+    <Action ID="FallbackDriveQuizLocation"
+            editable="true">
+      <input_port name="timeout"/>
+      <input_port name="x"/>
+      <input_port name="y"/>
+      <input_port name="z"/>
+      <input_port name="qx"/>
+      <input_port name="qy"/>
+      <input_port name="qz"/>
+      <input_port name="qw"/>
+      <input_port name="sent_timestamp"/>
+    </Action>
+    <Action ID="FallbackDriveToChargingStation"
+            editable="true">
+      <input_port name="timeout"/>
+      <input_port name="charging_sent_timestamp"/>
+      <input_port name="bat_admin_status"/>
+      <input_port name="connection_chargeStatus"/>
+    </Action>
+    <Action ID="FallbackDriveToWorkArea"
+            editable="true">
+      <input_port name="timeout"/>
+      <input_port name="x"/>
+      <input_port name="y"/>
+      <input_port name="z"/>
+      <input_port name="qx"/>
+      <input_port name="qy"/>
+      <input_port name="qz"/>
+      <input_port name="qw"/>
+      <input_port name="workarea_timestamp"/>
+    </Action>
+    <Action ID="FallbackIsRobotAtChargingStation"
+            editable="true">
+      <input_port name="timeout"/>
+      <input_port name="charging_sent_timestamp"/>
+      <input_port name="drive_failed"/>
+    </Action>
+    <Action ID="FallbackIsRobotAtQuiz"
+            editable="true">
+      <input_port name="timeout"/>
+      <input_port name="sent_timestamp"/>
+      <input_port name="drive_failed"/>
+    </Action>
+    <Action ID="FallbackIsRobotAtWorkArea"
+            editable="true">
+      <input_port name="timeout"/>
+      <input_port name="workarea_timestamp"/>
+      <input_port name="drive_failed"/>
+    </Action>
+    <Action ID="IsBatteryFull"
+            editable="true">
+      <input_port name="robotLocation"/>
+      <input_port name="chargingInteger"/>
+      <input_port name="bat_admin_status"/>
+      <input_port name="skip_isrobotcharging"/>
+      <input_port name="skip_robotdrivechargingstation"/>
+    </Action>
+    <Action ID="IsRobotAtQuiz"
+            editable="true">
+      <input_port name="timeout"/>
+      <input_port name="sent_timestamp"/>
+      <input_port name="drive_failed"/>
+    </Action>
+    <Action ID="IsRobotAtWorkArea"
+            editable="true">
+      <input_port name="timeout"/>
+      <input_port name="workarea_timestamp"/>
+      <input_port name="drive_failed"/>
+    </Action>
+    <Action ID="IsRobotCharging"
+            editable="true">
+      <input_port name="timeout"/>
+      <input_port name="chargingInteger"/>
+      <input_port name="skip_drive2charging"/>
+      <input_port name="skip_isrobotcharging"/>
+    </Action>
+    <Decorator ID="LoopSequence"
+               editable="true"/>
+    <Action ID="MainBTSetErrorFlag"
+            editable="true">
+      <input_port name="drive_failed"/>
+    </Action>
+    <Action ID="MainBTStopDrive"
+            editable="true">
+      <input_port name="drive_failed"/>
+    </Action>
+    <Action ID="RobotAtQuiz"
+            editable="true">
+      <input_port name="robotLocation"/>
+    </Action>
+    <Action ID="RobotDriveToChargingStation"
+            editable="true">
+      <input_port name="timeout"/>
+      <input_port name="skip_drive2charging"/>
+      <input_port name="skip_robotdrivechargingstation"/>
+      <input_port name="charging_sent_timestamp"/>
+      <input_port name="bat_admin_status"/>
+      <input_port name="connection_chargeStatus"/>
+      <input_port name="skip_drivetoworkarea"/>
+    </Action>
+    <Action ID="RobotExplore"
+            editable="true">
+      <input_port name="robotLocation"/>
+      <input_port name="explore_timestamp"/>
+    </Action>
+    <Action ID="RobotFailedDriveToChargingStation"
+            editable="true">
+      <input_port name="skip_robotdrivechargingstation"/>
+    </Action>
+    <Action ID="RobotIsRobotAtChargingStation"
+            editable="true">
+      <input_port name="timeout"/>
+      <input_port name="charging_sent_timestamp"/>
+      <input_port name="skip_drive2charging"/>
+      <input_port name="skip_robotdrivechargingstation"/>
+      <input_port name="drive_failed"/>
+    </Action>
+    <Action ID="RobotRotationFollowMe"
+            editable="true">
+      <input_port name="visitor_code"/>
+      <input_port name="robot_needs_rotation"/>
+      <input_port name="distance_max"/>
+      <input_port name="zero_limit"/>
+      <input_port name="timer"/>
+    </Action>
+    <Action ID="RobotWaitInChargingStation"
+            editable="true">
+      <input_port name="buttonStop"/>
+    </Action>
+    <Action ID="StartDrivingToPeople"
+            editable="true">
+      <input_port name="explore_timestamp"/>
+      <input_port name="delta_seconds"/>
+      <input_port name="robot_needs_rotation"/>
+    </Action>
+    <Action ID="StatusDriveToChargingDock"
+            editable="true">
+      <input_port name="timeout"/>
+      <input_port name="chargingInteger"/>
+      <input_port name="skip_drive2charging"/>
+      <input_port name="skip_isrobotcharging"/>
+      <input_port name="skip_statusDriveToChargingStation"/>
+    </Action>
+    <Action ID="StopRobotCharging"
+            editable="true">
+      <input_port name="chargingInteger"/>
+      <input_port name="chargingInteger_nextCycle"/>
+    </Action>
+    <Action ID="WaitQuizToEnd"
+            editable="true">
+      <input_port name="timeout"/>
+      <input_port name="skip_drivetoworkarea"/>
+    </Action>
+  </TreeNodesModel>
+
+</root>

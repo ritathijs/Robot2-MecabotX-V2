@@ -1,0 +1,113 @@
+<root main_tree_to_execute="MainTree">
+    <BehaviorTree ID="MainTree">
+        <Fallback name="TopFallback">
+            
+            <Parallel name="NetworkAndMainParallel" success_threshold="1" failure_threshold="1">
+                <CheckNetworkError connection_chargeStatus="{connection_chargeStatus}"/>
+
+                <Fallback name="AdminPanelFallback">
+                    
+                    <Parallel name="CheckButtonAndMainParallel" success_threshold="1" failure_threshold="1">
+                        <CheckAdminPanel robot_startup = "{robot_startup}"/> 
+                        <Fallback name="BatteryLowFallback">
+                            <Parallel name="RootParallel" success_threshold="1" failure_threshold="1">
+                                <BatteryOk robotLocationBAT="{robotLocationBAT}"
+                                           chargingInteger="{chargingInteger}"
+                                           chargingInteger_nextCycle="{chargingInteger_nextCycle}"
+                                           bat_admin_status="{bat_admin_status}"
+                                           skip_drive2charging="{skip_drive2charging}"/>
+
+                                <ForceSuccess name="MainFallbackForceSuccess">
+                                    <Fallback name="MainFallback">
+                                        <Sequence name="MainSequence">
+                                            
+                                            <Fallback name="CheckWorkingZone">
+                                                <CheckInWorkingZone robotLocationBAT="{robotLocationBAT}" skip_drivetoworkarea="{skip_drivetoworkarea}"/>
+                                                
+                                                <Fallback name="DriveToWorkAreaMasterFallback">
+                                                    <Sequence name="GoToWorkAreaSequence">
+                                                        <DriveWorkArea timeout="3.0" x="-1.3658989667892456" y="-1.4719496965408325" z="0.0" qx="0.0" qy="0.0" qz="0.371473234987957" qw="0.9284436631737987" workarea_timestamp="{workarea_timestamp}" />
+                                                        <IsRobotAtWorkArea timeout="200.0" workarea_timestamp="{workarea_timestamp}" drive_failed="{drive_failed}" />
+                                                    </Sequence>
+                                                    
+                                                    <Sequence name="FallbackGoToWorkAreaSequence">
+                                                        <FallbackDriveToWorkArea timeout="3.0" x=" -4.064824104309082" y="1.6677558422088623" z="0.0" qx="0.0" qy="0.0" qz="0.03214270147272485" qw="0.9994832898763417" workarea_timestamp="{workarea_timestamp}" />
+                                                        <FallbackIsRobotAtWorkArea timeout="100.0" workarea_timestamp="{workarea_timestamp}" drive_failed="{drive_failed}" />
+                                                    </Sequence>
+                                                </Fallback>
+                                            </Fallback>
+                                            
+                                            <RobotExplore robotLocation="{robotLocation}" explore_timestamp="{explore_timestamp}"  />
+                                            
+                                            <LoopSequence name="LoopSequence">
+                                                <Sequence name="FollowMeSequence">
+                                                    <StartDrivingToPeople explore_timestamp="{explore_timestamp}" delta_seconds ="250" robot_needs_rotation = "{robot_needs_rotation}"/>
+                                                    <CheckingNearbyVisitors  visitor_code ="{visitor_code}" robot_needs_rotation = "{robot_needs_rotation}"
+ timer="50"   />
+                                                    <RobotRotationFollowMe visitor_code ="{visitor_code}" robot_needs_rotation = "{robot_needs_rotation}"
+ distance_max="1.8" zero_limit="40" timer="60" />
+                                                    <ArrivedAtVisitors  visitor_code ="{visitor_code}" robot_needs_rotation = "{robot_needs_rotation}"
+ timeout="10.0"/>
+                                                </Sequence>
+                                            </LoopSequence>
+                                            
+                                            <Fallback name="DriveToQuizMasterFallback">
+                                                <Sequence name="GoToQuizSequence">
+                                                    <DriveQuizLocation timeout="2.5" x="-1.3658989667892456" y="-1.4719496965408325" z="0.0" qx="0.0" qy="0.0" qz="0.371473234987957" qw="0.9284436631737987" sent_timestamp="{quiz_timestamp}" />
+                                                    <IsRobotAtQuiz timeout="60.0" sent_timestamp="{quiz_timestamp}" drive_failed="{drive_failed}" />
+                                                </Sequence>
+                                                
+                                                <Sequence name="FallbackGoToQuizSequence">
+                                                    <FallbackDriveQuizLocation timeout="2.5" x=" -4.064824104309082" y="1.6677558422088623" z="0.0" qx="0.0" qy="0.0" qz="0.03214270147272485" qw="0.9994832898763417" sent_timestamp="{quiz_timestamp}" />
+                                                    <FallbackIsRobotAtQuiz timeout="60.0" sent_timestamp="{quiz_timestamp}" drive_failed="{drive_failed}" />
+                                                </Sequence>
+                                            </Fallback>
+                                            
+                                            <RobotAtQuiz robotLocation="{robotLocation}"/>
+                                            <WaitQuizToEnd timeout="300.0" skip_drivetoworkarea="{skip_drivetoworkarea}"/>
+                                        </Sequence>
+                                        
+                                        <Sequence name="MainSTOPSequence">
+                                            <MainBTStopDrive drive_failed="{drive_failed}"/>
+                                            <MainBTSetErrorFlag drive_failed="{drive_failed}"/>
+                                        </Sequence>
+                                    </Fallback>
+                                </ForceSuccess>
+                            </Parallel>
+
+                            <Fallback name="GoToChargeFallback">
+                                <Sequence name="ChargingSequence">
+                                    <Fallback name="DriveToChargingFallback">
+                                        <Sequence name="DriveToChargingSequence">
+                                            <RobotDriveToChargingStation timeout="5.0" skip_drive2charging="{skip_drive2charging}" skip_robotdrivechargingstation="{skip_robotdrivechargingstation}" charging_sent_timestamp="{charging_sent_timestamp}" bat_admin_status="{bat_admin_status}" connection_chargeStatus="{connection_chargeStatus}" skip_drivetoworkarea="{skip_drivetoworkarea}" />
+                                            <RobotIsRobotAtChargingStation timeout="200.0" charging_sent_timestamp="{charging_sent_timestamp}" skip_drive2charging="{skip_drive2charging}" skip_robotdrivechargingstation="{skip_robotdrivechargingstation}" drive_failed="{drive_failed}" />
+                                        </Sequence>
+                                        <Sequence name="FallbackDriveToChargingCoordinateSequence">
+                                            <FallbackDriveToChargingStation timeout="5.0"  charging_sent_timestamp="{charging_sent_timestamp}" bat_admin_status="{bat_admin_status}" connection_chargeStatus ="{connection_chargeStatus}"/>
+                                            <FallbackIsRobotAtChargingStation timeout="200.0" charging_sent_timestamp="{charging_sent_timestamp}" drive_failed="{drive_failed}" />
+                                        </Sequence>
+                                        <RobotFailedDriveToChargingStation skip_robotdrivechargingstation="{skip_robotdrivechargingstation}" />
+                                    </Fallback>
+                                    <DriveToChargingStation timeout="20.0" chargingInteger="{chargingInteger}" skip_drive2charging="{skip_drive2charging}" bat_admin_status="{bat_admin_status}" skip_isrobotcharging="{skip_isrobotcharging}" skip_statusDriveToChargingStation="{skip_statusDriveToChargingStation}" />
+                                    <StatusDriveToChargingDock timeout="200.0" chargingInteger="{chargingInteger}" skip_drive2charging="{skip_drive2charging}" skip_isrobotcharging="{skip_isrobotcharging}" skip_statusDriveToChargingStation="{skip_statusDriveToChargingStation}" />
+                                    <IsRobotCharging timeout="200" chargingInteger="{chargingInteger}" skip_drive2charging="{skip_drive2charging}" skip_isrobotcharging="{skip_isrobotcharging}" />
+                                    <IsBatteryFull robotLocation="{robotLocation}" chargingInteger="{chargingInteger}" bat_admin_status="{bat_admin_status}" skip_isrobotcharging="{skip_isrobotcharging}" skip_robotdrivechargingstation="{skip_robotdrivechargingstation}" />
+                                    <RobotWaitInChargingStation buttonStop="{buttonStop}" />
+                                    <StopRobotCharging chargingInteger="{chargingInteger}" chargingInteger_nextCycle="{chargingInteger_nextCycle}" />
+                                    <BatteryCharged timeout="5" connection_chargeStatus="{connection_chargeStatus}" robotLocationBAT="{robotLocationBAT}" bat_admin_status="{bat_admin_status}" />
+                                </Sequence>
+                                <BatteryStopDrive/>
+                            </Fallback>
+                        </Fallback> 
+                    </Parallel>
+                    <Sequence name="AdminSequence">
+                        <CheckAdminCondition robot_startup ="{robot_startup}" bat_admin_status="{bat_admin_status}" chargingInteger="{chargingInteger}" chargingInteger_nextCycle="{chargingInteger_nextCycle}"/>
+                        <CheckButtonState robot_startup = "{robot_startup}" buttonStop="{buttonStop}" robotLocationBAT="{robotLocationBAT}" skip_drivetoworkarea="{skip_drivetoworkarea}" />
+                    </Sequence>
+                </Fallback>
+            </Parallel>
+
+            <ConnectionLost /> 
+        </Fallback>
+    </BehaviorTree>
+</root>
