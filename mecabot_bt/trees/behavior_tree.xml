@@ -47,7 +47,7 @@
                                                     <RobotRotationFollowMe visitor_code ="{visitor_code}" robot_needs_rotation = "{robot_needs_rotation}"
  distance_max="1.8" zero_limit="40" timer="60" />
                                                     <ArrivedAtVisitors  visitor_code ="{visitor_code}" robot_needs_rotation = "{robot_needs_rotation}"
- timeout="10.0"/>
+ timeout="15.0"/>
                                                 </Sequence>
                                             </LoopSequence>
                                             
@@ -102,7 +102,7 @@
                     </Parallel>
                     <Sequence name="AdminSequence">
                         <CheckAdminCondition robot_startup ="{robot_startup}" bat_admin_status="{bat_admin_status}" chargingInteger="{chargingInteger}" chargingInteger_nextCycle="{chargingInteger_nextCycle}"/>
-                        <CheckButtonState robot_startup = "{robot_startup}" buttonStop="{buttonStop}" robotLocationBAT="{robotLocationBAT}" skip_drivetoworkarea="{skip_drivetoworkarea}" />
+                        <CheckButtonState robot_startup = "{robot_startup}" buttonStop="{buttonStop}" robotLocationBAT="{robotLocationBAT}" skip_drivetoworkarea="{skip_drivetoworkarea}" skip_drive2charging="{skip_drive2charging}" skip_robotdrivechargingstation="{skip_robotdrivechargingstation}" bat_admin_status="{bat_admin_status}"  />
                     </Sequence>
                 </Fallback>
             </Parallel>

@@ -159,25 +159,25 @@ class QuizBTNode(Node):
 
                 with open(file_path, "w") as f:
 
-                    # ittereer over elke dag in het schema
-                    for day_name, info in schedule.items():
+                    # # ittereer over elke dag in het schema
+                    # for day_name, info in schedule.items():
 
-                        # zet dag om naar 1 letterige prefix
-                        prefix = day_map.get(day_name, "?")
+                    #     # zet dag om naar 1 letterige prefix
+                    #     prefix = day_map.get(day_name, "?")
 
-                        # haal start en eindtijd op
-                        if info.get("active", False):
-                            start = (info.get("start") or "0000").replace(":", "")
-                            end = (info.get("end") or "0000").replace(":", "")
-                            #zorg dat tijden exact 4 karakters zijn bv 1000
-                            start = start.ljust(4, '0')[:4]
-                            end = end.ljust(4, '0')[:4]
+                    #     # haal start en eindtijd op
+                    #     if info.get("active", False):
+                    #         start = (info.get("start") or "0000").replace(":", "")
+                    #         end = (info.get("end") or "0000").replace(":", "")
+                    #         #zorg dat tijden exact 4 karakters zijn bv 1000
+                    #         start = start.ljust(4, '0')[:4]
+                    #         end = end.ljust(4, '0')[:4]
 
-                            line = f"{prefix}{start}{end}"
-                        else:
-                            line = f"{prefix}{'X'*8}"
-                        # schrijf lijn naar bestand
-                        f.write(line + "\n")
+                    #         line = f"{prefix}{start}{end}"
+                    #     else:
+                    #         line = f"{prefix}{'X'*8}"
+                    #     # schrijf lijn naar bestand
+                    #     f.write(line + "\n")
 
                     # Schrijf ROBOTACTIVE pas **na** alle dagen
                     robot_active = settings.get("robotActive", False)
@@ -295,7 +295,7 @@ class QuizBTNode(Node):
     
     # ---------------- BUMPER PUBLISHER ----------------
     def bump_status_callback(self, status):
-        self.get_logger().info(f'bumperstatus: {status.data}')
+        #self.get_logger().info(f'bumperstatus: {status.data}')
         self.safe_emit('robot-bumper-status', {
             "msg": status.data
         })

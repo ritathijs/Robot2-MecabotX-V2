@@ -320,10 +320,6 @@ public:
         {
             std::cout << "[BatteryOk] FORCE-CHARGING detected -> sending START" << std::endl;
             int counter = updateChargingCounter();
-
-
-
-
             updateSkipDrive();  // check bat_admin_status
             return BT::NodeStatus::FAILURE;
         }
@@ -518,18 +514,18 @@ public:
         std_msgs::msg::String bt_msg;
         std_msgs::msg::String rpi_msg;
 
-        // WORKING TIME CHECK
-        if (!is_working_time)
-        {
-            std::cout << "[CheckInWorkingZone] Buiten werkuren -> FORCE-CHARGING" << std::endl;
+        // // WORKING TIME CHECK
+        // if (!is_working_time)
+        // {
+        //     std::cout << "[CheckInWorkingZone] Buiten werkuren -> FORCE-CHARGING" << std::endl;
 
-            setOutput("robotLocationBAT", std::string("FORCE-CHARGING"));
+        //     setOutput("robotLocationBAT", std::string("FORCE-CHARGING"));
 
-            bt_msg.data = "FORCE-CHARGING";
-            pub_->publish(bt_msg);
+        //     bt_msg.data = "FORCE-CHARGING";
+        //     pub_->publish(bt_msg);
 
-            return BT::NodeStatus::SUCCESS;
-        }
+        //     return BT::NodeStatus::SUCCESS;
+        // }
 
         std::cout << "[CheckInWorkingZone] Een robot werkt altijd!" << std::endl;
 
@@ -3947,13 +3943,21 @@ public:
 
         pub_ = node_->create_publisher<std_msgs::msg::String>(
             "/BehaviorTreeNode", 10);
+
+        force_charge_pub_ = node_->create_publisher<std_msgs::msg::String>(
+            "/force_charge", 10);
     }
 
     static BT::PortsList providedPorts()
     {
         return {
             BT::OutputPort<bool>("buttonStop"),
+
+            BT::OutputPort<bool>("skip_drive2charging"),
+            BT::OutputPort<bool>("skip_robotdrivechargingstation"),
+
             BT::OutputPort<std::string>("robotLocationBAT"),
+            BT::OutputPort<std::string>("bat_admin_status"),
             BT::OutputPort<bool>("robot_startup"),
             BT::OutputPort<bool>("skip_drivetoworkarea")  
         };
@@ -3966,10 +3970,13 @@ public:
         setOutput("skip_drivetoworkarea", false);
 
         
+
+
         // 1. Publiceer node naam
         std_msgs::msg::String msg;
         msg.data = "CheckButtonState";
         pub_->publish(msg);
+
 
         // 2. Lees laatste lijn van file
         /*
@@ -4029,12 +4036,33 @@ public:
         {
             std::cout << "[CheckButtonState] START toestand (robot actief)" << std::endl;
             setOutput("buttonStop", false);
+            setOutput("robotLocationBAT", std::string("WORKING"));
+            // HIER ALLES RESETTEN VAN ANDERE DINGEN ZODAT ROBOT NIET VALSSPEELT
+
+            setOutput("skip_drive2charging", false);
+            setOutput("skip_robotdrivechargingstation", false);
+            setOutput("bat_admin_status", std::string("STOP"));
+
+                    std_msgs::msg::String cmd_msg;
+        cmd_msg.data = "0STOP";
+
+        for (int i = 0; i < 3; ++i)
+        {
+            force_charge_pub_->publish(cmd_msg);
+        }
+
+        std::cout << "[CheckButtonState] Published STOP to /force_charge (knop inschakelen)" << std::endl;
+        
+
+
+            // OOK DAT ROBOT LADEN STOPT MOET HIER GEBEUREN
         }
         else
         {
             std::cout << "[CheckButtonState] STOP toestand (robot NIET actief)" << std::endl;
             setOutput("buttonStop", true);
             setOutput("robotLocationBAT", std::string("FORCE-CHARGING"));
+            
         }
 
         return BT::NodeStatus::SUCCESS;
@@ -4043,6 +4071,7 @@ public:
 private:
     rclcpp::Node::SharedPtr node_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr force_charge_pub_;
 };
 
 
