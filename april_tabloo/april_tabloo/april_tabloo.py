@@ -74,6 +74,12 @@ class AprilTagAbsolutePose(Node):
             refine_edges=1
         )
 
+        self.done_pub = self.create_publisher(
+            String,
+            "reset_done",
+            qos
+        )
+
         self.create_subscription(
             Image,
             "/camera/color/image_raw",
@@ -145,6 +151,22 @@ class AprilTagAbsolutePose(Node):
 
         self.latest_frame = self.bridge.imgmsg_to_cv2(msg, "bgr8")
 
+
+
+    def publish_done(self):
+
+        # Wacht tot minstens één node luistert op reset_done
+        while self.done_pub.get_subscription_count() == 0:
+            self.get_logger().info("Waiting for subscribers on /reset_done...")
+            time.sleep(0.1)
+
+        msg = String()
+        msg.data = "done"
+
+        self.done_pub.publish(msg)
+        self.get_logger().info("Sent DONE on /reset_done")
+
+            
     ##########################################################
 
     def publish_pose(self, x, y, yaw):
@@ -255,6 +277,7 @@ class AprilTagAbsolutePose(Node):
             self.publish_pose(x, y, yaw)
 
             self.get_logger().info("Tag gevonden. Reset beëindigd.")
+            self.publish_done()
 
             self.reset_active = False
             self.attempts = 0

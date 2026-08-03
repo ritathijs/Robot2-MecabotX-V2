@@ -56,6 +56,15 @@ class PublishBackPose(Node):
             qos_reliable
         )
 
+        self.reset_done = False
+
+        self.reset_done_sub = self.create_subscription(
+            String,
+            "reset_done",
+            self.reset_done_callback,
+            qos_reliable
+        )
+
         self.reset_delay_timer = None
 
 
@@ -105,13 +114,41 @@ class PublishBackPose(Node):
         self.reset_pub.publish(msg)
         self.get_logger().info("Sent ACTIVE to /reset_active")
 
+    def reset_done_callback(self, msg):
+
+        if msg.data.lower() == "done":
+            self.reset_done = True
+            self.get_logger().info("AprilTag localization completed successfully.")
+
     def startup_callback(self):
-        # Annuleer timer zodat dit maar 1 keer gebeurt
         self.start_timer.cancel()
+        self.send_reset_active()
 
-        # Stuur XSTOPS richting autocharge om laden te stoppen
-        self.send_xstopS()
+        self.get_logger().info(
+            "Waiting up to 3 seconds for AprilTag localization..."
+        )
 
+        self.reset_start_time = time.time()
+        # non-blocking watchdog instead of a busy-wait with nested spin_once
+        self.watchdog_timer = self.create_timer(0.1, self.check_reset_progress)
+
+
+    def check_reset_progress(self):
+        if self.reset_done:
+            self.get_logger().info(
+                "AprilTag localization succeeded. No XSTOP required."
+            )
+            self.watchdog_timer.cancel()
+            self.destroy_subscription(self.reset_done_sub)
+            return
+
+        if time.time() - self.reset_start_time >= 3.0:
+            self.watchdog_timer.cancel()
+            self.get_logger().warn(
+                "AprilTag localization failed. Sending XSTOP."
+            )
+            self.send_xstopS()
+            self.destroy_subscription(self.reset_done_sub)
     def send_xstopS(self):
 
         # wacht tot er minstens 1 subscriber is (enige code die luistert is autocharge)
