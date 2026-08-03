@@ -22,6 +22,43 @@ using json = nlohmann::json;
 using namespace std::chrono_literals;
 
 
+#include <nlohmann/json.hpp>
+
+using json = nlohmann::json;
+
+bool updateRobotStatus(const json& fieldsToUpdate)
+{
+    httplib::Client cli("http://10.0.0.11");
+
+    auto res = cli.Post(
+        "/robot-status/update-robot-status",
+        fieldsToUpdate.dump(),
+        "application/json");
+
+    if (res && res->status == 200)
+    {
+        try
+        {
+            json response = json::parse(res->body);
+
+            if (response.contains("succes") && response["succes"] == true)
+            {
+                return true;
+            }
+        }
+        catch (const json::parse_error& e)
+        {
+            std::cerr << "JSON parse error: " << e.what() << std::endl;
+        }
+    }
+
+    std::string err = res ? std::to_string(res->status) : "Connection error";
+    std::cerr << "Update robot status failed: " << err << std::endl;
+
+    return false;
+}
+
+
 // Deze functie accepteert een lijst met veldnamen en geeft een JSON-object terug
 json retrieveRobotStatus(const std::vector<std::string>& fields) {
     json result = json::object(); // Maak standaard een leeg JSON-object aan
@@ -178,21 +215,25 @@ public:
         qos.reliable();
 
         // Subscriber naar /connection topic
-        // topic van quiz_bt_node die info geeft over connect en disconnect
         sub_ = node_->create_subscription<std_msgs::msg::String>(
             "/connection", qos,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
                 last_connection_msg_ = msg->data;
             });
+
+
+        // Publisher naar rpitopic (zelfde als andere BT nodes)
+        rpi_pub_ = node_->create_publisher<std_msgs::msg::String>(
+            "/rpitopic", 10);
     }
 
-    // Indien disconnect plaatsvind op moment dat robot in laadstation zit : geen probleem
-    // Om dit te weten via blackboard status ophalen of robot aan het laden is
+
     static BT::PortsList providedPorts()
     {
         return { BT::InputPort<bool>("connection_chargeStatus") };
     }
+
 
     BT::NodeStatus onStart() override
     {
@@ -200,34 +241,116 @@ public:
         return BT::NodeStatus::RUNNING;
     }
 
+
     BT::NodeStatus onRunning() override
     {
-        rclcpp::spin_some(node_); // Kijken of er nieuwe berichten zijn op topic
+        rclcpp::spin_some(node_);
 
-        // Lees van het blackboard (default = false)
         bool charge_connected = false;
         getInput("connection_chargeStatus", charge_connected);
 
-        // Indien DISCONNECTED message en niet aan het laden
-        if (last_connection_msg_ == "DISCONNECTED" && !charge_connected)
+
+        if (last_connection_msg_ == "DISCONNECTED")
         {
-            std::cout << "[CheckNetworkError] NETWORK ERROR -> FAILURE" << std::endl;
-            return BT::NodeStatus::FAILURE;  // falback wordt getriggerd, BT komt in ConnectionLost
+
+            // Alleen controleren als robot niet aan laden is
+            if (!charge_connected)
+            {
+                std::cout 
+                    << "[CheckNetworkError] NETWORK ERROR -> controleren batterijstatus"
+                    << std::endl;
+
+
+                bool battery_low = isBatteryLow();
+
+
+                std_msgs::msg::String rpi_msg;
+
+
+                if (battery_low)
+                {
+                    std::cout 
+                        << "[CheckNetworkError] BATTERY-LOW gevonden -> RobotIsActiveFalse"
+                        << std::endl;
+
+                    rpi_msg.data = "RobotIsActiveFalse";
+                }
+                else
+                {
+                    std::cout 
+                        << "[CheckNetworkError] Geen BATTERY-LOW -> RobotIsActiveTrue"
+                        << std::endl;
+
+                    rpi_msg.data = "RobotIsActiveTrue";
+                }
+
+
+                rpi_pub_->publish(rpi_msg);
+
+
+                std::cout 
+                    << "[CheckNetworkError] NETWORK ERROR -> FAILURE"
+                    << std::endl;
+
+                return BT::NodeStatus::FAILURE;
+            }
         }
+
 
         return BT::NodeStatus::RUNNING;
     }
+
 
     void onHalted() override
     {
         std::cout << "[CheckNetworkError] HALTED" << std::endl;
     }
 
+
 private:
+
+    bool isBatteryLow()
+    {
+        const std::string filePath =
+            "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/batstatus.txt";
+
+
+        std::ifstream file(filePath);
+
+        if (!file.is_open())
+        {
+            std::cerr 
+                << "[CheckNetworkError] Kan batstatus.txt niet openen"
+                << std::endl;
+
+            return false;
+        }
+
+
+        std::string line;
+
+        while (std::getline(file, line))
+        {
+            if (line == "BATTERY-LOW")
+            {
+                return true;
+            }
+        }
+
+
+        return false;
+    }
+
     rclcpp::Node::SharedPtr node_;
+
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
+
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr rpi_pub_;
+
     std::string last_connection_msg_;
 };
+
+
 
 
 
@@ -327,6 +450,9 @@ public:
         if (last_event_ == "BATTERY-LOW")
         {
             std::cout << "[BatteryOk] BATTERY LOW via bericht on start" << std::endl;
+            updateRobotStatus({
+                {"robotActive", false}
+            });
 
             setOutput("chargingInteger", 0);  // BATTERY-LOW bericht komt altijd met 0 voor (want telkens nieuwe sessie)
             updateSkipDrive();  // check bat_admin_status
@@ -336,6 +462,11 @@ public:
             if (batteryLowInFile())
             {
                 std::cout << "[BatteryOk] BATTERY-LOW gevonden in bestand. on start" << std::endl;
+                updateRobotStatus({
+                    {"robotActive", false}
+                });
+
+
                 updateSkipDrive();
                 return BT::NodeStatus::FAILURE;
             }
@@ -3048,6 +3179,11 @@ public:
         pub_bt_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
         pub_coord_ = node_->create_publisher<geometry_msgs::msg::PoseStamped>("/btDriveCoord", 10);
 
+        pub_rpi_ = node_->create_publisher<std_msgs::msg::String>(
+        "/rpitopic", 10);
+
+
+
         pub_tracking_enable_ = node_->create_publisher<std_msgs::msg::Bool>(
             "/tracking_enable", 10);
     }
@@ -3079,6 +3215,14 @@ public:
         pub_tracking_enable_->publish(tracking_msg);
 
         std::cout << "[DriveQuizLocation] Tracking DISABLED" << std::endl;
+
+
+        // Toon FollowRobotScreen op de RPi
+        std_msgs::msg::String screen_msg;
+        screen_msg.data = "FollowRobotScreen";
+        pub_rpi_->publish(screen_msg);
+
+
 
         // pose opbouwen voor navigation stack
         sent_coord_.header.stamp = node_->get_clock()->now();
@@ -3148,6 +3292,7 @@ private:
     geometry_msgs::msg::PoseStamped sent_coord_;
 
     rclcpp::Node::SharedPtr node_;
+        rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_rpi_;
 
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pub_coord_;
@@ -3970,55 +4115,11 @@ public:
         setOutput("skip_drivetoworkarea", false);
 
         
-
-
         // 1. Publiceer node naam
         std_msgs::msg::String msg;
         msg.data = "CheckButtonState";
         pub_->publish(msg);
 
-
-        // 2. Lees laatste lijn van file
-        /*
-        std::string file_path = "/home/wheeltec/wheeltec_ros2/src/quiz_bt_node/schedule.txt";
-        std::ifstream file(file_path);
-
-        if (!file.is_open())
-        {
-            std::cerr << "[CheckButtonState] Kan file niet openen!" << std::endl;
-            return BT::NodeStatus::FAILURE;
-        }
-
-        std::string line, last_line;
-
-        while (std::getline(file, line))
-        {
-            if (!line.empty())
-                last_line = line;
-        }
-
-        file.close();
-
-        std::cout << "[CheckButtonState] Laatste lijn: " << last_line << std::endl;
-
-        // 3. Parse ROBOTACTIVE
-        bool robot_active;
-
-        if (last_line.find("ROBOTACTIVE:true") != std::string::npos)
-        {
-            std::cout << "[RobotActiveTrue] Laatste lijn TRUE: " << std::endl;
-            robot_active = true;
-        }
-        else if (last_line.find("ROBOTACTIVE:false") != std::string::npos)
-        {
-            std::cout << "[RobotActiveTrue] Laatste lijn FALSE: " << std::endl;
-            robot_active = false;
-        }
-        else
-        {
-            std::cerr << "[CheckButtonState] Onbekend formaat!" << std::endl;
-            return BT::NodeStatus::FAILURE;
-        }*/
         
         // Haal de data op (let op de accolades voor de vector)
         json statusData = retrieveRobotStatus({"robotActive"});
@@ -5824,47 +5925,6 @@ public:
         };
     }
 
-    // int incrementChargingCounter()
-    // {
-    //     int counter = 0;
-
-    //     if (!getInput("chargingInteger", counter))
-    //     {
-    //         throw BT::RuntimeError("chargingInteger ontbreekt");
-    //     }
-
-    //     if (counter == 9)
-    //     {
-    //         counter = 0;
-    //     }
-    //     else
-    //     {
-    //         counter += 1;
-    //     }
-
-    //     setOutput("chargingInteger_nextCycle", 0);
-    //     return counter;
-    // }
-
-    // void publishStopCommand()
-    // {
-    //     int charge_id = 0;
-
-    //     if (!getInput("chargingInteger", charge_id))
-    //     {
-    //         throw BT::RuntimeError("chargingInteger ontbreekt");
-    //     }
-
-    //     std_msgs::msg::String cmd_msg;
-    //     cmd_msg.data = std::to_string(charge_id) + "STOP";
-
-    //     for (int i = 0; i < 3; ++i)
-    //     {
-    //         force_charge_pub_->publish(cmd_msg);
-    //     }
-
-    //     std::cout << "[CheckAdminCondition] STOP gestuurd naar /force_charge" << std::endl;
-    // }
 
     BT::NodeStatus onStart() override
     {
@@ -5891,8 +5951,7 @@ public:
             {
                 std::cout << "[CheckAdminCondition] bat_admin_status = STOP" << std::endl;
 
-                //incrementChargingCounter();
-                //publishStopCommand();
+
             }
         }
 

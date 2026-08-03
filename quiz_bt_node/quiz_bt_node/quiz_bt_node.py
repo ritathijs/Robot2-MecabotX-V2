@@ -30,6 +30,7 @@ SERVER_URL = f"http://{SERVER_IP}:80"
 
 
 
+
 # De systeemtijd van de pi wordt doorgestuurd naar de robot
 # Indien volgende parameter op False staat wordt de robot zijn systeemtijd NIET aangepast
 # Indien volgende parameter op True  staat wordt de robot zijn systeemtijd WEL  aangepast (kan transformproblemen leveren in RVIZ)
@@ -75,9 +76,12 @@ class QuizBTNode(Node):
         # Logica om bij te houden of laatst verstuurde event robot-charge is om bij adminpanelclosed juist bericht te sturen
         self.last_emitted_event = None
 
+        self.last_screen = None
+
+
         self.quiz_location_suffix = ""
 
-        # Berichten van BT om schermen aan te vragen
+        # Berichten van BT om schermen te sturen
         self.subscription = self.create_subscription(
             String,
             'rpitopic',
@@ -102,6 +106,8 @@ class QuizBTNode(Node):
             10
         )
         
+        self.quiz_activestatus_publisher = self.create_publisher(String, 'quizbtnode-activestatus', 1)
+
 
         # Socket.IO client
         self.sio = socketio.Client()
@@ -112,7 +118,12 @@ class QuizBTNode(Node):
         self.sio.on('quiz-finished', self.on_quiz_finished)
         self.sio.on('quiz_inactive', self.on_quiz_inactive)
         self.sio.on('drive_to_quiz_location', self.on_drive_to_quiz_location)
-        
+
+        self.sio.on('robot-askScreen', self.on_ask_screen)
+
+        self.sio.on('robot-askIsActive', self.on_ask_is_active)
+        self.sio.on('robot-activeButtonToggled', self.on_active_button_toggled)
+
         self.sio.on('robot-stop-for-x-time', self.on_robot_stop_for_x_time)
         
         self.sio.on('admin-panel-open', self.on_admin_panel_open)
@@ -129,6 +140,20 @@ class QuizBTNode(Node):
         # Connect to server
         self.sio.connect(SERVER_URL, retry=True)
         self.get_logger().info(f"Connected to server at {SERVER_URL}")
+
+        # Lees de JSON uit met de batterijniveaus om in de UI de juiste kleur te tonen (groen, oranje, rood)
+        try:
+            package_share_dir = get_package_share_directory('mecabot_bt')
+            json_file_path = os.path.join(package_share_dir, 'trees', 'spanningsniveaus.json')
+            with open(json_file_path, 'r') as json_file:
+                self.spanningsniveaus = json.load(json_file)
+                self.battery_low_voltage = self.spanningsniveaus.get("batteryLowVoltage", 1.0)
+                self.battery_high_voltage = self.spanningsniveaus.get("batteryHighVoltage", 2.0)
+            self.get_logger().info(f"JSON succesvol geladen. Inhoud: {self.spanningsniveaus}")
+        except Exception as e:
+            self.battery_low_voltage = 1.0
+            self.battery_high_voltage = 2.0
+            self.get_logger().error(f"Fout bij inladen json: {e}")
 
     # ---------------- SETTINGS OPHALEN ----------------
     
@@ -213,6 +238,15 @@ class QuizBTNode(Node):
         self.get_logger().info(f'Published to quiz topic: {msg.data}')
         
        
+    def publish_quiz_activestatus_message(self, message):
+        msg = String()
+        msg.data = message
+        self.quiz_activestatus_publisher.publish(msg)
+        self.get_logger().info(
+            f'Published to quizbtnode-activestatus topic: {msg.data}'
+        )
+
+
     def on_drive(self, data):
         # Controleer of er daadwerkelijk data is binnengekomen
         if not data:
@@ -235,20 +269,20 @@ class QuizBTNode(Node):
             msg.linear.x = 0.15*speed
             self.get_logger().info(f'{0.15*speed}')
         elif direction == 'backward':
-            msg.linear.x = -0.2*speed
-            self.get_logger().info(f'{0.2*speed}')
+            msg.linear.x = -0.15*speed
+            self.get_logger().info(f'{0.15*speed}')
         elif direction == 'left':
-            msg.linear.y = -0.1*speed
-            self.get_logger().info(f'{0.1*speed}')
+            msg.linear.y = -0.15*speed
+            self.get_logger().info(f'{0.15*speed}')
         elif direction == 'right':
-            msg.linear.y = 0.1*speed
-            self.get_logger().info(f'{0.1*speed}')
+            msg.linear.y = 0.15*speed
+            self.get_logger().info(f'{0.15*speed}')
         elif direction == 'cw':
-            msg.angular.z = -0.2*speed
-            self.get_logger().info(f'{0.2*speed}')
+            msg.angular.z = -0.15*speed
+            self.get_logger().info(f'{0.15*speed}')
         elif direction == 'ccw':
-            msg.angular.z = 0.2*speed
-            self.get_logger().info(f'{0.2*speed}')
+            msg.angular.z = 0.15*speed
+            self.get_logger().info(f'{0.15*speed}')
         else: # stop
             msg.linear.x = 0.0
             msg.linear.y = 0.0
@@ -284,8 +318,8 @@ class QuizBTNode(Node):
             
         self.safe_emit('robot-update-battery-percentage', {
             "battery": battery_val,
-            "batteryLow": 22.0,  # Threshold voor oranje
-            "batteryHigh": 23.0  # Threshold voor groen
+            "batteryLow": self.battery_low_voltage,   # Threshold voor oranje
+            "batteryHigh": self.battery_high_voltage  # Threshold voor groen
         })
           
         self.get_logger().info(f"Batterij doorgestuurd: {getattr(self, 'battery_level', 0)}Volts")
@@ -347,6 +381,23 @@ class QuizBTNode(Node):
             return
         self.get_logger().info("Quiz finished")
         self.publish_quiz_message("quiz-finished")
+
+    def on_ask_screen(self):
+        self.get_logger().info("scherm aangevraagd")
+        self.publish_quiz_message("ask-screen")
+
+    def on_ask_is_active(self):
+        self.get_logger().info("vraag aan bt of robot actief is")
+        self.publish_quiz_activestatus_message("ask-is-active")
+
+    def on_active_button_toggled(self, data):
+        is_active = data.get('isActive')
+        self.get_logger().info(f"gebruiker heeft op de knop geduwd; (gewenst:{is_active})")
+        
+        if is_active:
+            self.publish_quiz_message("robot-activeButtonToggled-true")
+        else:
+            self.publish_quiz_message("robot-activeButtonToggled-false")
 
     def on_robot_stop_for_x_time(self, data):
         self.get_logger().info("Hier zou de robot moeten stoppen voor max 30 seconden. Waarschijnlijk wordt tijdens 30 seconden quiz getrigger of adminpaneel geopend")
@@ -451,16 +502,6 @@ class QuizBTNode(Node):
 
         self._finalize_admin_closed()
 
-
-    def reboot_callback(self, msg):
-        self.get_logger().warning(f"SIMULATIE Reboot topic ontvangen: {msg.data}")
-
-        if msg.data == "REBOOT":
-            self.get_logger().warning("Jetson reboot wordt uitgevoerd!")
-            self.on_reboot()
-
-
-
     def _finalize_admin_closed(self):
         self.get_logger().info("Na vertraging adminpanelclosed")
 
@@ -484,11 +525,18 @@ class QuizBTNode(Node):
         self.get_logger().info(f'Received from RPi: {msg.data}')
 
         if msg.data == "RobotExplore":
+            self.last_screen = "robot-explore"
             self.safe_emit("robot-explore")
         elif msg.data == "RobotGoToVisitors":
+            self.last_screen = "robot-go-to-visitors"
             self.safe_emit("robot-go-to-visitors")
-        
-        
+            
+        elif msg.data == "RobotIsActiveTrue":
+            self.safe_emit("robot-isActive", True)
+
+        elif msg.data == "RobotIsActiveFalse":
+            self.safe_emit("robot-isActive", False)
+
         elif msg.data.startswith("RobotArrivedAtVisitors"):
             suffix = msg.data.replace("RobotArrivedAtVisitors", "")
 
@@ -499,26 +547,49 @@ class QuizBTNode(Node):
                     f"Quiz locatie suffix opgeslagen: {self.quiz_location_suffix}"
                 )
 
+            self.last_screen = "robot-arrived-at-visitors"
             self.safe_emit("robot-arrived-at-visitors")
 
 
         elif msg.data == "robot-arrived-at-quiz-location":
+            self.last_screen = "robot-arrived-at-quiz-location"
             self.safe_emit("robot-arrived-at-quiz-location")
+
+
         elif msg.data == "RobotError":
+            self.last_screen = "robot-error-drive"
             self.safe_emit("robot-error-drive")
+
+        elif msg.data == "FollowRobotScreen":
+            self.last_screen = "follow-robot-screen"
+            self.safe_emit("follow-robot-screen")
+
         elif msg.data == "RobotErrorCharge":
+            self.last_screen = "robot-error-charge"
             self.safe_emit("robot-error-charge")
+
         elif msg.data == "RobotGoCharge":
+            self.last_screen = "robot-go-charge"
             self.safe_emit("robot-go-charge")
+
         elif msg.data == "RobotCharging":
+            self.last_screen = "robot-charging"
             self.safe_emit("robot-charging")
+
         elif msg.data == "RobotStarting":
+            self.last_screen = "robot-startup"
             self.safe_emit("robot-startup")
+
         elif msg.data == "RobotDocking":
+            self.last_screen = "robot-docking"
             self.safe_emit("robot-docking")
+
         elif msg.data == "RobotStartup":
+            self.last_screen = "robot-startup"
             self.safe_emit("robot-startup")
+
         elif msg.data == "RobotFailedDriveToCharging":
+            self.last_screen = "robot-lost-charging"
             self.safe_emit("robot-lost-charging")
 
     # ---------------- CLEANUP ----------------
