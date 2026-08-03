@@ -56,6 +56,7 @@ import os
 json_file='/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/Charger_Position.json'
 yaml_file='/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/robot_info.yaml'
 batstatus_file = "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/batstatus.txt"
+laadstatus_file = "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/laadstatus.txt"
 
 
 #print_and_fixRetract相关，用于打印带颜色的信息
@@ -377,6 +378,14 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         self.set_charge.call_async(req).add_done_callback(self.wait_server_callback)
         print_and_fixRetract(f'正在关闭自动回充功能, 请求已发送...')
 
+    def write_laadstatus(self, tekst):
+        try:
+            with open(laadstatus_file, "w") as f:
+                f.write(tekst)
+            print_and_fixRetract(GREEN + f"Laadstatus geschreven: {tekst}" + RESET)
+        except Exception as e:
+            print_and_fixRetract(RED + f"Fout schrijven laadstatus: {e}" + RESET)
+
 
     # Aanzetten van laadmodus via service call. Blijft opnieuw proberen tot response
     def set_charge_mode(self,value,max_callcount=10):
@@ -505,6 +514,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
         # STOP
         elif command == "STOP":
+            self.write_laadstatus("LOS")
 
             if self.stop_processed:
                 print_and_fixRetract(
@@ -714,6 +724,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             # self.publish_docking_status("DOCKING_DISABLED")
             self.publish_event("ROBOT-CHARGING")
             self.publish_rpi_event("RobotCharging")
+            self.write_laadstatus("LADEN")
 
             print_and_fixRetract(GREEN + "Charging started!" + RESET)
             self.hard_stop_robot()
