@@ -2,6 +2,7 @@ import requests
 import time
 import signal
 import sys
+import os
 
 import rclpy
 import subprocess
@@ -10,6 +11,8 @@ from std_msgs.msg import String
 from std_msgs.msg import Int8
 from std_msgs.msg import Float32
 
+from ament_index_python.packages import get_package_share_directory
+import json
 
 # Socket.IO client voor communicatie met server
 import socketio
@@ -106,7 +109,7 @@ class QuizBTNode(Node):
             10
         )
         
-        self.quiz_activestatus_publisher = self.create_publisher(String, 'quizbtnode-activestatus', 1)
+        self.quiz_activestatus_publisher = self.create_publisher(String, 'quizbtnode_activestatus', 1)
 
 
         # Socket.IO client
@@ -382,11 +385,16 @@ class QuizBTNode(Node):
         self.get_logger().info("Quiz finished")
         self.publish_quiz_message("quiz-finished")
 
-    def on_ask_screen(self):
-        self.get_logger().info("scherm aangevraagd")
-        self.publish_quiz_message("ask-screen")
+    def on_ask_screen(self, data=None):
+        self.get_logger().info("Scherm aangevraagd")
 
-    def on_ask_is_active(self):
+        if self.last_screen:
+            self.get_logger().info(f"Laatste scherm opnieuw versturen: {self.last_screen}")
+            self.safe_emit(self.last_screen)
+        else:
+            self.get_logger().warn("Nog geen last_screen beschikbaar")
+
+    def on_ask_is_active(self, data=None):
         self.get_logger().info("vraag aan bt of robot actief is")
         self.publish_quiz_activestatus_message("ask-is-active")
 

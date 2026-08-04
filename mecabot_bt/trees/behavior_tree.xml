@@ -3,7 +3,7 @@
         <Fallback name="TopFallback">
             
             <Parallel name="NetworkAndMainParallel" success_threshold="1" failure_threshold="1">
-                <CheckNetworkError connection_chargeStatus="{connection_chargeStatus}"/>
+                <CheckNetworkError />
 
                 <Fallback name="AdminPanelFallback">
                     
@@ -47,7 +47,7 @@
                                                     <RobotRotationFollowMe visitor_code ="{visitor_code}" robot_needs_rotation = "{robot_needs_rotation}"
  distance_max="1.8" zero_limit="40" timer="60" />
                                                     <ArrivedAtVisitors  visitor_code ="{visitor_code}" robot_needs_rotation = "{robot_needs_rotation}"
- timeout="15.0"/>
+ timeout="25.0"/>
                                                 </Sequence>
                                             </LoopSequence>
                                             

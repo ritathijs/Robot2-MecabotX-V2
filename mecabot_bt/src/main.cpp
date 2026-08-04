@@ -202,6 +202,8 @@ private:
 
 // Node die altijd draait (bovenaan in BT) tenzij hij faalt
 // Kijkt of quiz_bt_node laat weten dat er een disconnect heeft plaatsgevonden
+// Node die altijd draait (bovenaan in BT)
+
 class CheckNetworkError : public BT::StatefulActionNode
 {
 public:
@@ -210,147 +212,85 @@ public:
     {
         node_ = rclcpp::Node::make_shared("btCheckNetworkError");
 
-        // reliable communicatie
         rclcpp::QoS qos(1);
         qos.reliable();
 
-        // Subscriber naar /connection topic
+        // Subscriber naar quizbtnode_activestatus
         sub_ = node_->create_subscription<std_msgs::msg::String>(
-            "/connection", qos,
+            "quizbtnode_activestatus",
+            qos,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
-                last_connection_msg_ = msg->data;
+                last_message_ = msg->data;
             });
 
-
-        // Publisher naar rpitopic (zelfde als andere BT nodes)
+        // Publisher naar rpitopic
         rpi_pub_ = node_->create_publisher<std_msgs::msg::String>(
             "/rpitopic", 10);
     }
 
-
     static BT::PortsList providedPorts()
     {
-        return { BT::InputPort<bool>("connection_chargeStatus") };
+        return {};
     }
-
 
     BT::NodeStatus onStart() override
     {
-        last_connection_msg_ = "";
+        last_message_.clear();
         return BT::NodeStatus::RUNNING;
     }
-
 
     BT::NodeStatus onRunning() override
     {
         rclcpp::spin_some(node_);
 
-        bool charge_connected = false;
-        getInput("connection_chargeStatus", charge_connected);
-
-
-        if (last_connection_msg_ == "DISCONNECTED")
+        if (last_message_ == "ask-is-active")
         {
+            // Bericht verwerken
+            last_message_.clear();
 
-            // Alleen controleren als robot niet aan laden is
-            if (!charge_connected)
+            json robotStatus = retrieveRobotStatus({"robotActive"});
+
+            bool robotActive = false;
+
+            if (robotStatus.contains("robotActive"))
             {
-                std::cout 
-                    << "[CheckNetworkError] NETWORK ERROR -> controleren batterijstatus"
-                    << std::endl;
-
-
-                bool battery_low = isBatteryLow();
-
-
-                std_msgs::msg::String rpi_msg;
-
-
-                if (battery_low)
-                {
-                    std::cout 
-                        << "[CheckNetworkError] BATTERY-LOW gevonden -> RobotIsActiveFalse"
-                        << std::endl;
-
-                    rpi_msg.data = "RobotIsActiveFalse";
-                }
-                else
-                {
-                    std::cout 
-                        << "[CheckNetworkError] Geen BATTERY-LOW -> RobotIsActiveTrue"
-                        << std::endl;
-
-                    rpi_msg.data = "RobotIsActiveTrue";
-                }
-
-
-                rpi_pub_->publish(rpi_msg);
-
-
-                std::cout 
-                    << "[CheckNetworkError] NETWORK ERROR -> FAILURE"
-                    << std::endl;
-
-                return BT::NodeStatus::FAILURE;
+                robotActive = robotStatus["robotActive"].get<bool>();
             }
-        }
 
+            std_msgs::msg::String msg;
+
+            if (robotActive)
+            {
+                std::cout << "[CheckNetworkError] robotActive = true" << std::endl;
+                msg.data = "RobotIsActiveTrue";
+            }
+            else
+            {
+                std::cout << "[CheckNetworkError] robotActive = false" << std::endl;
+                msg.data = "RobotIsActiveFalse";
+            }
+
+            rpi_pub_->publish(msg);
+        }
 
         return BT::NodeStatus::RUNNING;
     }
-
 
     void onHalted() override
     {
         std::cout << "[CheckNetworkError] HALTED" << std::endl;
     }
 
-
 private:
-
-    bool isBatteryLow()
-    {
-        const std::string filePath =
-            "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/batstatus.txt";
-
-
-        std::ifstream file(filePath);
-
-        if (!file.is_open())
-        {
-            std::cerr 
-                << "[CheckNetworkError] Kan batstatus.txt niet openen"
-                << std::endl;
-
-            return false;
-        }
-
-
-        std::string line;
-
-        while (std::getline(file, line))
-        {
-            if (line == "BATTERY-LOW")
-            {
-                return true;
-            }
-        }
-
-
-        return false;
-    }
-
     rclcpp::Node::SharedPtr node_;
 
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
 
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr rpi_pub_;
 
-    std::string last_connection_msg_;
+    std::string last_message_;
 };
-
-
 
 
 
