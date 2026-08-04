@@ -404,6 +404,11 @@ class QuizBTNode(Node):
     def on_ask_screen(self, data=None):
         self.get_logger().info("Scherm aangevraagd")
 
+        # Als het laatste scherm een drive error is, niets terugsturen
+        if self.last_screen == "robot-error-drive":
+            self.get_logger().info("Laatste scherm is robot-error-drive -> geen scherm terugsturen")
+            return
+
         if self.last_screen:
             self.get_logger().info(f"Laatste scherm opnieuw versturen: {self.last_screen}")
             self.safe_emit(self.last_screen)
@@ -507,7 +512,7 @@ class QuizBTNode(Node):
             msg.data = "MANUAL_DRIVE_CONTROL"
             self.manual_drive_control_publisher.publish(msg)
 
-            self._admin_timer = self.create_timer(10.0, self._finalize_admin_closed_wrapper)
+            self._admin_timer = self.create_timer(7.0, self._finalize_admin_closed_wrapper)
 
         else:
             self.get_logger().info("Geen manual drive gedaan : meteen ADMINPANELCLOSED")

@@ -22,22 +22,22 @@
                                         <Sequence name="MainSequence">
                                             
                                             <Fallback name="CheckWorkingZone">
-                                                <CheckInWorkingZone robotLocationBAT="{robotLocationBAT}" skip_drivetoworkarea="{skip_drivetoworkarea}"/>
+                                                <CheckInWorkingZone robotLocationBAT="{robotLocationBAT}" skip_drivetoworkarea="{skip_drivetoworkarea}" show_verdwaald = "{show_verdwaald}"/>
                                                 
                                                 <Fallback name="DriveToWorkAreaMasterFallback">
                                                     <Sequence name="GoToWorkAreaSequence">
                                                         <DriveWorkArea timeout="3.0" x="-1.3658989667892456" y="-1.4719496965408325" z="0.0" qx="0.0" qy="0.0" qz="0.371473234987957" qw="0.9284436631737987" workarea_timestamp="{workarea_timestamp}" />
-                                                        <IsRobotAtWorkArea timeout="200.0" workarea_timestamp="{workarea_timestamp}" drive_failed="{drive_failed}" />
+                                                        <IsRobotAtWorkArea timeout="150.0" workarea_timestamp="{workarea_timestamp}" drive_failed="{drive_failed}" />
                                                     </Sequence>
                                                     
                                                     <Sequence name="FallbackGoToWorkAreaSequence">
                                                         <FallbackDriveToWorkArea timeout="3.0" x=" -4.064824104309082" y="1.6677558422088623" z="0.0" qx="0.0" qy="0.0" qz="0.03214270147272485" qw="0.9994832898763417" workarea_timestamp="{workarea_timestamp}" />
-                                                        <FallbackIsRobotAtWorkArea timeout="100.0" workarea_timestamp="{workarea_timestamp}" drive_failed="{drive_failed}" />
+                                                        <FallbackIsRobotAtWorkArea timeout="75.0" workarea_timestamp="{workarea_timestamp}" drive_failed="{drive_failed}" />
                                                     </Sequence>
                                                 </Fallback>
                                             </Fallback>
                                             
-                                            <RobotExplore robotLocation="{robotLocation}" explore_timestamp="{explore_timestamp}"  />
+                                            <RobotExplore show_verdwaald = "{show_verdwaald}" robotLocation="{robotLocation}" explore_timestamp="{explore_timestamp}"  />
                                             
                                             <LoopSequence name="LoopSequence">
                                                 <Sequence name="FollowMeSequence">
@@ -68,8 +68,8 @@
                                         </Sequence>
                                         
                                         <Sequence name="MainSTOPSequence">
-                                            <MainBTStopDrive drive_failed="{drive_failed}"/>
-                                            <MainBTSetErrorFlag drive_failed="{drive_failed}"/>
+                                            <MainBTStopDrive drive_failed="{drive_failed}" show_verdwaald = "{show_verdwaald}" />
+                                            <MainBTSetErrorFlag show_verdwaald = "{show_verdwaald}" drive_failed="{drive_failed}"/>
                                         </Sequence>
                                     </Fallback>
                                 </ForceSuccess>

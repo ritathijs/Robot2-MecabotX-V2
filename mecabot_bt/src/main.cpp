@@ -644,124 +644,206 @@ public:
         return scheduleList;
     }
 };
-
-
 class CheckInWorkingZone : public BT::SyncActionNode
 {
 public:
-    CheckInWorkingZone(const std::string& name, const BT::NodeConfiguration& config)
+    CheckInWorkingZone(const std::string& name,
+                       const BT::NodeConfiguration& config)
         : BT::SyncActionNode(name, config)
     {
         node_ = rclcpp::Node::make_shared("btInWorkingZone");
-        pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
-        rpi_pub_ = node_->create_publisher<std_msgs::msg::String>("/rpitopic", 10);
 
+        pub_ = node_->create_publisher<std_msgs::msg::String>(
+            "/BehaviorTreeNode", 10);
+
+        rpi_pub_ = node_->create_publisher<std_msgs::msg::String>(
+            "/rpitopic", 10);
     }
 
     static BT::PortsList providedPorts()
     {
         return {
             BT::InputPort<std::string>("robotLocation"),
-            // Blackboard output voor andere nodes
+
+            // Blackboard output
             BT::OutputPort<std::string>("robotLocationBAT"),
-            BT::InputPort<bool>("skip_drivetoworkarea")
+
+            BT::InputPort<bool>("skip_drivetoworkarea"),
+
+            // Nieuwe input
+            BT::InputPort<bool>("show_verdwaald")
         };
     }
 
     BT::NodeStatus tick() override
     {
+        // =====================================================
+        // Check show_verdwaald blackboard
+        // =====================================================
+        bool show_verdwaald = false;
+
+        getInput("show_verdwaald", show_verdwaald);
+
+        if (show_verdwaald)
+        {
+            std::cout
+                << "[CheckInWorkingZone] show_verdwaald = TRUE -> checking status file"
+                << std::endl;
+
+            const std::string status_file =
+                "/home/wheeltec/wheeltec_ros2/src/april_tabloo/status.txt";
+
+            std::ifstream file(status_file);
+
+            if (file.is_open())
+            {
+                std::string status;
+                std::getline(file, status);
+                file.close();
+
+                // verwijder eventuele spaties/newline
+                status.erase(
+                    std::remove_if(status.begin(),
+                                   status.end(),
+                                   [](unsigned char c)
+                                   {
+                                       return std::isspace(c);
+                                   }),
+                    status.end());
+
+                std::cout
+                    << "[CheckInWorkingZone] status.txt = "
+                    << status
+                    << std::endl;
+
+
+                if (status == "NOK")
+                {
+                    std::cout
+                        << "[CheckInWorkingZone] Status NOK -> FORCE SUCCESS"
+                        << std::endl;
+
+                    return BT::NodeStatus::SUCCESS;
+                }
+
+                if (status == "OK")
+                {
+                    std::cout
+                        << "[CheckInWorkingZone] Status OK -> normale werking"
+                        << std::endl;
+                }
+            }
+            else
+            {
+                std::cout
+                    << "[CheckInWorkingZone] Kan status file niet openen -> normale werking"
+                    << std::endl;
+            }
+        }
+
+
+        // =====================================================
+        // Bestaande logica
+        // =====================================================
+
         std::time_t now = std::time(nullptr);
         std::tm *local = std::localtime(&now);
 
         char day_codes[] = {'U', 'M', 'D', 'W', 'T', 'F', 'S'};
         char current_day_code = day_codes[local->tm_wday];
 
-        int current_time_val = (local->tm_hour * 100) + local->tm_min;
+        int current_time_val =
+            (local->tm_hour * 100) + local->tm_min;
 
-        //auto schedule = ScheduleParser::getFullSchedule();
 
-        bool is_working_time = true;      //RT aangepast
-       /* for (const auto& day : schedule)
-       {
-            if (day.dayCode == current_day_code)
-            {
-                if (day.isActive &&
-                    current_time_val >= day.startTime &&
-                    current_time_val < day.endTime)
-                {
-                    is_working_time = true;
-                }
-                break;
-            }
-        }
-       */
+        bool is_working_time = true;
+
+
         std_msgs::msg::String bt_msg;
         std_msgs::msg::String rpi_msg;
 
-        // // WORKING TIME CHECK
-        // if (!is_working_time)
-        // {
-        //     std::cout << "[CheckInWorkingZone] Buiten werkuren -> FORCE-CHARGING" << std::endl;
 
-        //     setOutput("robotLocationBAT", std::string("FORCE-CHARGING"));
+        std::cout
+            << "[CheckInWorkingZone] Een robot werkt altijd!"
+            << std::endl;
 
-        //     bt_msg.data = "FORCE-CHARGING";
-        //     pub_->publish(bt_msg);
 
-        //     return BT::NodeStatus::SUCCESS;
-        // }
+        setOutput("robotLocationBAT",
+                  std::string("WORKING"));
 
-        std::cout << "[CheckInWorkingZone] Een robot werkt altijd!" << std::endl;
-
-        setOutput("robotLocationBAT", std::string("WORKING"));
 
         bt_msg.data = "CheckInWorkingZone-WORKING";
         pub_->publish(bt_msg);
 
-        rpi_msg.data = "RobotStarting";    //RT na te kijken want Starting kan ongewenst zijn na het laden als hijzelf naar de docking is gereden en nog "Actief" staat
+
+        rpi_msg.data = "RobotStarting";
         rpi_pub_->publish(rpi_msg);
 
 
+
         bool skip_drive_to_workarea = false;
-        getInput("skip_drivetoworkarea", skip_drive_to_workarea);  
+
+        getInput("skip_drivetoworkarea",
+                 skip_drive_to_workarea);
+
 
 
         std::string location;
+
         if (!getInput("robotLocation", location))
         {
-            std::cerr << "[CheckInWorkingZone] Geen robotLocation!\n";
-            
+            std::cerr
+                << "[CheckInWorkingZone] Geen robotLocation!"
+                << std::endl;
+
+
             if (skip_drive_to_workarea)
             {
-                std::cout << "[CheckInWorkingZone] skip_drivetoworkarea = TRUE -> FORCE SUCCESS" << std::endl;
+                std::cout
+                    << "[CheckInWorkingZone] skip_drivetoworkarea = TRUE -> FORCE SUCCESS"
+                    << std::endl;
+
                 return BT::NodeStatus::SUCCESS;
             }
+
 
             return BT::NodeStatus::FAILURE;
         }
 
-        // ALS AL IN WORKING AREA -> altijd SUCCESS
+
+
+        // AL IN WORKING AREA
         if (location == "WORKING")
         {
             return BT::NodeStatus::SUCCESS;
         }
 
-                
-        if (skip_drive_to_workarea){
-            
-            std::cout << "[CheckInWorkingZone] skip_drivetoworkarea = TRUE -> FORCE SUCCESS" << std::endl;
+
+
+        if (skip_drive_to_workarea)
+        {
+            std::cout
+                << "[CheckInWorkingZone] skip_drivetoworkarea = TRUE -> FORCE SUCCESS"
+                << std::endl;
+
             return BT::NodeStatus::SUCCESS;
         }
+
 
 
         return BT::NodeStatus::FAILURE;
     }
 
+
 private:
+
     rclcpp::Node::SharedPtr node_;
+
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr rpi_pub_;
 };
+
 
 // BT node die een doelpositie naar charging station stuurt via PoseStamped
 // BT node die een doelpositie naar charging station stuurt via PoseStamped
@@ -2003,64 +2085,192 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pub_coord_;
 };
 
-
 class RobotExplore : public BT::SyncActionNode
 {
 public:
-    RobotExplore(const std::string& name, const BT::NodeConfiguration& config)
+    RobotExplore(const std::string& name,
+                 const BT::NodeConfiguration& config)
         : BT::SyncActionNode(name, config)
     {
         node_ = rclcpp::Node::make_shared("btRobotExplore");
-        pub_quiz_ = node_->create_publisher<std_msgs::msg::String>("/rpitopic", 10);
-        pub_bt_   = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
+
+        pub_quiz_ = node_->create_publisher<std_msgs::msg::String>(
+            "/rpitopic", 10);
+
+        pub_bt_ = node_->create_publisher<std_msgs::msg::String>(
+            "/BehaviorTreeNode", 10);
     }
+
 
     static BT::PortsList providedPorts()
     {
         return {
             BT::OutputPort<std::string>("robotLocation"),
-            BT::OutputPort<std::string>("explore_timestamp")   // <-- toegevoegd
+
+            BT::OutputPort<std::string>("explore_timestamp"),
+
+            // Nieuwe input
+            BT::InputPort<bool>("show_verdwaald")
         };
     }
 
+
     BT::NodeStatus tick() override
     {
-        // output state
+
+        // =====================================================
+        // Check show_verdwaald blackboard
+        // =====================================================
+
+        bool show_verdwaald = false;
+
+        getInput("show_verdwaald", show_verdwaald);
+
+
+        if (show_verdwaald)
+        {
+            std::cout
+                << "[RobotExplore] show_verdwaald = TRUE -> checking status file"
+                << std::endl;
+
+
+            const std::string status_file =
+                "/home/wheeltec/wheeltec_ros2/src/april_tabloo/status.txt";
+
+
+            std::ifstream file(status_file);
+
+
+            if (file.is_open())
+            {
+                std::string status;
+
+                std::getline(file, status);
+
+                file.close();
+
+
+                // spaties/newlines verwijderen
+                status.erase(
+                    std::remove_if(status.begin(),
+                                   status.end(),
+                                   [](unsigned char c)
+                                   {
+                                       return std::isspace(c);
+                                   }),
+                    status.end());
+
+
+                std::cout
+                    << "[RobotExplore] status.txt = "
+                    << status
+                    << std::endl;
+
+
+
+                if (status == "NOK")
+                {
+                    std::cout
+                        << "[RobotExplore] Status NOK -> FAILURE"
+                        << std::endl;
+
+                    return BT::NodeStatus::FAILURE;
+                }
+
+
+                if (status == "OK")
+                {
+                    std::cout
+                        << "[RobotExplore] Status OK -> normale werking"
+                        << std::endl;
+                }
+            }
+            else
+            {
+                std::cout
+                    << "[RobotExplore] Kan status file niet openen -> normale werking"
+                    << std::endl;
+            }
+        }
+
+
+
+        // =====================================================
+        // Originele RobotExplore logica
+        // =====================================================
+
+
         setOutput("robotLocation", "WORKING");
+
 
         // timestamp maken (Unix time)
         auto stamp = node_->get_clock()->now();
 
-        int64_t sec = static_cast<int64_t>(stamp.seconds());
-        int64_t nanosec = stamp.nanoseconds() % 1000000000;
+
+        int64_t sec =
+            static_cast<int64_t>(stamp.seconds());
+
+
+        int64_t nanosec =
+            stamp.nanoseconds() % 1000000000;
+
+
 
         std::string explore_timestamp =
-            std::to_string(sec) + "." + std::to_string(nanosec);
+            std::to_string(sec)
+            + "."
+            + std::to_string(nanosec);
 
-        // blackboard output
-        setOutput("explore_timestamp", explore_timestamp);
+
+
+        setOutput("explore_timestamp",
+                  explore_timestamp);
+
+
 
         std::string state = "RobotExplore";
+
+
         std_msgs::msg::String msg;
+
         msg.data = state;
+
         pub_quiz_->publish(msg);
 
+
+
         std_msgs::msg::String bt_msg;
+
         bt_msg.data = "RobotExplore";
+
         pub_bt_->publish(bt_msg);
 
-        std::cout << "[RobotExplore] Exploring environment (sim)" << std::endl;
-        std::cout << "[RobotExplore] Timestamp: " << explore_timestamp << std::endl;
+
+
+        std::cout
+            << "[RobotExplore] Exploring environment (sim)"
+            << std::endl;
+
+
+        std::cout
+            << "[RobotExplore] Timestamp: "
+            << explore_timestamp
+            << std::endl;
+
+
 
         return BT::NodeStatus::SUCCESS;
     }
 
+
 private:
+
     rclcpp::Node::SharedPtr node_;
+
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;
+
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
 };
-
 
 
 
@@ -5556,7 +5766,6 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
 };
-
 class MainBTStopDrive : public BT::StatefulActionNode
 {
 public:
@@ -5565,68 +5774,94 @@ public:
     {
         node_ = rclcpp::Node::make_shared("btMainBTStopDrive");
 
-        // Publisher voor BT-status zoals bij andere nodes
-        pub_ = node_->create_publisher<std_msgs::msg::String>("/BehaviorTreeNode", 10);
+        // Publisher voor BT-status
+        pub_ = node_->create_publisher<std_msgs::msg::String>(
+            "/BehaviorTreeNode", 10);
 
-        rpi_pub_ = node_->create_publisher<std_msgs::msg::String>("/rpitopic", 10);    }
+        rpi_pub_ = node_->create_publisher<std_msgs::msg::String>(
+            "/rpitopic", 10);
+    }
 
     static BT::PortsList providedPorts()
     {
         return {
-            BT::InputPort<bool>("drive_failed"),  // BlackBoard input
+            BT::InputPort<bool>("drive_failed"),
+            BT::OutputPort<bool>("show_verdwaald")
         };
     }
 
     BT::NodeStatus onStart() override
     {
+        // =====================================================
+        // Toon verdwaald melding
+        // =====================================================
+        setOutput("show_verdwaald", true);
+
+        // =====================================================
         // Publiceer de node-status
+        // =====================================================
         std_msgs::msg::String msg;
         msg.data = "MainBTStopDrive";
         pub_->publish(msg);
 
+        // =====================================================
         // RPI topic publish
+        // =====================================================
         std_msgs::msg::String rpi_msg;
         rpi_msg.data = "RobotError";
         rpi_pub_->publish(rpi_msg);
 
-        
+        std::cout
+            << "[MainBTStopDrive] Node gestart, show_verdwaald = TRUE"
+            << std::endl;
 
-        std::cout << "[MainBTStopDrive] Node gestart, check drive_failed op blackboard" << std::endl;
         return BT::NodeStatus::RUNNING;
     }
 
     BT::NodeStatus onRunning() override
     {
         bool drive_failed = false;
+
         if (!getInput<bool>("drive_failed", drive_failed))
         {
-            std::cout << "[MainBTStopDrive] Geen drive_failed waarde gevonden, ga van FALSE uit" << std::endl;
+            std::cout
+                << "[MainBTStopDrive] Geen drive_failed waarde gevonden, ga van FALSE uit"
+                << std::endl;
+
             return BT::NodeStatus::SUCCESS;
         }
 
         if (drive_failed)
         {
-            std::cout << "[MainBTStopDrive] drive_failed = TRUE, blijf RUNNING" << std::endl;
+            std::cout
+                << "[MainBTStopDrive] drive_failed = TRUE, blijf RUNNING"
+                << std::endl;
+
             return BT::NodeStatus::RUNNING;
         }
         else
         {
-            std::cout << "[MainBTStopDrive] drive_failed = FALSE, returning SUCCESS" << std::endl;
+            std::cout
+                << "[MainBTStopDrive] drive_failed = FALSE, returning SUCCESS"
+                << std::endl;
+
             return BT::NodeStatus::SUCCESS;
         }
     }
 
     void onHalted() override
     {
-        std::cout << "[MainBTStopDrive] HALTED" << std::endl;
+        std::cout
+            << "[MainBTStopDrive] HALTED"
+            << std::endl;
     }
 
 private:
     rclcpp::Node::SharedPtr node_;
+
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr rpi_pub_;
 };
-
 class MainBTSetErrorFlag : public BT::StatefulActionNode
 {
 public:
@@ -5636,30 +5871,41 @@ public:
         node_ = rclcpp::Node::make_shared("btMainBTSetErrorFlag");
 
         // Publisher naar rpitopic
-        rpi_pub_ = node_->create_publisher<std_msgs::msg::String>("/rpitopic", 10);
+        rpi_pub_ = node_->create_publisher<std_msgs::msg::String>(
+            "/rpitopic", 10);
     }
 
     static BT::PortsList providedPorts()
     {
         return {
-            BT::OutputPort<bool>("drive_failed")  // BlackBoard output
+            BT::OutputPort<bool>("drive_failed"),
+            BT::OutputPort<bool>("show_verdwaald")
         };
     }
 
     BT::NodeStatus onStart() override
     {
-        // Zet blackboard flag
+        // =====================================================
+        // Zet blackboard flags
+        // =====================================================
         setOutput("drive_failed", true);
+        setOutput("show_verdwaald", false);
 
+        // =====================================================
         // Publish naar RPI topic
+        // =====================================================
         std_msgs::msg::String msg;
         msg.data = "RobotStarting";
         rpi_pub_->publish(msg);
 
+        // =====================================================
         // Start tijd registreren
+        // =====================================================
         start_time_ = std::chrono::steady_clock::now();
 
-        std::cout << "[MainBTSetErrorFlag] started -> publishing RobotExplore" << std::endl;
+        std::cout
+            << "[MainBTSetErrorFlag] started -> publishing RobotStarting"
+            << std::endl;
 
         return BT::NodeStatus::RUNNING;
     }
@@ -5667,34 +5913,41 @@ public:
     BT::NodeStatus onRunning() override
     {
         auto elapsed = std::chrono::steady_clock::now() - start_time_;
-        auto seconds = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
+        auto seconds =
+            std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
 
         if (seconds >= 5)
         {
-            std::cout << "[MainBTSetErrorFlag] 5 seconds done -> SUCCESS" << std::endl;
+            std::cout
+                << "[MainBTSetErrorFlag] 5 seconds done -> SUCCESS"
+                << std::endl;
+
             return BT::NodeStatus::SUCCESS;
         }
 
-        std::cout << "[MainBTSetErrorFlag] running... (" << seconds << "s)" << std::endl;
+        std::cout
+            << "[MainBTSetErrorFlag] running... ("
+            << seconds
+            << "s)"
+            << std::endl;
+
         return BT::NodeStatus::RUNNING;
     }
 
     void onHalted() override
     {
-        std::cout << "[MainBTSetErrorFlag] HALTED" << std::endl;
+        std::cout
+            << "[MainBTSetErrorFlag] HALTED"
+            << std::endl;
     }
 
 private:
     rclcpp::Node::SharedPtr node_;
+
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr rpi_pub_;
 
     std::chrono::steady_clock::time_point start_time_;
 };
-// =======================================================
-// StartDrivingToPeople
-// → Start beweging richting bezoekers/people node
-// → Publishes BT status + quiz trigger-
-// =======================================================
 
 
 
@@ -5710,7 +5963,6 @@ private:
 
 #include <thread>
 #include <chrono>
-
 class StartDrivingToPeople : public BT::StatefulActionNode
 {
 public:
@@ -5738,11 +5990,18 @@ public:
         return {
             BT::InputPort<std::string>("explore_timestamp"),
             BT::InputPort<int>("delta_seconds"),
-            BT::InputPort<bool>("robot_needs_rotation")};
+            BT::InputPort<bool>("robot_needs_rotation"),
+            BT::OutputPort<bool>("show_verdwaald")
+        };
     }
 
     BT::NodeStatus onStart() override
     {
+        // =====================================================
+        // Reset verdwaald melding
+        // =====================================================
+        setOutput("show_verdwaald", false);
+
         std_msgs::msg::String quiz_msg;
         quiz_msg.data = "RobotExplore";
         pub_quiz_->publish(quiz_msg);
@@ -5759,11 +6018,11 @@ public:
                       << std::endl;
 
             geometry_msgs::msg::Twist twist;
-            twist.angular.z = 0.3; // lage rotatiesnelheid
+            twist.angular.z = 0.3;
 
             rclcpp::Rate rate(20);
 
-            // ongeveer 90° draaien
+            // ongeveer 90 graden draaien
             // 0.3 rad/s gedurende ±5.2 s ≈ 1.57 rad
             for (int i = 0; i < 104; i++)
             {
@@ -5785,11 +6044,6 @@ public:
         std_msgs::msg::String bt_msg;
         bt_msg.data = "StartDrivingToPeople";
         pub_bt_->publish(bt_msg);
-
-        // =====================================================
-        // Publish naar RPi
-        // =====================================================
-
 
         // =====================================================
         // Tracking inschakelen
@@ -5860,11 +6114,7 @@ public:
         // Klaar?
         // =====================================================
 
-
         return BT::NodeStatus::SUCCESS;
-
-
-
     }
 
     void onHalted() override
@@ -5888,8 +6138,6 @@ private:
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_tracking_enable_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr pub_cmd_vel_;
 };
-
-
 
 class LoopSequence : public BT::DecoratorNode
 {
@@ -6055,7 +6303,6 @@ private:
 };
 
 
-
 class CheckAdminPanel : public BT::StatefulActionNode
 {
 public:
@@ -6064,20 +6311,6 @@ public:
           admin_panel_open_(false)
     {
         node_ = rclcpp::Node::make_shared("btCheckAdminPanel");
-
-        // Subscriber naar /admin topic
-        rclcpp::QoS qos(1);
-        qos.reliable(); 
-        sub_ = node_->create_subscription<std_msgs::msg::String>(
-            "/admin", qos,
-            [this](std_msgs::msg::String::SharedPtr msg)
-            {
-                if (msg->data == "ADMINPANELOPEN")
-                {
-                    std::cout << "[CheckAdminPanel] ADMINPANELOPEN ontvangen!" << std::endl;
-                    admin_panel_open_ = true;
-                }
-            });
     }
 
     static BT::PortsList providedPorts()
@@ -6098,12 +6331,23 @@ public:
         }
 
         admin_panel_open_ = false;
+
         return BT::NodeStatus::RUNNING;
     }
 
     BT::NodeStatus onRunning() override
     {
-        rclcpp::spin_some(node_);
+        // Check admin panel status via database
+        json status = retrieveRobotStatus({"adminPanelIsOpen"});
+
+        if (status.contains("adminPanelIsOpen"))
+        {
+            admin_panel_open_ = status["adminPanelIsOpen"].get<bool>();
+        }
+        else
+        {
+            std::cout << "[CheckAdminPanel] adminPanelIsOpen niet gevonden in database" << std::endl;
+        }
 
         if (admin_panel_open_)
         {
@@ -6121,10 +6365,8 @@ public:
 
 private:
     rclcpp::Node::SharedPtr node_;
-    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
     bool admin_panel_open_;
 };
-
 
 /* RT: we willen de robot ook kunnen opstarten aan de april TAG.
 
