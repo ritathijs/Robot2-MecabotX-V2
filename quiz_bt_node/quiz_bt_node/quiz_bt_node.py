@@ -109,6 +109,14 @@ class QuizBTNode(Node):
             10
         )
         
+        # publisher voor active button events
+        self.ask_button_quiz_publisher = self.create_publisher(
+            String,
+            'ask_button_quiz',
+            1
+        )
+
+
         self.quiz_activestatus_publisher = self.create_publisher(String, 'quizbtnode_activestatus', 1)
 
 
@@ -159,6 +167,14 @@ class QuizBTNode(Node):
             self.get_logger().error(f"Fout bij inladen json: {e}")
 
     # ---------------- SETTINGS OPHALEN ----------------
+
+    def publish_ask_button_quiz_message(self, message):
+        msg = String()
+        msg.data = message
+        self.ask_button_quiz_publisher.publish(msg)
+        self.get_logger().info(
+            f'Published to ask_button_quiz topic: {msg.data}'
+        )
     
     def fetch_schedule(self):
         # mapping van de dagnamen uit de server naar het 1 letter formaat dat in de schedule.txt staat
@@ -398,14 +414,19 @@ class QuizBTNode(Node):
         self.get_logger().info("vraag aan bt of robot actief is")
         self.publish_quiz_activestatus_message("ask-is-active")
 
-    def on_active_button_toggled(self, data):
-        is_active = data.get('isActive')
-        self.get_logger().info(f"gebruiker heeft op de knop geduwd; (gewenst:{is_active})")
-        
+    def on_active_button_toggled(self, is_active):
+        self.get_logger().info(
+            f"Gebruiker heeft op de knop gedrukt (gewenst: {is_active})"
+        )
+
         if is_active:
-            self.publish_quiz_message("robot-activeButtonToggled-true")
+            self.publish_ask_button_quiz_message(
+                "robot-activeButtonToggled-true"
+            )
         else:
-            self.publish_quiz_message("robot-activeButtonToggled-false")
+            self.publish_ask_button_quiz_message(
+                "robot-activeButtonToggled-false"
+            )
 
     def on_robot_stop_for_x_time(self, data):
         self.get_logger().info("Hier zou de robot moeten stoppen voor max 30 seconden. Waarschijnlijk wordt tijdens 30 seconden quiz getrigger of adminpaneel geopend")

@@ -31,7 +31,7 @@ bool updateRobotStatus(const json& fieldsToUpdate)
     httplib::Client cli("http://10.0.0.11");
 
     auto res = cli.Post(
-        "/robot-status/update-robot-status",
+        "/robot-status/insert-robot-status",
         fieldsToUpdate.dump(),
         "application/json");
 
@@ -50,6 +50,12 @@ bool updateRobotStatus(const json& fieldsToUpdate)
         {
             std::cerr << "JSON parse error: " << e.what() << std::endl;
         }
+    }
+
+    if (res)
+    {
+        std::cout << "Status: " << res->status << std::endl;
+        std::cout << "Body: " << res->body << std::endl;
     }
 
     std::string err = res ? std::to_string(res->status) : "Connection error";
@@ -215,13 +221,26 @@ public:
         rclcpp::QoS qos(1);
         qos.reliable();
 
-        // Subscriber naar quizbtnode_activestatus
+        // -----------------------------
+        // BESTAANDE subscriber behouden
+        // -----------------------------
         sub_ = node_->create_subscription<std_msgs::msg::String>(
             "quizbtnode_activestatus",
             qos,
             [this](std_msgs::msg::String::SharedPtr msg)
             {
                 last_message_ = msg->data;
+            });
+
+        // -----------------------------
+        // NIEUWE subscriber
+        // -----------------------------
+        ask_button_sub_ = node_->create_subscription<std_msgs::msg::String>(
+            "ask_button_quiz",
+            qos,
+            [this](std_msgs::msg::String::SharedPtr msg)
+            {
+                last_button_message_ = msg->data;
             });
 
         // Publisher naar rpitopic
@@ -237,6 +256,7 @@ public:
     BT::NodeStatus onStart() override
     {
         last_message_.clear();
+        last_button_message_.clear();
         return BT::NodeStatus::RUNNING;
     }
 
@@ -244,9 +264,11 @@ public:
     {
         rclcpp::spin_some(node_);
 
+        // ==========================================================
+        // BESTAANDE functionaliteit behouden
+        // ==========================================================
         if (last_message_ == "ask-is-active")
         {
-            // Bericht verwerken
             last_message_.clear();
 
             json robotStatus = retrieveRobotStatus({"robotActive"});
@@ -274,6 +296,60 @@ public:
             rpi_pub_->publish(msg);
         }
 
+        // ==========================================================
+        // NIEUWE functionaliteit
+        // ==========================================================
+
+        if (last_button_message_ == "robot-activeButtonToggled-false")
+        {
+            last_button_message_.clear();
+
+            std::cout << "[CheckNetworkError] Active button -> FALSE" << std::endl;
+
+            // Database op false zetten
+            updateRobotStatus({
+                {"robotActive", false}
+            });
+
+            // Bevestiging terugsturen
+            std_msgs::msg::String msg;
+            msg.data = "RobotIsActiveFalse";
+            rpi_pub_->publish(msg);
+        }
+        else if (last_button_message_ == "robot-activeButtonToggled-true")
+        {
+            last_button_message_.clear();
+
+            std::cout << "[CheckNetworkError] Active button -> TRUE" << std::endl;
+
+            std_msgs::msg::String msg;
+
+            if (batteryLowInFile())
+            {
+                std::cout << "[CheckNetworkError] Battery LOW -> robot blijft inactive" << std::endl;
+
+                // Database terug op false
+                updateRobotStatus({
+                    {"robotActive", false}
+                });
+
+                msg.data = "RobotIsActiveFalse";
+            }
+            else
+            {
+                std::cout << "[CheckNetworkError] Battery OK -> robot wordt active" << std::endl;
+
+                // Database op true
+                updateRobotStatus({
+                    {"robotActive", true}
+                });
+
+                msg.data = "RobotIsActiveTrue";
+            }
+
+            rpi_pub_->publish(msg);
+        }
+
         return BT::NodeStatus::RUNNING;
     }
 
@@ -283,13 +359,50 @@ public:
     }
 
 private:
+
+    bool batteryLowInFile()
+    {
+        const std::string filePath =
+            "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/batstatus.txt";
+
+        std::ifstream file(filePath);
+
+        if (!file.is_open())
+        {
+            return false;
+        }
+
+        std::string line;
+        while (std::getline(file, line))
+        {
+            if (line == "BATTERY-LOW")
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+private:
     rclcpp::Node::SharedPtr node_;
 
+    // Bestaande subscriber
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
+
+    // Nieuwe subscriber
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr ask_button_sub_;
 
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr rpi_pub_;
 
+    // Bestaande variabele
     std::string last_message_;
+
+    // Nieuwe variabele
+    std::string last_button_message_;
+
+    // Mag blijven staan indien elders gebruikt
+    std::string last_event_;
 };
 
 
