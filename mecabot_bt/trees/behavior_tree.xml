@@ -41,7 +41,7 @@
                                             
                                             <LoopSequence name="LoopSequence">
                                                 <Sequence name="FollowMeSequence">
-                                                    <StartDrivingToPeople explore_timestamp="{explore_timestamp}" delta_seconds ="250" robot_needs_rotation = "{robot_needs_rotation}"/>
+                                                    <StartDrivingToPeople visitor_code = "{visitor_code}" show_verdwaald = "{show_verdwaald}" explore_timestamp="{explore_timestamp}" delta_seconds ="250" robot_needs_rotation = "{robot_needs_rotation}"  />
                                                     <CheckingNearbyVisitors  visitor_code ="{visitor_code}" robot_needs_rotation = "{robot_needs_rotation}"
  timer="50"   />
                                                     <RobotRotationFollowMe visitor_code ="{visitor_code}" robot_needs_rotation = "{robot_needs_rotation}"

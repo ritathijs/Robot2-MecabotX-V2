@@ -2679,7 +2679,6 @@ private:
 #include <fstream>
 #include <random>
 #include <cctype>
-
 class CheckingNearbyVisitors : public BT::StatefulActionNode
 {
 public:
@@ -2693,9 +2692,6 @@ public:
 
         pub_ = node_->create_publisher<std_msgs::msg::String>(
             "/BehaviorTreeNode", 10);
-
-        pub_quiz_screen_ = node_->create_publisher<std_msgs::msg::String>(
-            "/rpitopic", 10);
 
         search_pub_ = node_->create_publisher<geometry_msgs::msg::Twist>(
             "/search_cmd_vel", 10);
@@ -2764,24 +2760,67 @@ public:
         return
         {
             BT::InputPort<double>("timer"),
-            BT::OutputPort<std::string>("visitor_code"),
+            BT::InputPort<std::string>("visitor_code"),
             BT::OutputPort<bool>("robot_needs_rotation")
         };
     }
 
     BT::NodeStatus onStart() override
     {
-        latest_value_ = 999.0;
-        received_drive_to_quiz_ = false;
+        // -----------------------------
+        // Visitor code ophalen via InputPort
+        // (wordt nu al gegenereerd door StartDrivingToPeople)
+        // -----------------------------
+        visitor_code_.clear();
+
+        if(getInput("visitor_code", visitor_code_))
+        {
+            std::cout
+                << "[CheckingNearbyVisitors] Visitor code received from port: "
+                << visitor_code_
+                << std::endl;
+        }
+        else
+        {
+            std::cout
+                << "[CheckingNearbyVisitors] WARNING: No visitor_code received"
+                << std::endl;
+        }
 
         // standaard: volgende nodes uitvoeren
         setOutput("robot_needs_rotation", true);
 
-        // Nieuwe random code maken
-        visitor_code_ = generateRandomCode();
+        //--------------------------------------------------------
+        // Controle: knop mogelijk al ingedrukt vóór deze node
+        // (scherm staat al aan sinds StartDrivingToPeople)
+        //--------------------------------------------------------
+        {
+            std::ifstream file(
+            "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/quizknop.txt");
 
-        // Output ports vullen
-        setOutput("visitor_code", visitor_code_);
+            if(file.is_open())
+            {
+                std::string status;
+
+                std::getline(file, status);
+
+                file.close();
+
+                if(status == "GEDRUKT")
+                {
+                    std::cout
+                        << "[CheckingNearbyVisitors] quizknop.txt = GEDRUKT -> SUCCESS"
+                        << std::endl;
+
+                    setOutput("robot_needs_rotation", false);
+
+                    return BT::NodeStatus::SUCCESS;
+                }
+            }
+        }
+
+        latest_value_ = 999.0;
+        received_drive_to_quiz_ = false;
 
         start_time_ =
             std::chrono::steady_clock::now();
@@ -2789,33 +2828,9 @@ public:
         rotation_start_time_ =
             std::chrono::steady_clock::now();
 
-        {
-            std::ofstream file(
-            "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/quizknop.txt");
-
-            if(file.is_open())
-            {
-                file << "LOS";
-                file.close();
-            }
-        }
-
         std_msgs::msg::String msg;
         msg.data = "CheckingNearbyVisitors";
         pub_->publish(msg);
-
-        // Scherm bericht met code
-        std_msgs::msg::String screen_msg;
-
-        screen_msg.data =
-            "RobotArrivedAtVisitors" + visitor_code_;
-
-        pub_quiz_screen_->publish(screen_msg);
-
-        std::cout
-        << "[CheckingNearbyVisitors] Screen trigger sent: "
-        << screen_msg.data
-        << std::endl;
 
         std::cout
         << "[CheckingNearbyVisitors] Visitor code: "
@@ -2935,24 +2950,6 @@ public:
 
 private:
 
-    std::string generateRandomCode()
-    {
-        static std::random_device rd;
-        static std::mt19937 gen(rd());
-
-        std::uniform_int_distribution<int> letter_dist(0,25);
-        std::uniform_int_distribution<int> number_dist(0,9);
-
-        char letter =
-            'A' + letter_dist(gen);
-
-        int number =
-            number_dist(gen);
-
-        return std::string(1, letter)
-               + std::to_string(number);
-    }
-
     void stopRotation()
     {
         geometry_msgs::msg::Twist stop;
@@ -2968,7 +2965,6 @@ private:
     rclcpp::Node::SharedPtr node_;
 
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_screen_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr search_pub_;
 
     rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr sub_;
@@ -2982,7 +2978,9 @@ private:
 
     std::chrono::steady_clock::time_point start_time_;
     std::chrono::steady_clock::time_point rotation_start_time_;
-}; 
+};
+
+
 #include <fstream>
 #include <string>
 // BT node die bepaalt of robot de visitors bereikt heeft via afstand + trigger event
@@ -5191,12 +5189,6 @@ public:
                     new_measurement_ = true;
                 });
 
-
-
-
-
-
-
         // -------------------------------------------------
         // Quiz knop subscriber
         // -------------------------------------------------
@@ -5211,19 +5203,13 @@ public:
                     std::string expected_message =
                         "drive_to_quiz_location" + visitor_code_;
 
-
-
                     if(msg->data == expected_message)
                     {
                         std::cout
                             << "[RobotRotationFollowMe] Correct quiz code received: "
                             << msg->data
                             << std::endl;
-
-
                         received_drive_to_quiz_ = true;
-
-
 
                         std::ofstream file(
                             "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/quizknop.txt");
@@ -5246,12 +5232,6 @@ public:
                 });
     }
 
-
-
-
-
-
-
     static BT::PortsList providedPorts()
     {
         return {
@@ -5263,13 +5243,6 @@ public:
             BT::OutputPort<bool>("robot_needs_rotation")
         };
     }
-
-
-
-
-
-
-
 
     BT::NodeStatus onStart() override
     {
@@ -5295,11 +5268,6 @@ public:
                 << std::endl;
         }
 
-
-
-
-
-
         //--------------------------------------------------------
         // Controle vorige knop
         //--------------------------------------------------------
@@ -5307,7 +5275,6 @@ public:
         {
             std::ifstream file(
                 "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/quizknop.txt");
-
 
             if(file.is_open())
             {
@@ -5332,11 +5299,6 @@ public:
                 }
             }
         }
-
-
-
-
-
 
         latest_distance_ = 0.0;
 
@@ -5968,7 +5930,8 @@ class StartDrivingToPeople : public BT::StatefulActionNode
 public:
     StartDrivingToPeople(const std::string &name,
                          const BT::NodeConfiguration &config)
-        : BT::StatefulActionNode(name, config)
+        : BT::StatefulActionNode(name, config),
+          received_drive_to_quiz_(false)
     {
         node_ = rclcpp::Node::make_shared("btStartDrivingToPeople");
 
@@ -5983,6 +5946,48 @@ public:
 
         pub_cmd_vel_ = node_->create_publisher<geometry_msgs::msg::Twist>(
             "/gui_cmd_vel", 10);
+
+        // -----------------------------
+        // Quiz knop subscriber
+        // -----------------------------
+        rclcpp::QoS quiz_qos(1);
+        quiz_qos.reliable();
+        quiz_qos.durability(RMW_QOS_POLICY_DURABILITY_VOLATILE);
+
+        sub_quiz_ = node_->create_subscription<std_msgs::msg::String>(
+            "/quiz",
+            quiz_qos,
+            [this](std_msgs::msg::String::SharedPtr msg)
+            {
+                std::string expected =
+                    "drive_to_quiz_location" + visitor_code_;
+
+                if(msg->data == expected)
+                {
+                    std::cout
+                    << "[StartDrivingToPeople] Received correct quiz code: "
+                    << msg->data
+                    << std::endl;
+
+                    received_drive_to_quiz_ = true;
+
+                    std::ofstream file(
+                    "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/quizknop.txt");
+
+                    if(file.is_open())
+                    {
+                        file << "GEDRUKT";
+                        file.close();
+                    }
+                }
+                else
+                {
+                    std::cout
+                    << "[StartDrivingToPeople] Wrong quiz code received: "
+                    << msg->data
+                    << std::endl;
+                }
+            });
     }
 
     static BT::PortsList providedPorts()
@@ -5991,7 +5996,8 @@ public:
             BT::InputPort<std::string>("explore_timestamp"),
             BT::InputPort<int>("delta_seconds"),
             BT::InputPort<bool>("robot_needs_rotation"),
-            BT::OutputPort<bool>("show_verdwaald")
+            BT::OutputPort<bool>("show_verdwaald"),
+            BT::OutputPort<std::string>("visitor_code")
         };
     }
 
@@ -6002,9 +6008,41 @@ public:
         // =====================================================
         setOutput("show_verdwaald", false);
 
+        // =====================================================
+        // Nieuwe visitor code + knopscherm activeren
+        // =====================================================
+        visitor_code_ = generateRandomCode();
+        setOutput("visitor_code", visitor_code_);
+        received_drive_to_quiz_ = false;
+
+        {
+            std::ofstream file(
+            "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/quizknop.txt");
+
+            if(file.is_open())
+            {
+                file << "LOS";
+                file.close();
+            }
+        }
+
         std_msgs::msg::String quiz_msg;
         quiz_msg.data = "RobotExplore";
         pub_quiz_->publish(quiz_msg);
+
+        std_msgs::msg::String screen_msg;
+        screen_msg.data = "RobotArrivedAtVisitors" + visitor_code_;
+        pub_quiz_->publish(screen_msg);
+
+        std::cout
+        << "[StartDrivingToPeople] Screen trigger sent: "
+        << screen_msg.data
+        << std::endl;
+
+        std::cout
+        << "[StartDrivingToPeople] Visitor code: "
+        << visitor_code_
+        << std::endl;
 
         // =====================================================
         // Indien nodig eerst een kwartslag draaien
@@ -6131,13 +6169,40 @@ public:
     }
 
 private:
+
+    std::string generateRandomCode()
+    {
+        static std::random_device rd;
+        static std::mt19937 gen(rd());
+
+        std::uniform_int_distribution<int> letter_dist(0,25);
+        std::uniform_int_distribution<int> number_dist(0,9);
+
+        char letter =
+            'A' + letter_dist(gen);
+
+        int number =
+            number_dist(gen);
+
+        return std::string(1, letter)
+               + std::to_string(number);
+    }
+
+private:
     rclcpp::Node::SharedPtr node_;
 
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_tracking_enable_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr pub_cmd_vel_;
+
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_quiz_;
+
+    bool received_drive_to_quiz_;
+    std::string visitor_code_;
 };
+
+
 
 class LoopSequence : public BT::DecoratorNode
 {
