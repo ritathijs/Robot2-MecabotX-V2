@@ -1896,14 +1896,14 @@ public:
         }
 
         geometry_msgs::msg::Twist cmd;
-        cmd.linear.x = 0.25;   // rustige snelheid
+        cmd.linear.x = 0.20;   // rustige snelheid
         cmd.angular.z = 0.0;
 
         auto drive_start = std::chrono::steady_clock::now();
 
         while (std::chrono::duration<double>(
                    std::chrono::steady_clock::now() - drive_start)
-                   .count() < 2.0)
+                   .count() < 1.0)
         {
             pub_cmd_vel_->publish(cmd);
             rclcpp::spin_some(node_);

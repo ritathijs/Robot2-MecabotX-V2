@@ -7,8 +7,6 @@
 #引用ros库
 import rclpy
 from rclpy.node import Node
-from nav2_simple_commander.robot_navigator import BasicNavigator,TaskResult
-from rclpy.duration import Duration
 from std_msgs.msg import String  
 
 from rclpy.qos import QoSProfile, ReliabilityPolicy
@@ -103,7 +101,7 @@ def print_and_fixRetract(str):
     print(str)
 
 class AutoRecharger(Node):
-    def __init__(self, navigator):
+    def __init__(self):
         
         #创建节点
         super().__init__("auto_recharger")
@@ -112,9 +110,6 @@ class AutoRecharger(Node):
 
 
         self.must_reset = False  # VLAG VOOR HET HERSTARTEN VAN DE GEHELE CODE NA STOP BERICHT
-
-        self.nav_controller = navigator
-
 
  #Statusvariabelen van de robot: type, batterijcapaciteit, batterijspanning, laadstatus, laadstroom, status van het infraroodsignaal, registratie van de houding van de robot        
         self.robot = {
@@ -223,17 +218,12 @@ class AutoRecharger(Node):
         # Laatste laadpaal locatie data
         self.json_data = 0
 
-        # Vlag of navigatie-resultaten worden gemonitord
-        self.star_getNav_Feedback_Flag = 0
-
         # default waarde voor hoeveel afstand voor pijl rviz er moet worden gereden (waarde uit yaml zal deze overschrijven)
         self.diff_point = 1.2
 
         # idem hierboven maar dan hoek
         self.diff_angle = -15
 
-        #self.nav_controller =  BasicNavigator()
- 
  
         #De locatiegegevens van laadpalen uit een JSON-bestand ophalen
         with open(json_file,'r')as fp:
@@ -283,7 +273,7 @@ class AutoRecharger(Node):
         #按键控制说明
         self.tips = """
 使用下面按键使用自动回充功能.       Press below Key to AutoRecharger.
-Q/q:开启自动回充.                   Q/q:Start Navigation to find charger.
+Q/q:开启自动回充.                   Q/q:Start looking for charger.
 E/e:停止自动回充.                   E/e:Stop find charger.
 Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 可使用话题"charger_position_update"更新充电桩的位置.
@@ -492,6 +482,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                 self.charge_session_id = session_id
                 self.force_charge_active = True
                 self.stop_processed = False
+                self.publish_event("DRIVE-TO-DOCK-SUCCESS")
                 self.start_forced_charging()
                 return
 
@@ -535,44 +526,6 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
             self.Stop_Charge(drive_forward=True)
 
-
-    # het publiceren van het navigatiedoel naar nav
-    def Pub_Charger_Position(self):
-        '''使用最新充电桩位置发布导航目标点话题'''
-        # 开始监听导航结果
-        self.star_getNav_Feedback_Flag=1  # Deze vlag gezet om te kijken naar feedback van navigatie
-
-        #nav doelwit aanmaken
-        nav_goal=PoseStamped()
-        nav_goal.header.frame_id = 'map'
-        nav_goal.header.stamp = self.get_clock().now().to_msg()
-
-        #opladen van doellocatie uit de json file waar locatie instaat
-        nav_goal.pose.position.x = self.json_data['p_x']
-        nav_goal.pose.position.y = self.json_data['p_y']
-        nav_goal.pose.orientation.z = self.json_data['orien_z']
-        nav_goal.pose.orientation.w = self.json_data['orien_w']
-
-        # charger in rviz2 visualiseren (of toch de mogelijkheid tot indien je het juiste aanzet)
-        self.Pub_Charger_marker(
-            self.json_data['p_x'], 
-            self.json_data['p_y'], 
-            self.json_data['orien_z'], 
-            self.json_data['orien_w'])
-        
-        # BT HIER START RIJDEN
-        self.publish_event("DRIVING-TO-DOCK")
-
-        # effectief starten met navigatie tot doel
-        self.nav_controller.goToPose(nav_goal)
-
-
-    # annuleer actieve taak
-    def Pub_NavGoal_Cancel(self):
-        '''取消导航'''
-        # stop feedback tracking en annuleer doel
-        self.star_getNav_Feedback_Flag = 0
-        self.nav_controller.cancelTask()
 
     def Pub_Charger_marker(self, p_x, p_y, o_z, o_w):
         '''发布目标点可视化话题'''
@@ -634,18 +587,6 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         markerArray.markers.append(marker_string) #添加元素进数组
         self.Charger_marker_pub.publish(markerArray) #发布markerArray，rviz订阅并进行可视化
 
-    # def Pub_Recharger_Flag(self):
-    #   '''发布自动回充任务是否开启标志位话题'''
-    #   # topic=Int8()
-    #   # topic.data=self.chargeflag
-    #   # for i in range(10):
-    #   #   self.Recharger_Flag_pub.publish(topic)
-                        
-    #   topic = Twist()
-    #   for i in range(5):
-    #       self.Cmd_vel_pub.publish(topic)
-
-
     def Pub_Recharger_Flag(self,set_velflag=0):
         # oproepen van de juiste functie om status naar stm te sturen
 
@@ -676,36 +617,6 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         '''Update batterij spanning'''
 
         self.robot['Voltage']=topic.data
-
-    # def Charging_Flag_callback(self, topic):
-    #     # detecteren van starten of stoppen met laden
-        
-
-
-    #     '''更新机器人充电状态'''
-    #     # robot was niet aan het laden, maar is nu wel aan het laden
-    #     if(self.robot['Charging']==0 and topic.data==1):
-
-    #         # BT Start met opladen
-    #         self.publish_event("ROBOT-CHARGING")
-
-    #         # Toon scherm om aan te geven dat robot aan het laden is
-    #         self.publish_rpi_event("RobotCharging")
-
-
-    #         print_and_fixRetract(GREEN+"Charging started!"+RESET)
-    #         self.hard_stop_robot() # dwingen om robot om te stoppen (wielen snelheden even 0 sturen)
-
-    #     # robot was aan het laden, maar is nu niet meer aa nhet laden
-    #     if(self.robot['Charging']==1 and topic.data==0):
-    #         print_and_fixRetract(YELLOW+"Charging disconnected!"+RESET)
-    #         if self.chargeflag == 1:  # we verwachten nog wel dat de robot aan het laden is
-    #             print_and_fixRetract(YELLOW+"Code bereikt"+RESET)
-    #             self.hard_stop_robot() # even terug wielen op 0 dwingen
-    #             self.retry_docking_if_not_charging() # robot naar voor dwingen te rijden, hij zal daarna opnieuw zijn IR laten plaatsvinden (dus een docking retry)
-    #     self.robot['Charging']=topic.data
-
-
 
     def Charging_Current_callback(self, topic):
         """Update laadstroom en bepaal laadstatus op basis van stroom."""
@@ -811,15 +722,6 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             # Als IR gevonden tijdens draaien
             if self.robot['RED']==1:
                 self.find_redsignal = self.find_redsignal + 1 
-                # print(self.find_redsignal)
-                # if self.find_redsignal>=3: # 稳定识别一段时间
-                #   self.find_redsignal = 0 
-                #   self.start_turn=0
-                #   print_and_fixRetract(GREEN+'已通过自转发现红外信号,开始对接充电.(Infrared signals have been detected by rotation. Docking and charging has begun.)'+RESET)
-                #   vel_topic=Twist()
-                #   self.Cmd_vel_pub.publish(vel_topic) # 停止运动
-                #   self.chargeflag=1 # 开启自动回充
-                #   self.Pub_Recharger_Flag()
             else:
                 # Reset counter als signaal wegvalt tijdens rotatie
                 self.find_redsignal = 0
@@ -887,17 +789,10 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
         """
         Emergency stop:
-        - Cancels Nav2 goal
         - Stops rotation search
         - Publishes zero velocity multiple times to guarantee stop
         """
             
-
-        # Stop Nav2
-        try:
-            self.nav_controller.cancelTask()
-        except Exception:
-            pass
 
         # Stop zoek-rotatie
         self.start_turn = 0
@@ -913,24 +808,15 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         """
 
         Stop volledige charging flow:
-        - Cancels navigation
         - Stops IR search
         - Optionally drives robot slightly forward to clear dock
         - Resets charging state
         """
 
 
-        #如果在导航回充模式下，关闭导航
-
         # print_and_fixRetract(
         #     CYAN + f"[DEBUG] STOP CHARGE BEFORE RESET | start_turn={self.start_turn} | find_red={self.find_redsignal} | RED={self.robot['RED']}" + RESET
         # )
-            
-        # cancelen van doel
-        self.Pub_NavGoal_Cancel() 
-
-        # we hoeven niet naar nav te kijken
-        self.star_getNav_Feedback_Flag = 0
 
         self.lost_power_once=1
         
@@ -1007,60 +893,33 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         self.Cmd_vel_pub.publish(rotate)
 
 
-    # def wait_for_docking_status_subscriber(self, timeout=10.0):
-    #     """
-    #     Wacht totdat minstens één subscriber verbonden is met
-    #     /infrared_docking_status.
-    #     """
-
-    #     start_time = time.time()
-
-    #     while self.count_subscribers('/infrared_docking_status') == 0:
-
-    #         if time.time() - start_time > timeout:
-    #             print_and_fixRetract(
-    #                 RED + "Geen subscriber gevonden voor infrared_docking_status!" + RESET
-    #             )
-    #             return False
-
-    #         print_and_fixRetract(
-    #             YELLOW + "Wachten op subscriber voor infrared_docking_status..." + RESET
-    #         )
-
-    #         rclpy.spin_once(self, timeout_sec=0.1)
-    #         time.sleep(0.1)
-
-    #     print_and_fixRetract(
-    #         GREEN + "Subscriber voor infrared_docking_status gevonden." + RESET
-    #     )
-
-    #     return True
-
-
-
     def start_forced_charging(self):
-        """Start charging logic (same as pressing Q)"""
+        """Start charging logic (same as pressing Q).
+        De robot wordt buiten deze code om al voor het laadstation gepositioneerd,
+        dus er wordt niet meer genavigeerd: er wordt enkel gecontroleerd of er al
+        een sterk IR-signaal is, en anders start het ronddraaien om te zoeken.
+        """
 
-
-
-        # print_and_fixRetract(
-        #     CYAN + f"[DEBUG] start_forced_charging | red_count={self.red_count} | chargeflag={self.chargeflag}" + RESET
-        # )
-
-        # indien metteen vanaf de locatie sterke IR wordt gezien
+        # indien meteen vanaf de locatie sterke IR wordt gezien
         if self.red_count >= 3:
-            self.Pub_NavGoal_Cancel()
             self.chargeflag = 1
             # self.publish_docking_status("DOCKING_ENABLED")
             self.Pub_Recharger_Flag()
             print_and_fixRetract(
                 'Geforceerd laden: sterke IR gedetecteerd, direct docken.'
             )
-        # rijden naar locatie initieren
+        # nog geen sterk IR: begin met ronddraaien om te zoeken
         else:
-            self.Pub_Charger_Position()
+            self.nav_end_z = self.robot['Rotation_Z']
+            self.start_turn = 1
+            self.find_redsignal = 0
+
+            topic = Twist()
+            topic.angular.z = 0.2
+            self.Cmd_vel_pub.publish(topic)
+
             print_and_fixRetract(
-                'Geforceerd laden: navigeren naar laadstation.'
+                'Geforceerd laden: nog geen sterk IR-signaal, start ronddraaien om te zoeken.'
             )
 
     def autoRecharger(self, key):
@@ -1074,10 +933,8 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             Handles:
             - Keyboard input (Q/E/T/Y)
             - Low battery detection
-            - Navigation state machine
             - IR docking logic
             - Charging monitoring
-            - Nav2 result handling
         """
 
 
@@ -1114,7 +971,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                 if self.power_lost_count>5 and self.lost_power_once==1:
                     self.power_lost_count=0
 
-                    #  indien vaak genoeg te laaG en de robot niet aan het laden is : cancelen van doel, battery low produceren en laden initieren
+                    #  indien vaak genoeg te laaG en de robot niet aan het laden is : battery low produceren
                     if self.chargeflag==0:
                         # ROBOT HEEFT TE LAGE SPANNING : BT moet aan zet zijn, NIET DEZE CODE
                         
@@ -1123,19 +980,6 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             
                         # IDEE : ZET HIER CODE DIE IN EEN FILE SCHRIJFT DAT SPANNING TE LAAG IS. BT ZAL HIERNA BEPALEN WAT DE SITUATIE IS
                         self.write_battery_status("BATTERY-LOW")
-                    
-                    
-                        # self.Pub_NavGoal_Cancel() # 取消导航
-                        # BT: batterij laag, laden moet starten
-                        # self.publish_event("BATTERY-LOW")
-                        # if 'akm' in self.robot['car_mode']:
-                        #     self.chargeflag=2
-                        # else:
-                        #     self.chargeflag=1
-                        # self.Pub_Recharger_Flag(1) # 出现要优先开启自动回充然后再导航的情况,需要进行标志位传递
-                        # self.Pub_Charger_Position()
-                        # print_and_fixRetract(YELLOW+'检测到电池电量低,即将导航到充电桩进行充电.(Detects low battery level and will navigate to a charging station for charging.)'+RESET)
-                        # self.lost_power_once=0
     
             else:
                 self.power_lost_count=0     
@@ -1154,81 +998,6 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                 self.json_data['orien_z'], 
                 self.json_data['orien_w'])
             self.last_time=self.get_clock().now()
-
-
-            # 需要监听导航结果
-            res = None
-            nav_feedback = None
-            if self.star_getNav_Feedback_Flag==1:  # Als deze vlag gezet is moet er actief geluisterd worden naar de feedback van de nav-code
-                # 等待导航结束
-                if self.nav_controller.isTaskComplete()==True:
-                    self.star_getNav_Feedback_Flag = 0 # 导航任务结束,结束监听
-                    res = self.nav_controller.getResult()
-                    if res==TaskResult.SUCCEEDED:
-
-          
-                        # BT rijden naar dock succesvol => nu nog docken zelf
-                        self.publish_event("DRIVE-TO-DOCK-SUCCESS")
-                        print("已到达目标点.")  # NL: HET EINDPUNT IS BEREIKT
-                        print("HET EINDPUNT IS BEREIKT VAN DE NAVIGATIE.")  # NL: HET EINDPUNT IS BEREIKT
-
-                        if self.robot['RED']==1:
-                            # 成功到达目标点,开启自动回充
-                            print("发现红外信号,开启对接功能.")
-                            print("INFRAROOD GEDETECTEERD, KOPPELINGSFUNCTIE INGESCHAKELD.")
-                            self.chargeflag=1
-                            # self.publish_docking_status("DOCKING_ENABLED")
-                            self.Pub_Recharger_Flag()
-                        else:
-                            print('GEEN INFRAROOD GEVONDEN, BEGIN MET RONDDRAAIEN OM TE ZOEKEN')  # NL
-                            self.nav_end_z = self.robot['Rotation_Z']
-                            self.start_turn=1 # 没有红外信号,让小车自转
-                            topic=Twist()
-                            topic.angular.z = 0.2
-                            self.Cmd_vel_pub.publish(topic) 
-                    
-                    # 导航被取消了
-                    elif res==TaskResult.CANCELED:
-                        print_and_fixRetract('nav was canceled.') 
-                        # BT rijden naar dock gecanceled
-                        self.publish_event("DRIVE-TO-DOCK-CANCELED")
-
-
-                    elif res==TaskResult.FAILED:
-                        # 导航失败,可能是用户使用rviz新建了目标点,也可能是无法规划到目的
-                        print_and_fixRetract('goal failed.')
-                        # BT rijden naar dock gefaald
-                        self.publish_event("DRIVE-TO-DOCK-FAILED")
-
-                else:
-                    # 获取反馈
-                    nav_feedback = self.nav_controller.getFeedback()
-                    huidige_afstand = nav_feedback.distance_remaining
-                    if nav_feedback!=None:
-                        if (((huidige_afstand < 0.2) and Duration.from_msg(nav_feedback.navigation_time) > Duration(seconds=500.0))):
-                            print_and_fixRetract('长时间无法到达目标点,导航已取消')
-
-                    # Maak een gedetailleerd bericht voor het topic
-                            event_msg = f"DICHT-GENOEG: afstand={huidige_afstand:.3f}m"
-                            self.publish_event(event_msg) # Dit gaat naar /auto_recharge_event
-                            self.Pub_NavGoal_Cancel()
-                            if self.robot['RED']==1:
-                                self.chargeflag=1
-                                # self.publish_docking_status("DOCKING_ENABLED")
-                                self.Pub_Recharger_Flag()
-                            else:
-                                # We zien niets, dus we moeten gaan zoeken!
-                                print_and_fixRetract(YELLOW + 'Nog geen infrarood gevonden, start zwenken om te zoeken...' + RESET)
-                                
-                                self.nav_end_z = self.robot['Rotation_Z']
-                                self.start_turn = 1 # Activeer de zoek-modus
-            
-                                topic = Twist()
-                                topic.angular.z = 0.2
-                                self.Cmd_vel_pub.publish(topic)
-
-                        else:
-                            pass
 
             #充电期间打印电池电压、充电时间
             if self.robot['Charging']==1:
@@ -1304,66 +1073,12 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
         self.last_charge_complete=self.charge_complete
 
-import threading
-
-def wait_for_nav2_simple(navigator, max_retries=5):
-
-    print_and_fixRetract("[NAV2] Start wait_for_nav2_simple()")
-
-    for attempt in range(1, max_retries + 1):
-
-        print_and_fixRetract(
-            YELLOW + f"[NAV2] ===== Poging {attempt}/{max_retries} =====" + RESET
-        )
-
-        try:
-
-            print_and_fixRetract("[NAV2] Wachten op Nav2Active...")
-
-            start = time.time()
-
-            navigator.waitUntilNav2Active()
-
-            elapsed = time.time() - start
-
-            print_and_fixRetract(
-                GREEN + f"[NAV2] waitUntilNav2Active() teruggekeerd na {elapsed:.1f}s" + RESET
-            )
-
-            return True
-
-        except Exception as e:
-
-            print_and_fixRetract(
-                RED + f"[NAV2] Exception: {repr(e)}" + RESET
-            )
-
-        print_and_fixRetract("[NAV2] 2 seconden wachten voor volgende poging...")
-        time.sleep(2)
-
-    print_and_fixRetract(RED + "[NAV2] Alle pogingen mislukt." + RESET)
-
-    return False
-
 
 def main():
     rclpy.init()
     try:
-        navigator = BasicNavigator()
-        print_and_fixRetract("[MAIN] BasicNavigator aangemaakt")
-
-
-        nav2_ok = wait_for_nav2_simple(navigator)
-        print_and_fixRetract(f"[MAIN] wait_for_nav2_simple returned {nav2_ok}")
-
-        if not nav2_ok:
-            navigator.destroy_node()
-            rclpy.shutdown()
-            return
-
-
         while rclpy.ok():
-            autorecharger = AutoRecharger(navigator) 
+            autorecharger = AutoRecharger() 
 
 
             print_and_fixRetract(autorecharger.tips)
@@ -1435,13 +1150,6 @@ def main():
         print_and_fixRetract(f"Er is een fout opgetreden: {e}")
     
     finally:
-
-        try:
-            navigator.cancelTask()
-        except:
-            pass
-
-        navigator.destroy_node()
 
         if settings is not None:
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, settings)

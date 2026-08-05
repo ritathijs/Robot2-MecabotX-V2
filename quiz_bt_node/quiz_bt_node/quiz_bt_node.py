@@ -158,12 +158,12 @@ class QuizBTNode(Node):
             json_file_path = os.path.join(package_share_dir, 'trees', 'spanningsniveaus.json')
             with open(json_file_path, 'r') as json_file:
                 self.spanningsniveaus = json.load(json_file)
-                self.battery_low_voltage = self.spanningsniveaus.get("batteryLowVoltage", 1.0)
-                self.battery_high_voltage = self.spanningsniveaus.get("batteryHighVoltage", 2.0)
+                self.battery_low_voltage = self.spanningsniveaus.get("battery_low_voltage", 21.0)
+                self.battery_high_voltage = self.spanningsniveaus.get("battery_ok_voltage", 23.0)
             self.get_logger().info(f"JSON succesvol geladen. Inhoud: {self.spanningsniveaus}")
         except Exception as e:
-            self.battery_low_voltage = 1.0
-            self.battery_high_voltage = 2.0
+            self.battery_low_voltage = 21.0
+            self.battery_high_voltage = 23.0
             self.get_logger().error(f"Fout bij inladen json: {e}")
 
     # ---------------- SETTINGS OPHALEN ----------------
@@ -411,7 +411,7 @@ class QuizBTNode(Node):
 
         if self.last_screen:
             self.get_logger().info(f"Laatste scherm opnieuw versturen: {self.last_screen}")
-            self.safe_emit(self.last_screen)
+            # self.safe_emit(self.last_screen)
         else:
             self.get_logger().warn("Nog geen last_screen beschikbaar")
 
