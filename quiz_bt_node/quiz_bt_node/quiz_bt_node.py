@@ -33,7 +33,57 @@ SERVER_URL = f"http://{SERVER_IP}:80"
 
 
 
+import requests
 
+SERVER_IP = "10.0.0.11"
+
+def update_robot_status(fields_to_update):
+    try:
+        response = requests.post(
+            f"http://{SERVER_IP}/robot-status/insert-robot-status",
+            json=fields_to_update,
+            timeout=5
+        )
+
+        if response.status_code == 200:
+            body = response.json()
+
+            if body.get("succes") is True:
+                return True
+
+        print(f"Update robot status failed: {response.status_code}")
+        print(response.text)
+
+    except Exception as e:
+        print(f"Update robot status failed: {e}")
+
+    return False
+
+def retrieve_robot_status(fields):
+    try:
+        params = {
+            "fields": ",".join(fields)
+        }
+
+        response = requests.get(
+            f"http://{SERVER_IP}/robot-status/get-robot-status",
+            params=params,
+            timeout=5
+        )
+
+        if response.status_code == 200:
+            body = response.json()
+
+            if body.get("succes") is True:
+                return body.get("data", {})
+
+        print(f"Retrieve robot status failed: {response.status_code}")
+        print(response.text)
+
+    except Exception as e:
+        print(f"Retrieve robot status failed: {e}")
+
+    return {}
 # De systeemtijd van de pi wordt doorgestuurd naar de robot
 # Indien volgende parameter op False staat wordt de robot zijn systeemtijd NIET aangepast
 # Indien volgende parameter op True  staat wordt de robot zijn systeemtijd WEL  aangepast (kan transformproblemen leveren in RVIZ)
@@ -60,6 +110,12 @@ class QuizBTNode(Node):
 
         # timer die elke 50 ms checkt of robot moet stoppen of niet
         self.check_drive_timer = self.create_timer(0.05, self.check_drive)
+
+        self.robot_ready_sent = False
+
+        self.manual_drive_since_admin_open = False
+        self.manual_drive_db_updated = False
+
 
         qos = QoSProfile(depth=1)
         qos.reliability = ReliabilityPolicy.RELIABLE
@@ -115,6 +171,20 @@ class QuizBTNode(Node):
             'ask_button_quiz',
             1
         )
+
+
+        # Publisher voor noodstop
+        self.estop_cmd_vel_publisher = self.create_publisher(
+            Twist,
+            '/estop_cmd_vel',
+            10
+        )
+
+        # timer die periodiek 0-snelheid stuurt op /estop_cmd_vel gedurende robot-stop-for-x-time
+        self.estop_timer = None
+        # tijdstip (time.time()) waarop de estop-periode moet eindigen
+        self.estop_end_time = None
+
 
 
         self.quiz_activestatus_publisher = self.create_publisher(String, 'quizbtnode_activestatus', 1)
@@ -237,7 +307,32 @@ class QuizBTNode(Node):
 
     def safe_emit(self, event, data=None):
         try:
+            # Alleen bij scherm-events robot-ready versturen
+            screen_events = {
+                "robot-explore",
+                "robot-go-to-visitors",
+                "robot-arrived-at-visitors",
+                "robot-arrived-at-quiz-location",
+                "robot-error-drive",
+                "follow-robot-screen",
+                "robot-error-charge",
+                "robot-go-charge",
+                "robot-charging",
+                "robot-startup",
+                "robot-docking",
+                "robot-lost-charging",
+            }
+
+            if (
+                not self.robot_ready_sent
+                and event in screen_events
+            ):
+                self.sio.emit("robot-ready")
+                self.robot_ready_sent = True
+                self.get_logger().info("robot-ready verstuurd")
+
             self.sio.emit(event, data)
+
         except BadNamespaceError:
             self.get_logger().warn(
                 f"Dropped event '{event}', socket not connected."
@@ -283,6 +378,17 @@ class QuizBTNode(Node):
         self.get_logger().info(f'Direction received: {direction}, speed {speed}')
     
         msg = Twist()
+
+        if hasattr(self, 'admin_panel_open') and self.admin_panel_open:
+            self.manual_drive_since_admin_open = True
+
+            if not self.manual_drive_db_updated:
+                update_robot_status({
+                    "manualDrive": True
+                })
+
+                self.manual_drive_db_updated = True
+
 
         if direction == 'forward':
             msg.linear.x = 0.15*speed
@@ -404,16 +510,37 @@ class QuizBTNode(Node):
     def on_ask_screen(self, data=None):
         self.get_logger().info("Scherm aangevraagd")
 
-        # Als het laatste scherm een drive error is, niets terugsturen
-        if self.last_screen == "robot-error-drive":
-            self.get_logger().info("Laatste scherm is robot-error-drive -> geen scherm terugsturen")
+        if self.ignore_screen_requests:
+            self.get_logger().info(
+                "robot-askScreen genegeerd wegens manual-drive cooldown"
+            )
+            return
+
+
+        # Schermen die niet opnieuw mogen worden verstuurd
+        blocked_screens = {
+            "robot-error-drive",
+            "robot-error-charge",
+            "robot-go-charge",
+            "robot-charging",
+            "robot-docking",
+            "robot-lost-charging",
+        }
+
+        if self.last_screen in blocked_screens:
+            self.get_logger().info(
+                f"Laatste scherm ({self.last_screen}) mag niet opnieuw verstuurd worden"
+            )
             return
 
         if self.last_screen:
-            self.get_logger().info(f"Laatste scherm opnieuw versturen: {self.last_screen}")
-            # self.safe_emit(self.last_screen)
+            self.get_logger().info(
+                f"Laatste scherm opnieuw versturen: {self.last_screen}"
+            )
+            self.safe_emit(self.last_screen)
         else:
             self.get_logger().warn("Nog geen last_screen beschikbaar")
+
 
     def on_ask_is_active(self, data=None):
         self.get_logger().info("vraag aan bt of robot actief is")
@@ -435,10 +562,68 @@ class QuizBTNode(Node):
 
     def on_robot_stop_for_x_time(self, data):
         self.get_logger().info("Hier zou de robot moeten stoppen voor max 30 seconden. Waarschijnlijk wordt tijdens 30 seconden quiz getrigger of adminpaneel geopend")
-        stop_time = data.get('time') 
+
+        if not data:
+            self.get_logger().warn("robot-stop-for-x-time zonder data ontvangen -> genegeerd")
+            return
+
+        stop_time = data.get('time')
         self.get_logger().info(f"data.time ({stop_time} milliseconden) kan hiervoor gebruikt worden.")
-        # self.publish_quiz_message("stop_for_x_time")
-        
+
+        try:
+            stop_time_sec = float(stop_time) / 1000.0
+        except (TypeError, ValueError):
+            self.get_logger().error(f"Ongeldige tijd meegegeven voor robot-stop-for-x-time: {stop_time}")
+            return
+
+        if stop_time_sec <= 0:
+            self.get_logger().warn("Tijd voor robot-stop-for-x-time is 0 of negatief -> genegeerd")
+            return
+
+        # indien er al een estop-periode bezig is, stoppen we die en starten we opnieuw met de nieuwe tijd
+        if self.estop_timer is not None:
+            self.estop_timer.cancel()
+            self.estop_timer = None
+
+        self.estop_end_time = time.time() + stop_time_sec
+
+        self.get_logger().info(
+            f"Estop gestart: {stop_time_sec}s lang wordt 0-snelheid gestuurd op /estop_cmd_vel"
+        )
+
+        # timer die elke 50ms een 0-snelheid stuurt op /estop_cmd_vel, tot de tijd verstreken is
+        self.estop_timer = self.create_timer(0.05, self._publish_estop_cmd_vel)
+
+        # meteen 1 keer sturen zodat er niet gewacht moet worden op de eerste timer-tick
+        self._publish_estop_cmd_vel()
+
+    def _publish_estop_cmd_vel(self):
+        # als de periode voorbij is: timer stoppen en niet meer sturen
+        if self.estop_end_time is None or time.time() >= self.estop_end_time:
+            if self.estop_timer is not None:
+                self.estop_timer.cancel()
+                self.estop_timer = None
+            self.estop_end_time = None
+            self.get_logger().info("Estop-periode afgelopen, stoppen met sturen op /estop_cmd_vel")
+            return
+
+        msg = Twist()
+        msg.linear.x = 0.0
+        msg.linear.y = 0.0
+        msg.angular.z = 0.0
+        self.estop_cmd_vel_publisher.publish(msg)
+
+    def _stop_estop(self, reason=""):
+        # Stopt een eventueel lopende estop-periode voortijdig (bv. omdat er een scherm werd aangevraagd via rpitopic)
+        if self.estop_timer is not None or self.estop_end_time is not None:
+            if self.estop_timer is not None:
+                self.estop_timer.cancel()
+                self.estop_timer = None
+            self.estop_end_time = None
+            self.get_logger().info(
+                f"Estop voortijdig gestopt{f' ({reason})' if reason else ''}"
+            )
+
     def on_quiz_inactive(self):
         if self._is_blocking():
             return
@@ -482,6 +667,10 @@ class QuizBTNode(Node):
         if hasattr(self, 'admin_panel_open') and self.admin_panel_open:
             self.get_logger().info("Admin panel was al open -> negeren")
             return
+
+        self.manual_drive_since_admin_open = False
+        self.manual_drive_db_updated = False
+
         self.get_logger().info("Admin Panel geopend")
         self.admin_panel_open = True
         self.manual_drive_since_admin_open = False # resetten van variabele
@@ -507,12 +696,13 @@ class QuizBTNode(Node):
             self.get_logger().info("Manual drive gedetecteerd -> 10s vertraging")
 
             self.blocking = True
+            self.ignore_screen_requests = True
 
             msg = String()
             msg.data = "MANUAL_DRIVE_CONTROL"
             self.manual_drive_control_publisher.publish(msg)
 
-            self._admin_timer = self.create_timer(7.0, self._finalize_admin_closed_wrapper)
+            self._admin_timer = self.create_timer(4.0, self._finalize_admin_closed_wrapper)
 
         else:
             self.get_logger().info("Geen manual drive gedaan : meteen ADMINPANELCLOSED")
@@ -523,8 +713,6 @@ class QuizBTNode(Node):
             else:
                 self.get_logger().info("Laatste event was niet robot-charging -> niets versturen")
 
-            self.publish_admin_message("ADMINPANELCLOSED")
-            self.fetch_schedule()
 
 
     def _finalize_admin_closed_wrapper(self):
@@ -540,11 +728,15 @@ class QuizBTNode(Node):
         self.get_logger().info("Na vertraging adminpanelclosed")
 
 
-        self.publish_admin_message("ADMINPANELCLOSED")
         self.fetch_schedule() # bij sluiten adminpanel zeker de instellingen opvragen
+
+        update_robot_status({
+            "manualDrive": False
+        })
 
         self.manual_drive_since_admin_open = False
         self.blocking = False
+        self.ignore_screen_requests = False
 
     # def _delayed_admin_closed_publish(self):
     #     time.sleep(10) 
@@ -556,6 +748,11 @@ class QuizBTNode(Node):
     def rpi_callback(self, msg):
         if self._is_blocking():
             return
+
+        # Zodra er een scherm wordt aangevraagd via rpitopic, stoppen we een eventueel
+        # lopende estop-periode: er wordt dan niet langer 0-snelheid op /estop_cmd_vel gestuurd.
+        self._stop_estop("scherm aangevraagd via rpitopic")
+
         self.get_logger().info(f'Received from RPi: {msg.data}')
 
         if msg.data == "RobotExplore":
@@ -629,6 +826,9 @@ class QuizBTNode(Node):
     # ---------------- CLEANUP ----------------
     def shutdown(self):
         self.get_logger().info("Shutting down node...")
+        if self.estop_timer is not None:
+            self.estop_timer.cancel()
+            self.estop_timer = None
         if self.sio.connected:
             self.sio.disconnect()
         self.destroy_node()
@@ -652,5 +852,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-

@@ -273,7 +273,7 @@ public:
 
             json robotStatus = retrieveRobotStatus({"robotActive"});
 
-            bool robotActive = false;
+            bool robotActive = true;
 
             if (robotStatus.contains("robotActive"))
             {
@@ -843,9 +843,6 @@ private:
 
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr rpi_pub_;
 };
-
-
-// BT node die een doelpositie naar charging station stuurt via PoseStamped
 // BT node die een doelpositie naar charging station stuurt via PoseStamped
 class RobotDriveToChargingStation : public BT::StatefulActionNode
 {
@@ -872,7 +869,6 @@ public:
             BT::OutputPort<bool>("connection_chargeStatus"),
             BT::InputPort<bool>("skip_robotdrivechargingstation"),
             BT::OutputPort<bool>("skip_drivetoworkarea")
-
         };
     }
 
@@ -890,7 +886,6 @@ public:
             return BT::NodeStatus::SUCCESS;
         }
 
-    
         bool skip_robot_drive = false;
         if (getInput("skip_robotdrivechargingstation", skip_robot_drive))
         {
@@ -898,6 +893,35 @@ public:
             {
                 std::cout << "[RobotDriveToChargingStation] skip wegens manual drive naar station" << std::endl;
                 return BT::NodeStatus::SUCCESS;
+            }
+        }
+
+        // ===============================
+        // Controleren of laadstatus al "LADEN" is
+        // ===============================
+        {
+            std::string laadstatus_file =
+                "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/laadstatus.txt";
+
+            std::ifstream laadstatus_stream(laadstatus_file);
+
+            if (laadstatus_stream.is_open())
+            {
+                std::string laadstatus_content(
+                    (std::istreambuf_iterator<char>(laadstatus_stream)),
+                    std::istreambuf_iterator<char>());
+                laadstatus_stream.close();
+
+                if (laadstatus_content.find("LADEN") != std::string::npos)
+                {
+                    std::cout << "[RobotDriveToChargingStation] skip wegens LADEN in laadstatus.txt" << std::endl;
+                    return BT::NodeStatus::SUCCESS;
+                }
+            }
+            else
+            {
+                std::cerr << "[RobotDriveToChargingStation] Kan laadstatus.txt niet openen: "
+                          << laadstatus_file << std::endl;
             }
         }
 
@@ -1015,6 +1039,10 @@ private:
     rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr pub_coord_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;
 };
+
+
+
+
 class FallbackDriveToChargingStation : public BT::StatefulActionNode
 {
 public:
@@ -1239,7 +1267,6 @@ private:
 
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;
 };
-
 class RobotIsRobotAtChargingStation : public BT::StatefulActionNode
 {
 public:
@@ -1330,6 +1357,34 @@ public:
             }
         }
 
+        // ===============================
+        // Controleren of laadstatus al "LADEN" is
+        // ===============================
+        {
+            std::string laadstatus_file =
+                "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/laadstatus.txt";
+
+            std::ifstream laadstatus_stream(laadstatus_file);
+
+            if (laadstatus_stream.is_open())
+            {
+                std::string laadstatus_content(
+                    (std::istreambuf_iterator<char>(laadstatus_stream)),
+                    std::istreambuf_iterator<char>());
+                laadstatus_stream.close();
+
+                if (laadstatus_content.find("LADEN") != std::string::npos)
+                {
+                    std::cout << "[RobotIsRobotAtChargingStation] skip wegens LADEN in laadstatus.txt" << std::endl;
+                    return BT::NodeStatus::SUCCESS;
+                }
+            }
+            else
+            {
+                std::cerr << "[RobotIsRobotAtChargingStation] Kan laadstatus.txt niet openen: "
+                          << laadstatus_file << std::endl;
+            }
+        }
 
         received_success_ = false;
         received_failure_ = false;
@@ -1418,10 +1473,6 @@ private:
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
 };
-
-
-
-
 
 class DriveToChargingStation : public BT::StatefulActionNode
 {
@@ -1559,17 +1610,6 @@ public:
 
     BT::NodeStatus onStart() override
     {
-        publishDockingEnabled();
-
-        success_received_ = false;
-        force_charge_received_ = false;
-
-        start_time_ = std::chrono::steady_clock::now();
-
-        getInput("timeout", timeout_);
-
-        setOutput("connection_chargeStatus", true);
-
         //---------------------------------
         // Skip check
         //---------------------------------
@@ -1583,6 +1623,46 @@ public:
                 return BT::NodeStatus::SUCCESS;
             }
         }
+
+        // ===============================
+        // Controleren of laadstatus al "LADEN" is
+        // ===============================
+        {
+            std::string laadstatus_file =
+                "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/laadstatus.txt";
+
+            std::ifstream laadstatus_stream(laadstatus_file);
+
+            if (laadstatus_stream.is_open())
+            {
+                std::string laadstatus_content(
+                    (std::istreambuf_iterator<char>(laadstatus_stream)),
+                    std::istreambuf_iterator<char>());
+                laadstatus_stream.close();
+
+                if (laadstatus_content.find("LADEN") != std::string::npos)
+                {
+                    std::cout << "[DriveToChargingStation] skip wegens LADEN in laadstatus.txt" << std::endl;
+                    return BT::NodeStatus::SUCCESS;
+                }
+            }
+            else
+            {
+                std::cerr << "[DriveToChargingStation] Kan laadstatus.txt niet openen: "
+                          << laadstatus_file << std::endl;
+            }
+        }
+
+        publishDockingEnabled();
+
+        success_received_ = false;
+        force_charge_received_ = false;
+
+        start_time_ = std::chrono::steady_clock::now();
+
+        getInput("timeout", timeout_);
+
+        setOutput("connection_chargeStatus", true);
 
         //---------------------------------
         // Blackboard check
@@ -1747,7 +1827,6 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr infrared_docking_pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr force_charge_pub_;
 };
-
 
 
 // Als er iets misloopt met het laden wordt deze node bereikt (via GoToChargeFallback)
@@ -2272,8 +2351,6 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
 };
 
-
-
 class StatusDriveToChargingDock : public BT::StatefulActionNode
 {
 public:
@@ -2343,12 +2420,6 @@ public:
             }
         }
 
-
-        status_ = "";
-        getInput("timeout", timeout_);
-        start_time_ = std::chrono::steady_clock::now();
-
-        
         // check skip_drive2charging bij start
         bool skip = false;
         if (getInput("skip_drive2charging", skip))
@@ -2363,6 +2434,39 @@ public:
                 std::cout << "[StatusDriveToChargingDock] skip_drive2charging = FALSE -> direct FAILURE" << std::endl;
             }
         }
+
+        // ===============================
+        // Controleren of laadstatus al "LADEN" is
+        // ===============================
+        {
+            std::string laadstatus_file =
+                "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/laadstatus.txt";
+
+            std::ifstream laadstatus_stream(laadstatus_file);
+
+            if (laadstatus_stream.is_open())
+            {
+                std::string laadstatus_content(
+                    (std::istreambuf_iterator<char>(laadstatus_stream)),
+                    std::istreambuf_iterator<char>());
+                laadstatus_stream.close();
+
+                if (laadstatus_content.find("LADEN") != std::string::npos)
+                {
+                    std::cout << "[StatusDriveToChargingDock] skip wegens LADEN in laadstatus.txt" << std::endl;
+                    return BT::NodeStatus::SUCCESS;
+                }
+            }
+            else
+            {
+                std::cerr << "[StatusDriveToChargingDock] Kan laadstatus.txt niet openen: "
+                          << laadstatus_file << std::endl;
+            }
+        }
+
+        status_ = "";
+        getInput("timeout", timeout_);
+        start_time_ = std::chrono::steady_clock::now();
 
         std_msgs::msg::String msg;
         msg.data = "StatusDriveToChargingDock";
@@ -2410,7 +2514,6 @@ private:
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
 };
-
 
 class IsRobotCharging : public BT::StatefulActionNode
 {
@@ -2495,6 +2598,36 @@ public:
                 return BT::NodeStatus::SUCCESS;
             }
         }
+
+        // ===============================
+        // Controleren of laadstatus al "LADEN" is
+        // ===============================
+        {
+            std::string laadstatus_file =
+                "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/laadstatus.txt";
+
+            std::ifstream laadstatus_stream(laadstatus_file);
+
+            if (laadstatus_stream.is_open())
+            {
+                std::string laadstatus_content(
+                    (std::istreambuf_iterator<char>(laadstatus_stream)),
+                    std::istreambuf_iterator<char>());
+                laadstatus_stream.close();
+
+                if (laadstatus_content.find("LADEN") != std::string::npos)
+                {
+                    std::cout << "[IsRobotCharging] skip wegens LADEN in laadstatus.txt" << std::endl;
+                    return BT::NodeStatus::SUCCESS;
+                }
+            }
+            else
+            {
+                std::cerr << "[IsRobotCharging] Kan laadstatus.txt niet openen: "
+                          << laadstatus_file << std::endl;
+            }
+        }
+
         return BT::NodeStatus::RUNNING;
     }
 
@@ -2536,6 +2669,7 @@ private:
     // NEW
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr rpi_pub_;
 };
+
 
 class IsBatteryFull : public BT::StatefulActionNode
 {
@@ -3090,11 +3224,6 @@ public:
         };
     }
 
-
-
-
-
-
     BT::NodeStatus onStart() override
     {
 
@@ -3111,18 +3240,11 @@ public:
 
         }
 
-
-
         //--------------------------------------------------------
         // standaard: volgende nodes mogen draaien
         //--------------------------------------------------------
 
         setOutput("robot_needs_rotation", true);
-
-
-
-
-
 
         //--------------------------------------------------------
         // Eerst controleren of knop al gedrukt was
@@ -3132,7 +3254,6 @@ public:
 
             std::ifstream file(
                 "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/quizknop.txt");
-
 
             if(file.is_open())
             {
@@ -3163,49 +3284,26 @@ public:
             }
         }
 
-
-
-
-
-
         overlimit_count_ = 0;
 
         received_drive_to_quiz_ = false;
 
         follow_value_ = 0.0;
 
-
-
-
-
         if(!getInput<double>("timeout", timeout_))
         {
             timeout_ = 15.0;
         }
 
-
-
-
-
         start_time_ =
             std::chrono::steady_clock::now();
-
-
-
-
-
 
         std_msgs::msg::String msg_bt_;
 
         msg_bt_.data = "ArrivedAtVisitors";
 
         pub_bt_->publish(msg_bt_);
-
-
-
-
-
-
+        
         std_msgs::msg::String screen_msg;
 
 
@@ -3215,10 +3313,6 @@ public:
 
         pub_quiz_screen_->publish(screen_msg);
 
-
-
-
-
         std::cout
             << "[ArrivedAtVisitors] START timeout="
             << timeout_
@@ -3226,40 +3320,19 @@ public:
             << visitor_code_
             << std::endl;
 
-
-
-
-
-
         return BT::NodeStatus::RUNNING;
     }
-
-
-
-
-
-
-
-
 
     BT::NodeStatus onRunning() override
     {
 
         rclcpp::spin_some(node_);
 
-
-
-
         std_msgs::msg::String msg_bt_;
 
         msg_bt_.data = "ArrivedAtVisitors";
 
         pub_bt_->publish(msg_bt_);
-
-
-
-
-
 
         //--------------------------------------------------------
         // Correct quiz bericht ontvangen
@@ -3277,15 +3350,8 @@ public:
                 << std::endl;
 
 
-
             return BT::NodeStatus::SUCCESS;
         }
-
-
-
-
-
-
 
         //--------------------------------------------------------
         // Filter afstand
@@ -3304,11 +3370,6 @@ public:
 
         }
 
-
-
-
-
-
         if(overlimit_count_ >= 5)
         {
 
@@ -3319,19 +3380,9 @@ public:
                 << "[ArrivedAtVisitors] 5 measurements > 3.0 -> FAILURE"
                 << std::endl;
 
-
-
             return BT::NodeStatus::FAILURE;
 
         }
-
-
-
-
-
-
-
-
 
         //--------------------------------------------------------
         // Timeout
@@ -5945,7 +5996,7 @@ public:
             "/tracking_enable", 10);
 
         pub_cmd_vel_ = node_->create_publisher<geometry_msgs::msg::Twist>(
-            "/gui_cmd_vel", 10);
+            "/turn_cmd_vel", 10);
 
         // -----------------------------
         // Quiz knop subscriber
@@ -6244,15 +6295,15 @@ public:
     }
 };
 
-
 #include <chrono>
+#include <fstream>
+#include <string>
+
 class CheckAdminCondition : public BT::StatefulActionNode
 {
 public:
     CheckAdminCondition(const std::string &name, const BT::NodeConfiguration &config)
         : BT::StatefulActionNode(name, config),
-          admin_closed_(false),
-          manual_drive_(false),
           timer_started_(false)
     {
         node_ = rclcpp::Node::make_shared("btCheckAdminCondition");
@@ -6262,23 +6313,6 @@ public:
 
         force_charge_pub_ = node_->create_publisher<std_msgs::msg::String>(
             "/force_charge", 10);
-
-        rclcpp::QoS qos(1);
-        qos.reliable();
-
-        sub_ = node_->create_subscription<std_msgs::msg::String>(
-            "/admin", qos,
-            [this](std_msgs::msg::String::SharedPtr msg)
-            {
-                if (msg->data == "ADMINPANELCLOSED")
-                {
-                    std::cout << "[CheckAdminCondition] ADMINPANELCLOSED ontvangen!" << std::endl;
-                    admin_closed_ = true;
-
-                    timer_started_ = true;
-                    start_time_ = std::chrono::steady_clock::now();
-                }
-            });
     }
 
     static BT::PortsList providedPorts()
@@ -6287,13 +6321,30 @@ public:
             BT::InputPort<bool>("robot_startup"),
             BT::InputPort<std::string>("bat_admin_status"),
             BT::InputPort<int>("chargingInteger"),
-            BT::OutputPort<int>("chargingInteger_nextCycle")
-        };
+            BT::OutputPort<int>("chargingInteger_nextCycle")};
     }
-
 
     BT::NodeStatus onStart() override
     {
+        // Schrijf NOK naar statusbestand
+        {
+            const std::string status_file =
+                "/home/wheeltec/wheeltec_ros2/src/april_tabloo/status.txt";
+
+            std::ofstream file(status_file);
+            if (file.is_open())
+            {
+                file << "NOK";
+                file.close();
+                std::cout << "[CheckAdminCondition] Statusbestand bijgewerkt: NOK" << std::endl;
+            }
+            else
+            {
+                std::cerr << "[CheckAdminCondition] Kan statusbestand niet openen: "
+                          << status_file << std::endl;
+            }
+        }
+
         // 🔹 BLACKBOARD CHECK
         bool robot_startup;
         if (!getInput("robot_startup", robot_startup))
@@ -6302,9 +6353,8 @@ public:
             return BT::NodeStatus::SUCCESS;
         }
 
-        admin_closed_ = false;
-        manual_drive_ = false;
         timer_started_ = false;
+        last_poll_time_ = std::chrono::steady_clock::time_point{}; // forceer meteen eerste poll
 
         std_msgs::msg::String msg;
         msg.data = "CheckAdminCondition";
@@ -6316,8 +6366,6 @@ public:
             if (bat_status == "STOP")
             {
                 std::cout << "[CheckAdminCondition] bat_admin_status = STOP" << std::endl;
-
-
             }
         }
 
@@ -6326,24 +6374,81 @@ public:
 
     BT::NodeStatus onRunning() override
     {
-        rclcpp::spin_some(node_);
+        auto now = std::chrono::steady_clock::now();
 
-        if (admin_closed_)
+        // Poll de database niet elke tick, maar max. elke 200ms
+        if (last_poll_time_.time_since_epoch().count() == 0 ||
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - last_poll_time_)
+                    .count() >= 200)
         {
-            if (timer_started_)
-            {
-                auto now = std::chrono::steady_clock::now();
-                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - start_time_).count();
+            last_poll_time_ = now;
 
-                if (elapsed >= 2)
+            json result = retrieveRobotStatus({"adminPanelIsOpen", "manualDrive"});
+
+            bool closed_condition = false; // default: nog niet gesloten
+
+            if (result.contains("adminPanelIsOpen") &&
+                result.contains("manualDrive"))
+            {
+                bool adminPanelIsOpen =
+                    result["adminPanelIsOpen"].get<bool>();
+                bool manualDrived =
+                    result["manualDrive"].get<bool>();
+
+                // Alleen "closed" als panel dicht is EN niet manueel gereden wordt
+                closed_condition =
+                    (!adminPanelIsOpen && !manualDrived);
+
+                if (!closed_condition)
                 {
-                    std::cout << "[CheckAdminCondition] Admin panel closed + delay -> SUCCESS" << std::endl;
-                    return BT::NodeStatus::SUCCESS;
+                    std::cout
+                        << "[CheckAdminCondition] Nog niet klaar (adminPanelIsOpen="
+                        << adminPanelIsOpen
+                        << ", manualDrived="
+                        << manualDrived
+                        << ")" << std::endl;
                 }
-                else
+            }
+            else
+            {
+                std::cout
+                    << "[CheckAdminCondition] Kan database niet lezen -> ga uit van NIET gesloten"
+                    << std::endl;
+                closed_condition = false;
+            }
+
+            if (closed_condition)
+            {
+                if (!timer_started_)
                 {
-                    return BT::NodeStatus::RUNNING;
+                    std::cout
+                        << "[CheckAdminCondition] Admin panel closed (via DB) gedetecteerd!"
+                        << std::endl;
+                    timer_started_ = true;
+                    start_time_ = now;
                 }
+            }
+            else
+            {
+                // Conditie niet (meer) voldaan -> reset timer
+                timer_started_ = false;
+            }
+        }
+
+        if (timer_started_)
+        {
+            auto elapsed =
+                std::chrono::duration_cast<std::chrono::seconds>(
+                    now - start_time_)
+                    .count();
+
+            if (elapsed >= 2)
+            {
+                std::cout
+                    << "[CheckAdminCondition] Admin panel closed + delay -> SUCCESS"
+                    << std::endl;
+                return BT::NodeStatus::SUCCESS;
             }
         }
 
@@ -6359,14 +6464,11 @@ private:
     rclcpp::Node::SharedPtr node_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr force_charge_pub_;
-    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_;
 
-    bool admin_closed_;
-    bool manual_drive_;
     bool timer_started_;
     std::chrono::steady_clock::time_point start_time_;
+    std::chrono::steady_clock::time_point last_poll_time_;
 };
-
 
 class CheckAdminPanel : public BT::StatefulActionNode
 {
