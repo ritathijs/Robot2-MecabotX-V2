@@ -229,7 +229,10 @@ class PeopleFollowerNode(Node):
             cx = max(0, min(cx, self.img_w - 1))
             cy = max(0, min(cy, self.img_h - 1))
 
-            dist_m = self._depth_at(depth, cx, cy, self.patch_r)
+            depth_cx = int(cx / 2.0) #Resolutie van dieptebeeld is de helft
+            depth_cy = int(cy / 2.0)
+            dist_m = self._depth_at(depth, depth_cx, depth_cy, self.patch_r)
+            
             if dist_m is None:
                 continue
             if not (self.min_dist_m <= dist_m <= self.max_dist_m):

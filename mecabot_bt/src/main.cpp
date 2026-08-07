@@ -678,6 +678,33 @@ public:
     BT::NodeStatus tick() override
     {
         // =====================================================
+        // Laadcyclus status wegschrijven (LOS)
+        // =====================================================
+        {
+            const std::string laadcyclus_file =
+                "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/laadcyclus_status.txt";
+
+            std::ofstream laadcyclus_out(laadcyclus_file);
+
+            if (laadcyclus_out.is_open())
+            {
+                laadcyclus_out << "LOS";
+                laadcyclus_out.close();
+
+                std::cout
+                    << "[CheckInWorkingZone] laadcyclus_status.txt -> LOS geschreven"
+                    << std::endl;
+            }
+            else
+            {
+                std::cerr
+                    << "[CheckInWorkingZone] Kan laadcyclus_status.txt niet openen om te schrijven"
+                    << std::endl;
+            }
+        }
+
+
+        // =====================================================
         // Check show_verdwaald blackboard
         // =====================================================
         bool show_verdwaald = false;
@@ -843,6 +870,8 @@ private:
 
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr rpi_pub_;
 };
+
+
 // BT node die een doelpositie naar charging station stuurt via PoseStamped
 class RobotDriveToChargingStation : public BT::StatefulActionNode
 {
@@ -1967,22 +1996,17 @@ public:
         // Rijd een klein stukje vooruit (~0.5 meter)
         // ----------------------------------------------------------
 
-        while (pub_cmd_vel_->get_subscription_count() == 0)
-        {
-            RCLCPP_INFO(node_->get_logger(),
-                        "Waiting for subscribers on gui_cmd_vel...");
-            rclcpp::sleep_for(std::chrono::milliseconds(100));
-        }
+
 
         geometry_msgs::msg::Twist cmd;
-        cmd.linear.x = 0.20;   // rustige snelheid
+        cmd.linear.x = 0.0;   // rustige snelheid
         cmd.angular.z = 0.0;
 
         auto drive_start = std::chrono::steady_clock::now();
 
         while (std::chrono::duration<double>(
                    std::chrono::steady_clock::now() - drive_start)
-                   .count() < 1.0)
+                   .count() < 0.5)
         {
             pub_cmd_vel_->publish(cmd);
             rclcpp::spin_some(node_);
@@ -4436,7 +4460,7 @@ public:
         // Haal de data op (let op de accolades voor de vector)
         json statusData = retrieveRobotStatus({"robotActive"});
 
-        bool robot_active = false; // Fallback waarde
+        bool robot_active = true; // Fallback waarde
         if (statusData.contains("robotActive") && !statusData["robotActive"].is_null()) {
             robot_active = statusData["robotActive"].get<bool>();
         }
@@ -6059,6 +6083,10 @@ public:
         // =====================================================
         setOutput("show_verdwaald", false);
 
+                std_msgs::msg::String bt_msg;
+        bt_msg.data = "StartDrivingToPeople";
+        pub_bt_->publish(bt_msg);
+
         // =====================================================
         // Nieuwe visitor code + knopscherm activeren
         // =====================================================
@@ -6130,7 +6158,7 @@ public:
         // =====================================================
         // Publish naar BehaviorTreeNode
         // =====================================================
-        std_msgs::msg::String bt_msg;
+     
         bt_msg.data = "StartDrivingToPeople";
         pub_bt_->publish(bt_msg);
 
@@ -6691,7 +6719,7 @@ int main(int argc, char **argv)
     tree.rootBlackboard()->set("restart_tree", false);
 
     std::cout << "--- Starting BT in continuous mode ---" << std::endl;
-    rclcpp::Rate loop_rate(1.0); // definieer hoeveel ticks/sec naar rootnode gaan
+    rclcpp::Rate loop_rate(2.0); // definieer hoeveel ticks/sec naar rootnode gaan
 
     while (rclcpp::ok())
         {

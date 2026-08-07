@@ -56,6 +56,9 @@ yaml_file='/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/robot_info.yaml'
 batstatus_file = "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/batstatus.txt"
 laadstatus_file = "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/laadstatus.txt"
 
+# NIEUW: file waarin we bijhouden of de robot in een laadcyclus zit (LAADCYCLUS) of los staat (LOS)
+laadcyclus_file = "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/laadcyclus_status.txt"
+
 
 #print_and_fixRetract相关，用于打印带颜色的信息
 RESET = '\033[0m'
@@ -376,6 +379,16 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         except Exception as e:
             print_and_fixRetract(RED + f"Fout schrijven laadstatus: {e}" + RESET)
 
+    # NIEUW: schrijft LAADCYCLUS (start van een laadcyclus / robot staat tegen het station)
+    # of LOS (stopbericht verwerkt, robot is losgekoppeld) naar laadcyclus_file
+    def write_laadcyclus(self, tekst):
+        try:
+            with open(laadcyclus_file, "w") as f:
+                f.write(tekst)
+            print_and_fixRetract(GREEN + f"Laadcyclus status geschreven: {tekst}" + RESET)
+        except Exception as e:
+            print_and_fixRetract(RED + f"Fout schrijven laadcyclus status: {e}" + RESET)
+
 
     # Aanzetten van laadmodus via service call. Blijft opnieuw proberen tot response
     def set_charge_mode(self,value,max_callcount=10):
@@ -483,6 +496,8 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                 self.force_charge_active = True
                 self.stop_processed = False
                 self.publish_event("DRIVE-TO-DOCK-SUCCESS")
+                # Goed startbericht ontvangen -> begin van een laadcyclus
+                self.write_laadcyclus("LAADCYCLUS")
                 self.start_forced_charging()
                 return
 
@@ -501,10 +516,15 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             print_and_fixRetract(YELLOW + f"Force charge START ontvangen (sessie {self.charge_session_id})." + RESET)
             self.force_charge_active = True
             self.stop_processed = False
+            # Goed startbericht ontvangen -> begin van een laadcyclus
+            self.write_laadcyclus("LAADCYCLUS")
             self.start_forced_charging()
 
         # STOP
         elif command == "STOP":
+            # Hier wordt vastgelegd dat de robot NIET (meer) tegen het station staat.
+            # Dit is de bestaande write en blijft ongewijzigd; hier wordt NIETS extra's
+            # naar onze laadcyclus_file geschreven.
             self.write_laadstatus("LOS")
 
             if self.stop_processed:
@@ -525,6 +545,10 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                 self.charge_session_id = 0
 
             self.Stop_Charge(drive_forward=True)
+
+            # Stopbericht is nu volledig afgehandeld EN de robot is al naar voor gereden
+            # -> pas nu LOS wegschrijven naar onze laadcyclus_file
+            self.write_laadcyclus("LOS")
 
 
     def Pub_Charger_marker(self, p_x, p_y, o_z, o_w):
@@ -636,6 +660,10 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             self.publish_event("ROBOT-CHARGING")
             self.publish_rpi_event("RobotCharging")
             self.write_laadstatus("LADEN")
+
+            # Hier wordt vastgelegd dat de robot tegen het station staat (er loopt
+            # effectief laadstroom) -> ook LAADCYCLUS wegschrijven naar onze file
+            self.write_laadcyclus("LAADCYCLUS")
 
             print_and_fixRetract(GREEN + "Charging started!" + RESET)
             self.hard_stop_robot()

@@ -37,6 +37,7 @@ import requests
 
 SERVER_IP = "10.0.0.11"
 
+
 def update_robot_status(fields_to_update):
     try:
         response = requests.post(
@@ -115,7 +116,8 @@ class QuizBTNode(Node):
 
         self.manual_drive_since_admin_open = False
         self.manual_drive_db_updated = False
-
+        
+        self.ignore_screen_requests = False
 
         qos = QoSProfile(depth=1)
         qos.reliability = ReliabilityPolicy.RELIABLE
@@ -236,6 +238,15 @@ class QuizBTNode(Node):
             self.battery_high_voltage = 23.0
             self.get_logger().error(f"Fout bij inladen json: {e}")
 
+        # ---------------- OPSTART: EENMALIG NAAR DATABASE SCHRIJVEN ----------------
+        # Dit gebeurt ENKEL bij opstart van deze hele code (dus 1x, hier in __init__,
+        # en nergens anders in de node). We zetten robotActive op true in de database.
+        self.get_logger().info("Opstart: robotActive=true wegschrijven naar database...")
+        if update_robot_status({"robotActive": True}):
+            self.get_logger().info("Opstart: robotActive succesvol op true gezet in database.")
+        else:
+            self.get_logger().error("Opstart: kon robotActive niet op true zetten in database.")
+
     # ---------------- SETTINGS OPHALEN ----------------
 
     def publish_ask_button_quiz_message(self, message):
@@ -263,10 +274,10 @@ class QuizBTNode(Node):
             if response.status_code == 200:
                 data = response.json()
                 # indien lijst : pak eerste element, anders het hele object (redundant)
-                settings = data[0] if isinstance(data, list) else data
+                #settings = data[0] if isinstance(data, list) else data
 
                 # haal schedule object uit settings
-                schedule = settings.get("schedule", {})
+                #schedule = settings.get("schedule", {})
 
                 # pad naar bestand waar schedule wordt opgeslagen
                 file_path = "/home/wheeltec/wheeltec_ros2/src/quiz_bt_node/schedule.txt"
