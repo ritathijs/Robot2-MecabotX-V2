@@ -186,6 +186,11 @@ class AutoRecharger(Node):
 
         self.force_charge_active = False  # NA START MOET EEN STOP KOMEN, EEN NIEUWE START WORDT GENEGEERD (VLAG HOOG)
 
+        # Geeft aan dat het loskomen door een expliciet STOP/XSTOP-bericht
+        # werd veroorzaakt. In dat geval mag de laad-disconnect callback
+        # GEEN automatische retry uitvoeren.
+        self.stop_requested = False
+
         #Voor het vastleggen van de positie van de robot op de Z-as aan het einde van de navigatie
         
         self.nav_end_z=0
@@ -463,17 +468,30 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
             # XSTOPS = altijd forceren
             if command == "XSTOPS" or self.robot['Charging'] == 1:
+
+                # Onthoud of er een actieve sessie was (start bericht eerder ontvangen)
+                # VOOR we force_charge_active resetten, zodat we dit correct kunnen gebruiken
+                # om te bepalen of we naar voor moeten rijden.
+                had_active_session = self.force_charge_active
+
                 self.force_charge_active = False
+                # Dit is een expliciet stopbericht: als de laadstroom
+                # hierdoor wegvalt, mag de disconnect callback niet retryen.
+                self.stop_requested = True
 
                 reset_msg = String()
                 reset_msg.data = "RESET"
                 self.Reset_Position_pub.publish(reset_msg)
 
+                # Enkel naar voor rijden indien het een XSTOPS bericht was,
+                # OF indien er een actieve sessie was (er is eerst een start bericht gestuurd).
+                drive_forward = (command == "XSTOPS") or had_active_session
+
                 print_and_fixRetract(
-                    GREEN + "Volledige stop + vooruit rijden (XSTOP/XSTOPS)." + RESET
+                    GREEN + f"Volledige stop (XSTOP/XSTOPS). Naar voor rijden: {drive_forward}." + RESET
                 )
 
-                self.Stop_Charge(drive_forward=True)
+                self.Stop_Charge(drive_forward=drive_forward)
 
             else:
                 print_and_fixRetract(
@@ -498,6 +516,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                 self.charge_session_id = session_id
                 self.force_charge_active = True
                 self.stop_processed = False
+                self.stop_requested = False
                 self.publish_event("DRIVE-TO-DOCK-SUCCESS")
                 # Goed startbericht ontvangen -> begin van een laadcyclus
                 self.write_laadcyclus("LAADCYCLUS")
@@ -519,6 +538,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             print_and_fixRetract(YELLOW + f"Force charge START ontvangen (sessie {self.charge_session_id})." + RESET)
             self.force_charge_active = True
             self.stop_processed = False
+            self.stop_requested = False
             # Goed startbericht ontvangen -> begin van een laadcyclus
             self.write_laadcyclus("LAADCYCLUS")
             self.start_forced_charging()
@@ -540,14 +560,29 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                 YELLOW + f"Force charge STOP ontvangen (sessie {self.charge_session_id})." + RESET
             )
 
+            # Onthoud of er een actieve sessie was (dus of er eerst een START bericht
+            # is binnengekomen) VOOR we force_charge_active resetten.
+            had_active_session = (
+                self.force_charge_active or
+                self.robot['Charging'] == 1
+            )
+
             self.stop_processed = True
             self.force_charge_active = False
+            # Dit loskomen is bewust door STOP veroorzaakt. De charging
+            # disconnect callback moet hiervoor dus GEEN retry starten.
+            self.stop_requested = True
 
             self.charge_session_id += 1
             if self.charge_session_id > 9:
                 self.charge_session_id = 0
 
-            self.Stop_Charge(drive_forward=True)
+            # Enkel naar voor rijden indien er een actieve sessie was
+            # (er is eerst ook een start bericht gestuurd).
+            print_and_fixRetract(
+                YELLOW + f"Naar voor rijden bij deze STOP: {had_active_session}." + RESET
+            )
+            self.Stop_Charge(drive_forward=had_active_session)
 
             # Stopbericht is nu volledig afgehandeld EN de robot is al naar voor gereden
             # -> pas nu LOS wegschrijven naar onze laadcyclus_file
@@ -677,10 +712,23 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             # self.publish_docking_status("DOCKING_DISABLED")
             print_and_fixRetract(YELLOW + "Charging disconnected!" + RESET)
 
-            if self.chargeflag == 1:
-                print_and_fixRetract(YELLOW + "Code bereikt" + RESET)
+            # Als de laadstroom wegvalt zonder dat een STOP/XSTOP is
+            # aangevraagd, is de robot fysiek losgekomen van het station.
+            # Dit moet ook werken wanneer hij MANUEEL tegen het station
+            # werd gezet: in dat scenario kan chargeflag nog 0 zijn.
+            #
+            # STOP/XSTOP blijft apart behandeld en mag hier nooit een
+            # automatische retry veroorzaken.
+            if not self.stop_requested:
+                print_and_fixRetract(
+                    YELLOW + "Robot is losgekomen van het laadstation, automatische docking-retry wordt gestart." + RESET
+                )
                 self.hard_stop_robot()
                 self.retry_docking_if_not_charging()
+            else:
+                print_and_fixRetract(
+                    YELLOW + "Laadstroom weggevallen door expliciet STOP/XSTOP; geen automatische retry." + RESET
+                )
 
         # interne status updaten
         self.robot['Charging'] = current_charging
