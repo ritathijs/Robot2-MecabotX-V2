@@ -12,9 +12,11 @@ class PublishBackPose(Node):
     def __init__(self):
         super().__init__('publish_back_pose')
 
-        
         self.manual_mode_file = "/home/wheeltec/wheeltec_ros2/src/robot_position_reset/robot_position_reset/manual_mode.txt"
 
+        # Maximale tijd (s) die we blokkerend willen wachten op subscribers
+        # voordat we het opgeven i.p.v. voor altijd te blijven hangen.
+        self.subscriber_wait_timeout = 10.0
 
         # QoS voor XSTOP met reliable (1 message buffer)
         qos_reliable = QoSProfile(depth=1)
@@ -67,17 +69,26 @@ class PublishBackPose(Node):
 
         self.reset_delay_timer = None
 
-
         # JSON bestand pad waar de locatie van het laadstation (+ 1.2m) instaat
         json_file = "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/Charger_Position.json"
-        with open(json_file, "r") as f:
-            data = json.load(f)
+        try:
+            with open(json_file, "r") as f:
+                data = json.load(f)
 
-        # positie uit json extraheren
-        self.p_x = data["p_x"]
-        self.p_y = data["p_y"]
-        self.orien_z = data["orien_z"]
-        self.orien_w = data["orien_w"]
+            # positie uit json extraheren
+            self.p_x = data["p_x"]
+            self.p_y = data["p_y"]
+            self.orien_z = data["orien_z"]
+            self.orien_w = data["orien_w"]
+        except Exception as e:
+            self.get_logger().error(
+                f"Kon Charger_Position.json niet laden/parsen ({e}). "
+                f"Val terug op x=0, y=0, orien_z=0, orien_w=1."
+            )
+            self.p_x = 0.0
+            self.p_y = 0.0
+            self.orien_z = 0.0
+            self.orien_w = 1.0
 
         # Bereken yaw (rotatie in 2d vlak)
         self.yaw = 2 * math.atan2(self.orien_z, self.orien_w)
@@ -101,105 +112,128 @@ class PublishBackPose(Node):
         except Exception as e:
             self.get_logger().warn(f"Could not read manual mode file: {e}")
             return "PASS"  # fallback veilig gedrag
-        
+
+    def _wait_for_subscribers(self, publisher, topic_name):
+        """Wacht (begrensd) tot er minstens 1 subscriber is op publisher.
+        Blokkeert net als voorheen, maar loopt niet meer oneindig door."""
+        start = time.time()
+        while publisher.get_subscription_count() == 0:
+            if time.time() - start >= self.subscriber_wait_timeout:
+                self.get_logger().error(
+                    f"Timeout: nog steeds geen subscribers op {topic_name} na "
+                    f"{self.subscriber_wait_timeout:.0f}s. Publiceer toch."
+                )
+                return False
+            self.get_logger().info(f"Waiting for subscribers on {topic_name}...")
+            time.sleep(0.1)
+        return True
 
     def send_reset_active(self):
+        try:
+            self._wait_for_subscribers(self.reset_pub, "/reset_active")
 
-        while self.reset_pub.get_subscription_count() == 0:
-            self.get_logger().info("Waiting for subscribers on /reset_active...")
-            time.sleep(0.1)
-
-        msg = String()
-        msg.data = "active"
-        self.reset_pub.publish(msg)
-        self.get_logger().info("Sent ACTIVE to /reset_active")
+            msg = String()
+            msg.data = "active"
+            self.reset_pub.publish(msg)
+            self.get_logger().info("Sent ACTIVE to /reset_active")
+        except Exception as e:
+            self.get_logger().error(f"send_reset_active mislukt: {e}")
 
     def reset_done_callback(self, msg):
-
-        if msg.data.lower() == "done":
-            self.reset_done = True
-            self.get_logger().info("AprilTag localization completed successfully.")
+        try:
+            if msg.data.lower() == "done":
+                self.reset_done = True
+                self.get_logger().info("AprilTag localization completed successfully.")
+        except Exception as e:
+            self.get_logger().error(f"reset_done_callback fout: {e}")
 
     def startup_callback(self):
-        self.start_timer.cancel()
-        self.send_reset_active()
+        try:
+            self.start_timer.cancel()
+            self.send_reset_active()
 
-        self.get_logger().info(
-            "Waiting up to 3 seconds for AprilTag localization..."
-        )
+            self.get_logger().info(
+                "Waiting up to 3 seconds for AprilTag localization..."
+            )
 
-        self.reset_start_time = time.time()
-        # non-blocking watchdog instead of a busy-wait with nested spin_once
-        self.watchdog_timer = self.create_timer(0.1, self.check_reset_progress)
-
+            self.reset_start_time = time.time()
+            # non-blocking watchdog instead of a busy-wait with nested spin_once
+            self.watchdog_timer = self.create_timer(0.1, self.check_reset_progress)
+        except Exception as e:
+            self.get_logger().error(f"startup_callback fout: {e}")
 
     def check_reset_progress(self):
-        if self.reset_done:
-            self.get_logger().info(
-                "AprilTag localization succeeded. No XSTOP required."
-            )
-            self.watchdog_timer.cancel()
-            self.destroy_subscription(self.reset_done_sub)
-            return
+        try:
+            if self.reset_done:
+                self.get_logger().info(
+                    "AprilTag localization succeeded. No XSTOP required."
+                )
+                self.watchdog_timer.cancel()
+                self.destroy_subscription(self.reset_done_sub)
+                return
 
-        if time.time() - self.reset_start_time >= 3.0:
-            self.watchdog_timer.cancel()
-            self.get_logger().warn(
-                "AprilTag localization failed. Sending XSTOP."
-            )
-            self.send_xstopS()
-            self.destroy_subscription(self.reset_done_sub)
+            if time.time() - self.reset_start_time >= 3.0:
+                self.watchdog_timer.cancel()
+                self.get_logger().warn(
+                    "AprilTag localization failed. Sending XSTOP."
+                )
+                self.send_xstopS()
+                self.destroy_subscription(self.reset_done_sub)
+        except Exception as e:
+            self.get_logger().error(f"check_reset_progress fout: {e}")
+
     def send_xstopS(self):
+        try:
+            # wacht (begrensd) tot er minstens 1 subscriber is (enige code die luistert is autocharge)
+            self._wait_for_subscribers(self.xstop_pub, "/charge_XSTOP")
 
-        # wacht tot er minstens 1 subscriber is (enige code die luistert is autocharge)
-        while self.xstop_pub.get_subscription_count() == 0:
-            self.get_logger().info("Waiting for subscribers on /charge_XSTOP...")
-            time.sleep(0.1)
-        
-        msg = String()
-        msg.data = "XSTOPS"
-        self.xstop_pub.publish(msg)
-        self.get_logger().info("Sent XSTOPS to /force_charge (reliable)")
-
+            msg = String()
+            msg.data = "XSTOPS"
+            self.xstop_pub.publish(msg)
+            self.get_logger().info("Sent XSTOPS to /force_charge (reliable)")
+        except Exception as e:
+            self.get_logger().error(f"send_xstopS mislukt: {e}")
 
     def send_xstop(self):
+        try:
+            # wacht (begrensd) tot er minstens 1 subscriber is (enige code die luistert is autocharge)
+            self._wait_for_subscribers(self.xstop_pub, "/charge_XSTOP")
 
-        # wacht tot er minstens 1 subscriber is (enige code die luistert is autocharge)
-        while self.xstop_pub.get_subscription_count() == 0:
-            self.get_logger().info("Waiting for subscribers on /charge_XSTOP...")
-            time.sleep(0.1)
-        
-        msg = String()
-        msg.data = "XSTOP"
-        self.xstop_pub.publish(msg)
-        self.get_logger().info("Sent XSTOP to /force_charge (reliable)")
+            msg = String()
+            msg.data = "XSTOP"
+            self.xstop_pub.publish(msg)
+            self.get_logger().info("Sent XSTOP to /force_charge (reliable)")
+        except Exception as e:
+            self.get_logger().error(f"send_xstop mislukt: {e}")
 
     def publish_pose(self):
+        try:
+            # maak een poseWithCovariantceStamped bericht aan volgens het formaat dat altijd gebruikt wordt
+            pose_msg = PoseWithCovarianceStamped()
+            pose_msg.header.stamp = self.get_clock().now().to_msg()
+            pose_msg.header.frame_id = "map"
 
-        # maak een poseWithCovariantceStamped bericht aan volgens het formaat dat altijd gebruikt wordt
-        pose_msg = PoseWithCovarianceStamped()
-        pose_msg.header.stamp = self.get_clock().now().to_msg()
-        pose_msg.header.frame_id = "map"
+            # positie en orientatie invullen
+            pose_msg.pose.pose.position.x = self.new_x
+            pose_msg.pose.pose.position.y = self.new_y
+            pose_msg.pose.pose.position.z = 0.0
+            pose_msg.pose.pose.orientation.x = 0.0
+            pose_msg.pose.pose.orientation.y = 0.0
+            pose_msg.pose.pose.orientation.z = self.orien_z
+            pose_msg.pose.pose.orientation.w = self.orien_w
 
-        # positie en orientatie invullen
-        pose_msg.pose.pose.position.x = self.new_x
-        pose_msg.pose.pose.position.y = self.new_y
-        pose_msg.pose.pose.position.z = 0.0
-        pose_msg.pose.pose.orientation.x = 0.0
-        pose_msg.pose.pose.orientation.y = 0.0
-        pose_msg.pose.pose.orientation.z = self.orien_z
-        pose_msg.pose.pose.orientation.w = self.orien_w
+            # Covariance matrix initaliseren
+            pose_msg.pose.covariance = [0.0] * 36
 
-        # Covariance matrix initaliseren
-        pose_msg.pose.covariance = [0.0]*36
+            # onzekerheid is laag (we weten vrij exact waar robot staat)
+            pose_msg.pose.covariance[0] = 0.01
+            pose_msg.pose.covariance[7] = 0.01
+            pose_msg.pose.covariance[35] = 0.01
 
-        # onzekerheid is laag (we weten vrij exact waar robot staat)
-        pose_msg.pose.covariance[0] = 0.01
-        pose_msg.pose.covariance[7] = 0.01
-        pose_msg.pose.covariance[35] = 0.01
-
-        self.pose_pub.publish(pose_msg)
-        self.get_logger().info(f'Pose published: x={self.new_x:.3f}, y={self.new_y:.3f}')
+            self.pose_pub.publish(pose_msg)
+            self.get_logger().info(f'Pose published: x={self.new_x:.3f}, y={self.new_y:.3f}')
+        except Exception as e:
+            self.get_logger().error(f"publish_pose mislukt: {e}")
 
     def publish_pose_multiple(self):
         # Publish 10 keer met kleine delay de locatie van chargestation
@@ -208,39 +242,43 @@ class PublishBackPose(Node):
             self.get_logger().info(f'Publish {i+1}/10 to /initialpose')
             time.sleep(0.3)  # kleine delay zodat AMCL het zeker ontvangt
 
-
     def reset_callback(self, msg):
-        # callback voor reset berichten van autochargecode
-        # deze wordt verstuurd als we XSTOP stuurden en de robot effectief aan het laden was
-        # dit wil zeggen dat de locatie veranderd moet worden
+        try:
+            # callback voor reset berichten van autochargecode
+            # deze wordt verstuurd als we XSTOP stuurden en de robot effectief aan het laden was
+            # dit wil zeggen dat de locatie veranderd moet worden
 
-        if msg.data == "RESET":
-            self.get_logger().info("RESET received, waiting 3 seconds before republishing pose")
+            if msg.data == "RESET":
+                self.get_logger().info("RESET received, waiting 3 seconds before republishing pose")
 
-            # start delayed timer
-            if self.reset_delay_timer is not None:
-                self.reset_delay_timer.cancel()
+                # start delayed timer
+                if self.reset_delay_timer is not None:
+                    self.reset_delay_timer.cancel()
 
-            # wacht 4 seconden voor positie aan te passen (geef robot tijd om van laadstation af te bewegen)
-            self.reset_delay_timer = self.create_timer(4.0, self.delayed_reset_publish)
-
-
+                # wacht 4 seconden voor positie aan te passen (geef robot tijd om van laadstation af te bewegen)
+                self.reset_delay_timer = self.create_timer(4.0, self.delayed_reset_publish)
+        except Exception as e:
+            self.get_logger().error(f"reset_callback fout: {e}")
 
     def delayed_reset_publish(self):
-        self.get_logger().info("3 seconds passed after RESET, publishing pose")
+        try:
+            self.get_logger().info("3 seconds passed after RESET, publishing pose")
 
-        # timer meteen stoppen (belangrijk anders blijft hij herhalen)
-        if self.reset_delay_timer is not None:
-            self.reset_delay_timer.cancel()
-            self.reset_delay_timer = None
+            # timer meteen stoppen (belangrijk anders blijft hij herhalen)
+            if self.reset_delay_timer is not None:
+                self.reset_delay_timer.cancel()
+                self.reset_delay_timer = None
 
-        self.publish_pose_multiple()
-        
+            self.publish_pose_multiple()
+        except Exception as e:
+            self.get_logger().error(f"delayed_reset_publish fout: {e}")
 
     def manual_drive_callback(self, msg):
-        if msg.data == "MANUAL_DRIVE_CONTROL":
-            mode = self.check_manual_mode()
+        try:
+            if msg.data != "MANUAL_DRIVE_CONTROL":
+                return
 
+            mode = self.check_manual_mode()
             self.get_logger().info(f"Manual drive received, mode = {mode}")
 
             if mode == "SKIP":
@@ -248,10 +286,13 @@ class PublishBackPose(Node):
                 self.send_reset_active()
                 return
 
-        if mode == "PASS":
-            self.get_logger().info("PASS mode → starting AprilTag localization")
-            self.send_xstop()
-            self.send_reset_active()
+            if mode == "PASS":
+                self.get_logger().info("PASS mode → starting AprilTag localization")
+                self.send_xstop()
+                self.send_reset_active()
+        except Exception as e:
+            self.get_logger().error(f"manual_drive_callback fout: {e}")
+
 
 def main(args=None):
     rclpy.init(args=args)
@@ -262,6 +303,7 @@ def main(args=None):
         pass
     node.destroy_node()
     rclpy.shutdown()
+
 
 if __name__ == "__main__":
     main()

@@ -241,11 +241,19 @@ class QuizBTNode(Node):
         # ---------------- OPSTART: EENMALIG NAAR DATABASE SCHRIJVEN ----------------
         # Dit gebeurt ENKEL bij opstart van deze hele code (dus 1x, hier in __init__,
         # en nergens anders in de node). We zetten robotActive op true in de database.
-        self.get_logger().info("Opstart: robotActive=true wegschrijven naar database...")
-        if update_robot_status({"robotActive": True}):
-            self.get_logger().info("Opstart: robotActive succesvol op true gezet in database.")
+        self.get_logger().info("Opstart: robotActive=true en manualDrive=false wegschrijven naar database...")
+
+        if update_robot_status({
+            "robotActive": True,
+            "manualDrive": False
+        }):
+            self.get_logger().info(
+                "Opstart: robotActive succesvol op true gezet en manualDrive succesvol op false gezet in database."
+            )
         else:
-            self.get_logger().error("Opstart: kon robotActive niet op true zetten in database.")
+            self.get_logger().error(
+                "Opstart: kon robotActive/manualDrive niet correct in de database zetten."
+            )
 
     # ---------------- SETTINGS OPHALEN ----------------
 
@@ -531,6 +539,8 @@ class QuizBTNode(Node):
         # Schermen die niet opnieuw mogen worden verstuurd
         blocked_screens = {
             "robot-error-drive",
+            "robot-arrived-at-visitors",
+            "robot-arrived-at-quiz-location",
             "robot-error-charge",
             "robot-go-charge",
             "robot-charging",

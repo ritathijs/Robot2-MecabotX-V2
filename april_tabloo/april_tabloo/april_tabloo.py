@@ -39,6 +39,16 @@ class AprilTagAbsolutePose(Node):
         self.camera_matrix = None
         self.dist_coeffs = None
 
+        # Maximale tijd (s) die we blokkerend willen wachten op subscribers
+        # voordat we het opgeven i.p.v. voor altijd te blijven hangen.
+        self.subscriber_wait_timeout = 10.0
+
+        # Maximale tijd (s) die een reset-poging in totaal mag duren,
+        # ongeacht of er al camera-frames binnenkomen. Dit voorkomt dat
+        # de node oneindig blijft hangen als de camera bij startup nog
+        # geen beeld levert (attempts telt dan anders nooit mee).
+        self.reset_timeout = 5.0
+        self.reset_start_time = None
 
         ##############################################
         # Status file
@@ -62,20 +72,17 @@ class AprilTagAbsolutePose(Node):
         self.max_attempts = 5
         self.attempts = 0
 
-
         self.pose_pub = self.create_publisher(
             PoseWithCovarianceStamped,
             "/initialpose",
             10
         )
 
-
         qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
             history=HistoryPolicy.KEEP_LAST,
             depth=10
         )
-
 
         self.create_subscription(
             String,
@@ -84,14 +91,16 @@ class AprilTagAbsolutePose(Node):
             qos
         )
 
-
-        self.detector = Detector(
-            families='tag36h11',
-            nthreads=1,
-            quad_decimate=1.0,
-            refine_edges=1
-        )
-
+        try:
+            self.detector = Detector(
+                families='tag36h11',
+                nthreads=1,
+                quad_decimate=1.0,
+                refine_edges=1
+            )
+        except Exception as e:
+            self.get_logger().error(f"Kon AprilTag Detector niet initialiseren: {e}")
+            raise
 
         self.screen_pub = self.create_publisher(
             String,
@@ -105,14 +114,12 @@ class AprilTagAbsolutePose(Node):
             qos
         )
 
-
         self.create_subscription(
             Image,
             "/camera/color/image_raw",
             self.image_callback,
             10
         )
-
 
         self.create_subscription(
             CameraInfo,
@@ -121,44 +128,43 @@ class AprilTagAbsolutePose(Node):
             10
         )
 
-
         self.timer = self.create_timer(
             0.1,
             self.timer_callback
         )
 
+        tags_file = "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/trees/tags.json"
+        try:
+            with open(tags_file) as f:
+                data = json.load(f)
 
-        with open(
-            "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/trees/tags.json"
-        ) as f:
+            self.tag_x = float(data["p_x"])
+            self.tag_y = float(data["p_y"])
 
-            data = json.load(f)
-
-
-        self.tag_x = float(data["p_x"])
-        self.tag_y = float(data["p_y"])
-
-
-        self.tag_yaw = 2 * math.atan2(
-            data["orien_z"],
-            data["orien_w"]
-        )
-
+            self.tag_yaw = 2 * math.atan2(
+                data["orien_z"],
+                data["orien_w"]
+            )
+        except Exception as e:
+            self.get_logger().error(
+                f"Kon tags.json niet laden/parsen ({e}). "
+                f"Val terug op x=0, y=0, yaw=0."
+            )
+            self.tag_x = 0.0
+            self.tag_y = 0.0
+            self.tag_yaw = 0.0
 
         self.arrow_dir = np.array([
             math.cos(self.tag_yaw),
             math.sin(self.tag_yaw)
         ])
 
-
         self.right_dir = np.array([
             -math.sin(self.tag_yaw),
             math.cos(self.tag_yaw)
         ])
 
-
         self.get_logger().info("Node started")
-
 
     ##########################################################
     # Status schrijven
@@ -181,147 +187,151 @@ class AprilTagAbsolutePose(Node):
                 f"Kon statusfile niet schrijven: {e}"
             )
 
-
     ##########################################################
-
-        ##########################################################
 
     def send_screen(self, text):
+        try:
+            msg = String()
+            msg.data = text
 
-        msg = String()
-        msg.data = text
+            self.screen_pub.publish(msg)
 
-        self.screen_pub.publish(msg)
-
-        self.get_logger().info(
-            f"Scherm gestuurd: {text}"
-        )
+            self.get_logger().info(
+                f"Scherm gestuurd: {text}"
+            )
+        except Exception as e:
+            self.get_logger().error(f"send_screen mislukt: {e}")
 
     ##########################################################
 
-
     def reset_callback(self, msg):
+        try:
+            if msg.data.lower() == "active":
 
-        if msg.data.lower() == "active":
+                self.reset_active = True
+                self.attempts = 0
+                self.reset_start_time = time.time()
 
-            self.reset_active = True
-            self.attempts = 0
+                self.get_logger().info(
+                    "Reset ACTIVE ontvangen."
+                )
 
-            self.get_logger().info(
-                "Reset ACTIVE ontvangen."
-            )
+            else:
 
-        else:
+                self.reset_active = False
 
-            self.reset_active = False
-
-            self.get_logger().info(
-                "Reset NON-ACTIVE."
-            )
-
+                self.get_logger().info(
+                    "Reset NON-ACTIVE."
+                )
+        except Exception as e:
+            self.get_logger().error(f"reset_callback fout: {e}")
 
     ##########################################################
 
     def camera_info_callback(self, msg):
+        try:
+            if self.camera_matrix is None:
 
-        if self.camera_matrix is None:
+                self.camera_matrix = np.array(
+                    msg.k
+                ).reshape(3, 3)
 
-            self.camera_matrix = np.array(
-                msg.k
-            ).reshape(3,3)
+                self.dist_coeffs = np.array(
+                    msg.d
+                )
 
-            self.dist_coeffs = np.array(
-                msg.d
-            )
-
-            self.get_logger().info(
-                "Camera intrinsics loaded"
-            )
-
+                self.get_logger().info(
+                    "Camera intrinsics loaded"
+                )
+        except Exception as e:
+            self.get_logger().error(f"camera_info_callback fout: {e}")
 
     ##########################################################
 
-    def image_callback(self,msg):
-
+    def image_callback(self, msg):
         if not self.reset_active:
             return
 
-        self.latest_frame = self.bridge.imgmsg_to_cv2(
-            msg,
-            "bgr8"
-        )
-
+        try:
+            self.latest_frame = self.bridge.imgmsg_to_cv2(
+                msg,
+                "bgr8"
+            )
+        except Exception as e:
+            self.get_logger().error(f"image_callback: kon frame niet converteren: {e}")
 
     ##########################################################
-    
+
     def publish_done(self):
+        try:
+            if self.done_sent:
+                self.get_logger().info(
+                    "DONE al verstuurd, overslaan."
+                )
+                return
 
-        if self.done_sent:
+            start = time.time()
+            while self.done_pub.get_subscription_count() == 0:
+                if time.time() - start >= self.subscriber_wait_timeout:
+                    self.get_logger().error(
+                        f"Timeout: nog steeds geen subscribers op reset_done na "
+                        f"{self.subscriber_wait_timeout:.0f}s. Publiceer toch."
+                    )
+                    break
+
+                self.get_logger().info(
+                    "Waiting for subscribers on /reset_done..."
+                )
+
+                time.sleep(0.1)
+
+            msg = String()
+            msg.data = "done"
+
+            self.done_pub.publish(msg)
+
+            self.done_sent = True
+
             self.get_logger().info(
-                "DONE al verstuurd, overslaan."
+                "Sent first DONE on /reset_done"
             )
-            return
-
-
-        while self.done_pub.get_subscription_count() == 0:
-
-            self.get_logger().info(
-                "Waiting for subscribers on /reset_done..."
-            )
-
-            time.sleep(0.1)
-
-
-        msg = String()
-        msg.data = "done"
-
-        self.done_pub.publish(msg)
-
-        self.done_sent = True
-
-        self.get_logger().info(
-            "Sent first DONE on /reset_done"
-        )
+        except Exception as e:
+            self.get_logger().error(f"publish_done mislukt: {e}")
 
     ##########################################################
 
     def publish_pose(self, x, y, yaw):
-
-        msg = PoseWithCovarianceStamped()
-
-        msg.header.stamp = self.get_clock().now().to_msg()
-        msg.header.frame_id = "map"
-
-
-        msg.pose.pose.position.x = float(x)
-        msg.pose.pose.position.y = float(y)
-        msg.pose.pose.position.z = 0.0
-
-
-        qx, qy, qz, qw = quat_from_yaw(yaw)
-
-        msg.pose.pose.orientation.x = qx
-        msg.pose.pose.orientation.y = qy
-        msg.pose.pose.orientation.z = qz
-        msg.pose.pose.orientation.w = qw
-
-
-        msg.pose.covariance = [0.0] * 36
-
-        msg.pose.covariance[0] = 0.05
-        msg.pose.covariance[7] = 0.05
-        msg.pose.covariance[35] = 0.05
-
-
-        for i in range(5):
+        try:
+            msg = PoseWithCovarianceStamped()
 
             msg.header.stamp = self.get_clock().now().to_msg()
+            msg.header.frame_id = "map"
 
-            self.pose_pub.publish(msg)
+            msg.pose.pose.position.x = float(x)
+            msg.pose.pose.position.y = float(y)
+            msg.pose.pose.position.z = 0.0
 
-            time.sleep(0.1)
+            qx, qy, qz, qw = quat_from_yaw(yaw)
 
+            msg.pose.pose.orientation.x = qx
+            msg.pose.pose.orientation.y = qy
+            msg.pose.pose.orientation.z = qz
+            msg.pose.pose.orientation.w = qw
 
+            msg.pose.covariance = [0.0] * 36
+
+            msg.pose.covariance[0] = 0.05
+            msg.pose.covariance[7] = 0.05
+            msg.pose.covariance[35] = 0.05
+
+            for i in range(5):
+                msg.header.stamp = self.get_clock().now().to_msg()
+
+                self.pose_pub.publish(msg)
+
+                time.sleep(0.1)
+        except Exception as e:
+            self.get_logger().error(f"publish_pose mislukt: {e}")
 
     ##########################################################
 
@@ -330,186 +340,176 @@ class AprilTagAbsolutePose(Node):
         if not self.reset_active:
             return
 
+        try:
+            # Harde deadline voor de volledige resetpoging, ongeacht of er
+            # al camera-frames binnenkomen. Voorkomt dat de node oneindig
+            # blijft hangen als de camera bij startup nog geen beeld geeft.
+            if self.reset_start_time is not None and \
+                    (time.time() - self.reset_start_time) >= self.reset_timeout:
 
-        if self.latest_frame is None:
-            return
+                self.get_logger().warn(
+                    f"Reset-poging timeout na {self.reset_timeout:.0f}s "
+                    f"(geen tag/frame gevonden)."
+                )
 
+                self.write_status("NOK")
+                self.first_reset_done = True
 
-        if self.camera_matrix is None:
-            return
+                self.reset_active = False
+                self.attempts = 0
+                self.reset_start_time = None
+                return
 
+            if self.latest_frame is None:
+                return
 
-        frame = self.latest_frame.copy()
+            if self.camera_matrix is None:
+                return
 
-        gray = cv2.cvtColor(
-            frame,
-            cv2.COLOR_BGR2GRAY
-        )
+            frame = self.latest_frame.copy()
 
-
-        tags = self.detector.detect(gray)
-
-
-        self.attempts += 1
-
-
-        self.get_logger().info(
-            f"Detectiepoging {self.attempts}/{self.max_attempts}"
-        )
-
-
-        for tag in tags:
-
-
-            if tag.tag_id != self.target_id:
-                continue
-
-
-            half = self.tag_size / 2.0
-
-
-            obj = np.array([
-
-                [-half, -half, 0],
-                [ half, -half, 0],
-                [ half,  half, 0],
-                [-half,  half, 0]
-
-            ], dtype=np.float64)
-
-
-            img = tag.corners.astype(
-                np.float64
+            gray = cv2.cvtColor(
+                frame,
+                cv2.COLOR_BGR2GRAY
             )
 
+            tags = self.detector.detect(gray)
 
-            ok, rvec, tvec = cv2.solvePnP(
+            self.attempts += 1
 
-                obj,
-                img,
-                self.camera_matrix,
-                self.dist_coeffs,
-                flags=cv2.SOLVEPNP_ITERATIVE
+            self.get_logger().info(
+                f"Detectiepoging {self.attempts}/{self.max_attempts}"
             )
 
+            for tag in tags:
 
-            if not ok:
-                continue
+                if tag.tag_id != self.target_id:
+                    continue
 
+                half = self.tag_size / 2.0
 
-            tvec = tvec.reshape(3)
+                obj = np.array([
 
+                    [-half, -half, 0],
+                    [half, -half, 0],
+                    [half, half, 0],
+                    [-half, half, 0]
 
-            depth = float(tvec[2])
+                ], dtype=np.float64)
 
-            side = -float(tvec[0])
+                img = tag.corners.astype(
+                    np.float64
+                )
 
+                ok, rvec, tvec = cv2.solvePnP(
 
-            if depth <= 0.0:
-                continue
+                    obj,
+                    img,
+                    self.camera_matrix,
+                    self.dist_coeffs,
+                    flags=cv2.SOLVEPNP_ITERATIVE
+                )
 
+                if not ok:
+                    continue
 
+                tvec = tvec.reshape(3)
 
-            ####################################################
-            # Positiebepaling
-            ####################################################
+                depth = float(tvec[2])
 
-            x = (
-                self.tag_x
-                + self.arrow_dir[0] * depth
-                + self.right_dir[0] * side
-            )
+                side = -float(tvec[0])
 
+                if depth <= 0.0:
+                    continue
 
-            y = (
-                self.tag_y
-                + self.arrow_dir[1] * depth
-                + self.right_dir[1] * side
-            )
+                ####################################################
+                # Positiebepaling
+                ####################################################
 
+                x = (
+                    self.tag_x
+                    + self.arrow_dir[0] * depth
+                    + self.right_dir[0] * side
+                )
 
-            yaw = math.atan2(
-                self.arrow_dir[1],
-                self.arrow_dir[0]
-            ) + math.pi
+                y = (
+                    self.tag_y
+                    + self.arrow_dir[1] * depth
+                    + self.right_dir[1] * side
+                )
 
+                yaw = math.atan2(
+                    self.arrow_dir[1],
+                    self.arrow_dir[0]
+                ) + math.pi
 
+                ####################################################
+                # Tag gevonden
+                ####################################################
 
-            ####################################################
-            # Tag gevonden
-            ####################################################
+                self.publish_pose(
+                    x,
+                    y,
+                    yaw
+                )
 
+                # Eerste reset:
+                # altijd NOK schrijven na afloop
+                if self.first_reset_done is False:
 
-            self.publish_pose(
-                x,
-                y,
-                yaw
-            )
+                    self.write_status("OK")
+                    self.send_screen("RobotStartup")
 
+                    time.sleep(0.1)
 
-            # Eerste reset:
-            # altijd NOK schrijven na afloop
-            if self.first_reset_done is False:
+                    self.write_status("NOK")
 
-                self.write_status("OK")
-                self.send_screen("RobotStartup")
+                    self.first_reset_done = True
 
-                time.sleep(0.1)
+                else:
+
+                    self.write_status("OK")
+
+                self.get_logger().info(
+                    "Tag gevonden. Reset beëindigd."
+                )
+
+                self.publish_done()
+
+                self.reset_active = False
+                self.attempts = 0
+                self.reset_start_time = None
+
+                return
+
+            ########################################################
+            # Geen tag gevonden na alle pogingen
+            ########################################################
+
+            if self.attempts >= self.max_attempts:
+
+                self.get_logger().warn(
+                    "Geen AprilTag gevonden na 5 pogingen."
+                )
+
+                # eerste opdracht of volgende opdrachten:
+                # altijd NOK bij mislukking
 
                 self.write_status("NOK")
 
                 self.first_reset_done = True
 
+                self.reset_active = False
+                self.attempts = 0
+                self.reset_start_time = None
 
-            else:
-
-                self.write_status("OK")
-
-
-
-            self.get_logger().info(
-                "Tag gevonden. Reset beëindigd."
-            )
-
-
-            self.publish_done()
-
-
-            self.reset_active = False
-            self.attempts = 0
-
-
-            return
-
-
-
-        ########################################################
-        # Geen tag gevonden na alle pogingen
-        ########################################################
-
-
-        if self.attempts >= self.max_attempts:
-
-
-            self.get_logger().warn(
-                "Geen AprilTag gevonden na 5 pogingen."
-            )
-
-
-            # eerste opdracht of volgende opdrachten:
-            # altijd NOK bij mislukking
-
+        except Exception as e:
+            self.get_logger().error(f"timer_callback fout: {e}")
+            # Sluit de lopende resetpoging netjes af i.p.v. oneindig te blijven hangen
             self.write_status("NOK")
-
-
-            self.first_reset_done = True
-
-
             self.reset_active = False
-
             self.attempts = 0
-
-
+            self.reset_start_time = None
 
 
 ##############################################################
@@ -519,24 +519,19 @@ def main():
 
     rclpy.init()
 
-
     node = AprilTagAbsolutePose()
-
 
     try:
 
         rclpy.spin(node)
 
-
     except KeyboardInterrupt:
 
         pass
 
-
     node.destroy_node()
 
     rclpy.shutdown()
-
 
 
 if __name__ == "__main__":

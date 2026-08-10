@@ -1,3 +1,4 @@
+
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
@@ -25,6 +26,7 @@ class driveMux(Node):
 
         past_time = self.get_clock().now() - Duration(seconds=5)
 
+        self.lastmessage_chargehp = past_time
         self.lastmessage_gui = past_time
         self.lastmessage_estop = past_time
         self.lastmessage_turn = past_time
@@ -37,6 +39,12 @@ class driveMux(Node):
         self.active_source = "NONE"
 
         # Subscribers
+        self.chargehp_sub = self.create_subscription(
+            Twist,
+            '/chargehp_cmd_vel',
+            self.chargehp_callback,
+            10)
+
         self.gui_sub = self.create_subscription(
             Twist,
             '/gui_cmd_vel',
@@ -96,6 +104,11 @@ class driveMux(Node):
         self.last_cmd = msg
         self.active_source = source
         self.pub.publish(msg)
+
+    def chargehp_callback(self, msg):
+        self.lastmessage_chargehp = self.get_clock().now()
+        if 7 >= self.currentPriority():
+            self.publish_command(msg, "CHARGEHP")
 
     def gui_callback(self, msg):
         self.lastmessage_gui = self.get_clock().now()
@@ -161,31 +174,35 @@ class driveMux(Node):
     def currentPriority(self):
         now = self.get_clock().now()
 
-        # 1. GUI (Hoogste)
-        if now - self.lastmessage_gui <= Duration(seconds=2):
+        # 1. CHARGEHP (Hoogste)
+        if now - self.lastmessage_chargehp <= Duration(seconds=1.0):
+            return 7
+
+        # 2. GUI
+        elif now - self.lastmessage_gui <= Duration(seconds=2):
             return 6
 
-        # 2. ESTOP
+        # 3. ESTOP
         elif now - self.lastmessage_estop <= Duration(seconds=0.5):
             return 5
 
-        # 3. TURN
+        # 4. TURN
         elif now - self.lastmessage_turn <= Duration(seconds=2):
             return 4
 
-        # 4. CHARGE
+        # 5. CHARGE
         elif now - self.lastmessage_charge <= Duration(seconds=0.5):
             return 3
 
-        # 5. BUMP
+        # 6. BUMP
         elif self.bump_effectively_blocking():
             return 2
 
-        # 6. SEARCH
+        # 7. SEARCH
         elif now - self.lastmessage_search <= Duration(seconds=0.5):
             return 1
 
-        # 7. NAV (Gewone cmd_vel)
+        # 8. NAV (Gewone cmd_vel)
         elif now - self.lastmessage_nav <= Duration(seconds=0.5):
             return 0.5
 
@@ -205,6 +222,8 @@ class driveMux(Node):
             color = ORANGE
         elif self.active_source in ["NAV", "GUI", "TURN", "SEARCH"]:
             color = GREEN
+        elif self.active_source == "CHARGEHP":
+            color = ORANGE
         else:
             color = GRAY
 
@@ -241,6 +260,7 @@ class driveMux(Node):
 
         # Bronnenlijst in volgorde van prioriteit
         sources = [
+            ("CHARGEHP", self.lastmessage_chargehp, 0.5),
             ("GUI", self.lastmessage_gui, 2),
             ("ESTOP", self.lastmessage_estop, 0.5),
             ("TURN", self.lastmessage_turn, 2),
@@ -253,21 +273,42 @@ class driveMux(Node):
         now = self.get_clock().now()
 
         for name, time_msg, timeout in sources:
+
             # Voeg BUMP in op de juiste plek in de print-lijst (na CHARGE)
             if name == "SEARCH":
                 bump_age = (now - self.lastmessage_bump).nanoseconds / 1e9
+
                 if self.bump_effectively_blocking():
-                    print(f"{GREEN}{'BUMP':<8}: ACTIEF (blokkeert) ({bump_age:.2f}s){RESET}")
+                    print(
+                        f"{GREEN}{'BUMP':<8}: "
+                        f"ACTIEF (blokkeert) ({bump_age:.2f}s){RESET}"
+                    )
+
                 elif self.bump_signal_recent() and self.bumper_ignoren():
-                    print(f"{ORANGE}{'BUMP':<8}: GENEGEERD (IR docking actief) ({bump_age:.2f}s){RESET}")
+                    print(
+                        f"{ORANGE}{'BUMP':<8}: "
+                        f"GENEGEERD (IR docking actief) "
+                        f"({bump_age:.2f}s){RESET}"
+                    )
+
                 else:
-                    print(f"{GRAY}{'BUMP':<8}: uit ({bump_age:.2f}s){RESET}")
+                    print(
+                        f"{GRAY}{'BUMP':<8}: "
+                        f"uit ({bump_age:.2f}s){RESET}"
+                    )
 
             age = (now - time_msg).nanoseconds / 1e9
+
             if age <= timeout:
-                print(f"{GREEN}{name:<8}: ACTIEF ({age:.2f}s){RESET}")
+                print(
+                    f"{GREEN}{name:<8}: "
+                    f"ACTIEF ({age:.2f}s){RESET}"
+                )
             else:
-                print(f"{GRAY}{name:<8}: uit ({age:.2f}s){RESET}")
+                print(
+                    f"{GRAY}{name:<8}: "
+                    f"uit ({age:.2f}s){RESET}"
+                )
 
         print("\n======================================")
 
@@ -287,3 +328,4 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
+

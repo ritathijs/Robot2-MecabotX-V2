@@ -243,6 +243,9 @@ class AutoRecharger(Node):
         #速度话题用于不开启导航时，向底盘发送开启自动回充任务命令
         self.Cmd_vel_pub = self.create_publisher(Twist,"/charge_cmd_vel",  5)
 
+        # NIEUW: aparte snelheidstopic voor het loskoppelen na een stopbericht (gestuurd door GUI-kant, geen deel van het docking/laad-proces)
+        self.Gui_Cmd_vel_pub = self.create_publisher(Twist,"/chargehp_cmd_vel",  5)
+
 
         # Voorzien voor het publiceren van batterijpercentage richting de communicatiecode BT <=> Quiz
         self.Battery_pub = self.create_publisher(Int8, '/battery_percentage', 10)
@@ -839,6 +842,9 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         - Stops IR search
         - Optionally drives robot slightly forward to clear dock
         - Resets charging state
+
+        LET OP: het vooruit rijden om los te koppelen na een stopbericht gebeurt
+        via /gui_cmd_vel (Gui_Cmd_vel_pub) en NIET meer via /charge_cmd_vel.
         """
 
 
@@ -855,12 +861,12 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                 )
             move = Twist()
             move.linear.x = 0.20
-            self.Cmd_vel_pub.publish(move)
+            self.Gui_Cmd_vel_pub.publish(move)
             time.sleep(3.0)
             
             # Stop weer na het vooruit rijden
             move.linear.x = 0.0
-            self.Cmd_vel_pub.publish(move)
+            self.Gui_Cmd_vel_pub.publish(move)
         else:
             print_and_fixRetract(YELLOW + "Gevraagd om niet naar voren te rijden." + RESET)
 
@@ -881,6 +887,9 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
     def retry_docking_if_not_charging(self):
         """
         als robot faalt bij docken, dan proberen we opnieuw
+
+        LET OP: dit blijft via /charge_cmd_vel (Cmd_vel_pub) lopen, dit is geen
+        loskoppelen na een stopbericht maar een nieuwe dockingpoging.
         """
         
         # self.publish_docking_status("DOCKING_DISABLED")

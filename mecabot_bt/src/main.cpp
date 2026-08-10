@@ -1616,9 +1616,7 @@ public:
         force_charge_pub_ = node_->create_publisher<std_msgs::msg::String>(
             "/force_charge", 10);
 
-        infrared_docking_pub_ =
-    node_->create_publisher<std_msgs::msg::String>(
-        "/infrared_docking_status",docking_qos);
+
 
 
     }
@@ -1682,7 +1680,6 @@ public:
             }
         }
 
-        publishDockingEnabled();
 
         success_received_ = false;
         force_charge_received_ = false;
@@ -1810,31 +1807,6 @@ public:
         std::cout << "[DriveToChargingStation] HALTED" << std::endl;
     }
 
-    void publishDockingEnabled()
-{
-    std_msgs::msg::String docking_msg;
-    docking_msg.data = "DOCKING_ENABLED";
-
-
-    while(infrared_docking_pub_->get_subscription_count() == 0)
-    {
-        RCLCPP_INFO(
-            node_->get_logger(),
-            "Waiting for subscribers on /infrared_docking_status..."
-        );
-
-        rclcpp::sleep_for(
-            std::chrono::milliseconds(100));
-    }
-
-
-    infrared_docking_pub_->publish(docking_msg);
-
-
-    std::cout 
-        << "[DriveToChargingStation] Published DOCKING_ENABLED"
-        << std::endl;
-}
 
 
 
@@ -1853,7 +1825,7 @@ private:
 
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr infrared_docking_pub_;
+
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr force_charge_pub_;
 };
 
@@ -4843,37 +4815,10 @@ public:
         docking_qos.reliable();
         docking_qos.transient_local();
 
-        infrared_docking_pub_ =
-            node_->create_publisher<std_msgs::msg::String>(
-                "/infrared_docking_status",
-                docking_qos);
+
     }
 
-    void publishDockingDisabled()
-    {
-        std_msgs::msg::String docking_msg;
-        docking_msg.data = "DOCKING_DISABLED";
 
-
-        while(infrared_docking_pub_->get_subscription_count() == 0)
-        {
-            RCLCPP_INFO(
-                node_->get_logger(),
-                "Waiting for subscribers on /infrared_docking_status..."
-            );
-
-            rclcpp::sleep_for(
-                std::chrono::milliseconds(100));
-        }
-
-
-        infrared_docking_pub_->publish(docking_msg);
-
-
-        std::cout
-            << "[BatteryCharged] Published DOCKING_DISABLED"
-            << std::endl;
-    }
 
     static BT::PortsList providedPorts()
     {
@@ -4887,7 +4832,6 @@ public:
 
     BT::NodeStatus onStart() override
     {
-        publishDockingDisabled();
 
         // timeout uit XML of default
         if (!getInput<double>("timeout", timeout_))
@@ -4940,7 +4884,6 @@ public:
 private:
     double timeout_;
     std::chrono::steady_clock::time_point start_time_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr infrared_docking_pub_;
     rclcpp::Node::SharedPtr node_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;
