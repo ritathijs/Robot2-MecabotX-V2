@@ -546,6 +546,7 @@ class QuizBTNode(Node):
             "robot-charging",
             "robot-docking",
             "robot-lost-charging",
+            "robot-startup"
         }
 
         if self.last_screen in blocked_screens:

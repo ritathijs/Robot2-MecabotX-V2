@@ -2826,6 +2826,13 @@ public:
         search_pub_ = node_->create_publisher<geometry_msgs::msg::Twist>(
             "/search_cmd_vel", 10);
 
+        // =====================================================
+        // E-STOP CMD VEL
+        // =====================================================
+        estop_pub_ =
+            node_->create_publisher<geometry_msgs::msg::Twist>(
+                "/estop_cmd_vel", 10);
+
         // -----------------------------
         // Target distance subscriber
         // -----------------------------
@@ -2856,19 +2863,19 @@ public:
                 std::string expected =
                     "drive_to_quiz_location" + visitor_code_;
 
-                if(msg->data == expected)
+                if (msg->data == expected)
                 {
                     std::cout
-                    << "[CheckingNearbyVisitors] Received correct quiz code: "
-                    << msg->data
-                    << std::endl;
+                        << "[CheckingNearbyVisitors] Received correct quiz code: "
+                        << msg->data
+                        << std::endl;
 
                     received_drive_to_quiz_ = true;
 
                     std::ofstream file(
-                    "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/quizknop.txt");
+                        "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/quizknop.txt");
 
-                    if(file.is_open())
+                    if (file.is_open())
                     {
                         file << "GEDRUKT";
                         file.close();
@@ -2877,11 +2884,10 @@ public:
                 else
                 {
                     std::cout
-                    << "[CheckingNearbyVisitors] Wrong quiz code received: "
-                    << msg->data
-                    << std::endl;
+                        << "[CheckingNearbyVisitors] Wrong quiz code received: "
+                        << msg->data
+                        << std::endl;
                 }
-
             });
     }
 
@@ -2897,38 +2903,87 @@ public:
 
     BT::NodeStatus onStart() override
     {
-        // -----------------------------
+        // =====================================================
+        // E-STOP / VEILIGE STOP
+        //
+        // Bij het starten van deze node wordt gedurende
+        // 1 seconde een nul-Twist naar /estop_cmd_vel gestuurd.
+        //
+        // Dit gebeurt VOORDAT de rest van deze node start.
+        // =====================================================
+        std::cout
+            << "[CheckingNearbyVisitors] Sending ZERO velocity to "
+               "/estop_cmd_vel for 1 second..."
+            << std::endl;
+
+        geometry_msgs::msg::Twist estop_stop;
+
+        // Volledig nul maken
+        estop_stop.linear.x = 0.0;
+        estop_stop.linear.y = 0.0;
+        estop_stop.linear.z = 0.0;
+
+        estop_stop.angular.x = 0.0;
+        estop_stop.angular.y = 0.0;
+        estop_stop.angular.z = 0.0;
+
+        // 20 Hz
+        rclcpp::Rate estop_rate(20);
+
+        // 20 berichten = ongeveer 1 seconde
+        for (int i = 0; i < 20; i++)
+        {
+            estop_pub_->publish(estop_stop);
+
+            // ROS callbacks blijven verwerken
+            rclcpp::spin_some(node_);
+
+            estop_rate.sleep();
+        }
+
+        // Nog één expliciete nul-snelheid sturen
+        estop_pub_->publish(estop_stop);
+
+        std::cout
+            << "[CheckingNearbyVisitors] 1 second zero velocity finished"
+            << std::endl;
+
+        // =====================================================
         // Visitor code ophalen via InputPort
-        // (wordt nu al gegenereerd door StartDrivingToPeople)
-        // -----------------------------
+        // (wordt gegenereerd door StartDrivingToPeople)
+        // =====================================================
         visitor_code_.clear();
 
-        if(getInput("visitor_code", visitor_code_))
+        if (getInput("visitor_code", visitor_code_))
         {
             std::cout
-                << "[CheckingNearbyVisitors] Visitor code received from port: "
+                << "[CheckingNearbyVisitors] Visitor code received "
+                   "from port: "
                 << visitor_code_
                 << std::endl;
         }
         else
         {
             std::cout
-                << "[CheckingNearbyVisitors] WARNING: No visitor_code received"
+                << "[CheckingNearbyVisitors] WARNING: "
+                   "No visitor_code received"
                 << std::endl;
         }
 
-        // standaard: volgende nodes uitvoeren
+        // =====================================================
+        // Standaard: volgende nodes uitvoeren
+        // =====================================================
         setOutput("robot_needs_rotation", true);
 
-        //--------------------------------------------------------
+        // =====================================================
         // Controle: knop mogelijk al ingedrukt vóór deze node
         // (scherm staat al aan sinds StartDrivingToPeople)
-        //--------------------------------------------------------
+        // =====================================================
         {
             std::ifstream file(
-            "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/quizknop.txt");
+                "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/quizknop.txt");
 
-            if(file.is_open())
+            if (file.is_open())
             {
                 std::string status;
 
@@ -2936,10 +2991,11 @@ public:
 
                 file.close();
 
-                if(status == "GEDRUKT")
+                if (status == "GEDRUKT")
                 {
                     std::cout
-                        << "[CheckingNearbyVisitors] quizknop.txt = GEDRUKT -> SUCCESS"
+                        << "[CheckingNearbyVisitors] "
+                           "quizknop.txt = GEDRUKT -> SUCCESS"
                         << std::endl;
 
                     setOutput("robot_needs_rotation", false);
@@ -2949,6 +3005,9 @@ public:
             }
         }
 
+        // =====================================================
+        // Initialisatie
+        // =====================================================
         latest_value_ = 999.0;
         received_drive_to_quiz_ = false;
 
@@ -2958,14 +3017,17 @@ public:
         rotation_start_time_ =
             std::chrono::steady_clock::now();
 
+        // =====================================================
+        // Publish BehaviorTree node
+        // =====================================================
         std_msgs::msg::String msg;
         msg.data = "CheckingNearbyVisitors";
         pub_->publish(msg);
 
         std::cout
-        << "[CheckingNearbyVisitors] Visitor code: "
-        << visitor_code_
-        << std::endl;
+            << "[CheckingNearbyVisitors] Visitor code: "
+            << visitor_code_
+            << std::endl;
 
         return BT::NodeStatus::RUNNING;
     }
@@ -2974,94 +3036,104 @@ public:
     {
         rclcpp::spin_some(node_);
 
-        //--------------------------------------------------------
-        // Quiz knop correct ingedrukt -> volgende nodes skippen
-        //--------------------------------------------------------
-        if(received_drive_to_quiz_)
+        // =====================================================
+        // Quiz knop correct ingedrukt
+        // =====================================================
+        if (received_drive_to_quiz_)
         {
             stopRotation();
 
             setOutput("robot_needs_rotation", false);
 
             std::cout
-            << "[CheckingNearbyVisitors] QUIZ BUTTON CORRECT -> SUCCESS"
-            << std::endl;
+                << "[CheckingNearbyVisitors] "
+                   "QUIZ BUTTON CORRECT -> SUCCESS"
+                << std::endl;
 
             return BT::NodeStatus::SUCCESS;
         }
 
+        // =====================================================
+        // Timer ophalen
+        // =====================================================
         double timer = 30.0;
         getInput("timer", timer);
 
-        //--------------------------------------------------------
+        // =====================================================
         // Roteren
-        //--------------------------------------------------------
+        // =====================================================
         geometry_msgs::msg::Twist cmd;
 
         cmd.linear.x = 0.0;
+        cmd.linear.y = 0.0;
+        cmd.linear.z = 0.0;
+
+        cmd.angular.x = 0.0;
+        cmd.angular.y = 0.0;
         cmd.angular.z = 0.25;
 
         search_pub_->publish(cmd);
 
-        //--------------------------------------------------------
+        // =====================================================
         // Persoon gezien
-        //--------------------------------------------------------
-        if(latest_value_ != 999.0 &&
-           latest_value_ > 0.0)
+        // =====================================================
+        if (latest_value_ != 999.0 &&
+            latest_value_ > 0.0)
         {
             stopRotation();
 
             setOutput("robot_needs_rotation", true);
 
             std::cout
-            << "[CheckingNearbyVisitors] PERSON DETECTED -> SUCCESS"
-            << std::endl;
+                << "[CheckingNearbyVisitors] PERSON DETECTED -> SUCCESS"
+                << std::endl;
 
             return BT::NodeStatus::SUCCESS;
         }
 
-        //--------------------------------------------------------
+        // =====================================================
         // Kwartrotatie klaar
-        //--------------------------------------------------------
+        // =====================================================
         auto rotation_elapsed =
-        std::chrono::duration<double>(
-            std::chrono::steady_clock::now()
-            - rotation_start_time_)
-            .count();
+            std::chrono::duration<double>(
+                std::chrono::steady_clock::now()
+                - rotation_start_time_)
+                .count();
 
         double quarter_rotation_time = 38;
 
-        if(rotation_elapsed >= quarter_rotation_time)
+        if (rotation_elapsed >= quarter_rotation_time)
         {
             stopRotation();
 
             setOutput("robot_needs_rotation", true);
 
             std::cout
-            << "[CheckingNearbyVisitors] QUARTER ROTATION COMPLETE"
-            << std::endl;
+                << "[CheckingNearbyVisitors] "
+                   "QUARTER ROTATION COMPLETE"
+                << std::endl;
 
             return BT::NodeStatus::SUCCESS;
         }
 
-        //--------------------------------------------------------
+        // =====================================================
         // Timeout
-        //--------------------------------------------------------
+        // =====================================================
         auto elapsed =
-        std::chrono::duration<double>(
-            std::chrono::steady_clock::now()
-            - start_time_)
-            .count();
+            std::chrono::duration<double>(
+                std::chrono::steady_clock::now()
+                - start_time_)
+                .count();
 
-        if(elapsed >= timer)
+        if (elapsed >= timer)
         {
             stopRotation();
 
             setOutput("robot_needs_rotation", true);
 
             std::cout
-            << "[CheckingNearbyVisitors] TIMEOUT"
-            << std::endl;
+                << "[CheckingNearbyVisitors] TIMEOUT"
+                << std::endl;
 
             return BT::NodeStatus::SUCCESS;
         }
@@ -3073,9 +3145,22 @@ public:
     {
         stopRotation();
 
+        // Ook bij halt een nulcommando naar estop_cmd_vel
+        geometry_msgs::msg::Twist estop_stop;
+
+        estop_stop.linear.x = 0.0;
+        estop_stop.linear.y = 0.0;
+        estop_stop.linear.z = 0.0;
+
+        estop_stop.angular.x = 0.0;
+        estop_stop.angular.y = 0.0;
+        estop_stop.angular.z = 0.0;
+
+        estop_pub_->publish(estop_stop);
+
         std::cout
-        << "[CheckingNearbyVisitors] HALTED"
-        << std::endl;
+            << "[CheckingNearbyVisitors] HALTED"
+            << std::endl;
     }
 
 private:
@@ -3085,6 +3170,11 @@ private:
         geometry_msgs::msg::Twist stop;
 
         stop.linear.x = 0.0;
+        stop.linear.y = 0.0;
+        stop.linear.z = 0.0;
+
+        stop.angular.x = 0.0;
+        stop.angular.y = 0.0;
         stop.angular.z = 0.0;
 
         search_pub_->publish(stop);
@@ -3095,10 +3185,20 @@ private:
     rclcpp::Node::SharedPtr node_;
 
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
-    rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr search_pub_;
+
+    rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr
+        search_pub_;
+
+    // =====================================================
+    // Publisher voor /estop_cmd_vel
+    // =====================================================
+    rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr
+        estop_pub_;
 
     rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr sub_;
-    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_quiz_;
+
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr
+        sub_quiz_;
 
     float latest_value_ = 999.0;
 
@@ -3107,6 +3207,7 @@ private:
     std::string visitor_code_;
 
     std::chrono::steady_clock::time_point start_time_;
+
     std::chrono::steady_clock::time_point rotation_start_time_;
 };
 
@@ -5965,6 +6066,13 @@ public:
         pub_cmd_vel_ = node_->create_publisher<geometry_msgs::msg::Twist>(
             "/turn_cmd_vel", 10);
 
+        // =====================================================
+        // E-STOP CMD VEL
+        // =====================================================
+        pub_estop_cmd_vel_ =
+            node_->create_publisher<geometry_msgs::msg::Twist>(
+                "/estop_cmd_vel", 10);
+
         // -----------------------------
         // Quiz knop subscriber
         // -----------------------------
@@ -5980,19 +6088,19 @@ public:
                 std::string expected =
                     "drive_to_quiz_location" + visitor_code_;
 
-                if(msg->data == expected)
+                if (msg->data == expected)
                 {
                     std::cout
-                    << "[StartDrivingToPeople] Received correct quiz code: "
-                    << msg->data
-                    << std::endl;
+                        << "[StartDrivingToPeople] Received correct quiz code: "
+                        << msg->data
+                        << std::endl;
 
                     received_drive_to_quiz_ = true;
 
                     std::ofstream file(
-                    "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/quizknop.txt");
+                        "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/quizknop.txt");
 
-                    if(file.is_open())
+                    if (file.is_open())
                     {
                         file << "GEDRUKT";
                         file.close();
@@ -6001,9 +6109,9 @@ public:
                 else
                 {
                     std::cout
-                    << "[StartDrivingToPeople] Wrong quiz code received: "
-                    << msg->data
-                    << std::endl;
+                        << "[StartDrivingToPeople] Wrong quiz code received: "
+                        << msg->data
+                        << std::endl;
                 }
             });
     }
@@ -6022,16 +6130,62 @@ public:
     BT::NodeStatus onStart() override
     {
         // =====================================================
-        // Reset verdwaald melding
+        // RESET VERDWAALD MELDING
         // =====================================================
         setOutput("show_verdwaald", false);
 
-                std_msgs::msg::String bt_msg;
+        // =====================================================
+        // E-STOP / VEILIGE STOP
+        //
+        // Bij het starten van deze node wordt gedurende
+        // 1 seconde een nul-Twist naar /estop_cmd_vel gestuurd.
+        //
+        // Dit gebeurt VOORDAT er eventueel gedraaid wordt.
+        // =====================================================
+        std::cout
+            << "[StartDrivingToPeople] Sending ZERO velocity to "
+               "/estop_cmd_vel for 1 second..."
+            << std::endl;
+
+        geometry_msgs::msg::Twist estop_twist;
+
+        // Alles staat standaard op 0.0
+        estop_twist.linear.x = 0.0;
+        estop_twist.linear.y = 0.0;
+        estop_twist.linear.z = 0.0;
+        estop_twist.angular.x = 0.0;
+        estop_twist.angular.y = 0.0;
+        estop_twist.angular.z = 0.0;
+
+        rclcpp::Rate estop_rate(20);
+
+        // 20 Hz gedurende 1 seconde
+        for (int i = 0; i < 20; i++)
+        {
+            pub_estop_cmd_vel_->publish(estop_twist);
+
+            // Eventueel callbacks verwerken
+            rclcpp::spin_some(node_);
+
+            estop_rate.sleep();
+        }
+
+        // Nog één expliciete nul-snelheid sturen
+        pub_estop_cmd_vel_->publish(estop_twist);
+
+        std::cout
+            << "[StartDrivingToPeople] 1 second zero velocity finished"
+            << std::endl;
+
+        // =====================================================
+        // PUBLISH NAAR BEHAVIORTREENODE
+        // =====================================================
+        std_msgs::msg::String bt_msg;
         bt_msg.data = "StartDrivingToPeople";
         pub_bt_->publish(bt_msg);
 
         // =====================================================
-        // Nieuwe visitor code + knopscherm activeren
+        // NIEUWE VISITOR CODE + KNOPSCHERM ACTIVEREN
         // =====================================================
         visitor_code_ = generateRandomCode();
         setOutput("visitor_code", visitor_code_);
@@ -6039,9 +6193,9 @@ public:
 
         {
             std::ofstream file(
-            "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/quizknop.txt");
+                "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/quizknop.txt");
 
-            if(file.is_open())
+            if (file.is_open())
             {
                 file << "LOS";
                 file.close();
@@ -6057,36 +6211,41 @@ public:
         pub_quiz_->publish(screen_msg);
 
         std::cout
-        << "[StartDrivingToPeople] Screen trigger sent: "
-        << screen_msg.data
-        << std::endl;
+            << "[StartDrivingToPeople] Screen trigger sent: "
+            << screen_msg.data
+            << std::endl;
 
         std::cout
-        << "[StartDrivingToPeople] Visitor code: "
-        << visitor_code_
-        << std::endl;
+            << "[StartDrivingToPeople] Visitor code: "
+            << visitor_code_
+            << std::endl;
 
         // =====================================================
-        // Indien nodig eerst een kwartslag draaien
+        // INDIEN NODIG EERST EEN KWARTSLAG DRAAIEN
         // =====================================================
         bool robot_needs_rotation = false;
 
         if (getInput("robot_needs_rotation", robot_needs_rotation) &&
             robot_needs_rotation)
         {
-            std::cout << "[StartDrivingToPeople] Performing quarter rotation..."
-                      << std::endl;
+            std::cout
+                << "[StartDrivingToPeople] Performing quarter rotation..."
+                << std::endl;
 
             geometry_msgs::msg::Twist twist;
             twist.angular.z = 0.3;
 
             rclcpp::Rate rate(20);
 
-            // ongeveer 90 graden draaien
+            // Ongeveer 90 graden draaien
             // 0.3 rad/s gedurende ±5.2 s ≈ 1.57 rad
             for (int i = 0; i < 104; i++)
             {
                 pub_cmd_vel_->publish(twist);
+
+                // Eventueel callbacks verwerken
+                rclcpp::spin_some(node_);
+
                 rate.sleep();
             }
 
@@ -6094,27 +6253,31 @@ public:
             twist.angular.z = 0.0;
             pub_cmd_vel_->publish(twist);
 
-            std::cout << "[StartDrivingToPeople] Quarter rotation finished"
-                      << std::endl;
+            std::cout
+                << "[StartDrivingToPeople] Quarter rotation finished"
+                << std::endl;
         }
 
         // =====================================================
-        // Publish naar BehaviorTreeNode
+        // PUBLISH NAAR BEHAVIORTREENODE
         // =====================================================
-     
         bt_msg.data = "StartDrivingToPeople";
         pub_bt_->publish(bt_msg);
 
         // =====================================================
-        // Tracking inschakelen
+        // TRACKING INSCHAKELEN
         // =====================================================
         std_msgs::msg::Bool tracking_msg;
         tracking_msg.data = true;
         pub_tracking_enable_->publish(tracking_msg);
 
-        std::cout << "[StartDrivingToPeople] Tracking ENABLED" << std::endl;
-        std::cout << "[StartDrivingToPeople] Started driving to people"
-                  << std::endl;
+        std::cout
+            << "[StartDrivingToPeople] Tracking ENABLED"
+            << std::endl;
+
+        std::cout
+            << "[StartDrivingToPeople] Started driving to people"
+            << std::endl;
 
         return BT::NodeStatus::RUNNING;
     }
@@ -6138,24 +6301,32 @@ public:
 
                 if (dot != std::string::npos)
                 {
-                    long sec = std::stol(ts_str.substr(0, dot));
+                    long sec =
+                        std::stol(ts_str.substr(0, dot));
 
-                    auto now = node_->get_clock()->now();
-                    long now_sec = now.seconds();
+                    auto now =
+                        node_->get_clock()->now();
 
-                    long diff = std::abs(now_sec - sec);
+                    long now_sec =
+                        now.seconds();
+
+                    long diff =
+                        std::abs(now_sec - sec);
 
                     if (diff > delta_seconds)
                     {
                         std::cout
-                            << "[StartDrivingToPeople] TIMEOUT detected (diff="
+                            << "[StartDrivingToPeople] TIMEOUT detected "
+                               "(diff="
                             << diff
                             << "s > delta="
                             << delta_seconds
                             << ") -> restart_tree=true"
                             << std::endl;
 
-                        config().blackboard->set("restart_tree", true);
+                        config().blackboard->set(
+                            "restart_tree",
+                            true);
 
                         return BT::NodeStatus::FAILURE;
                     }
@@ -6171,7 +6342,7 @@ public:
         }
 
         // =====================================================
-        // Klaar?
+        // KLAAR?
         // =====================================================
 
         return BT::NodeStatus::SUCCESS;
@@ -6179,15 +6350,38 @@ public:
 
     void onHalted() override
     {
+        // =====================================================
+        // TRACKING UITSCHAKELEN
+        // =====================================================
         std_msgs::msg::Bool tracking_msg;
         tracking_msg.data = false;
         pub_tracking_enable_->publish(tracking_msg);
 
+        // =====================================================
+        // TURN CMD VEL STOPPEN
+        // =====================================================
         geometry_msgs::msg::Twist stop;
+        stop.linear.x = 0.0;
+        stop.linear.y = 0.0;
+        stop.linear.z = 0.0;
+        stop.angular.x = 0.0;
+        stop.angular.y = 0.0;
+        stop.angular.z = 0.0;
+
         pub_cmd_vel_->publish(stop);
 
-        std::cout << "[StartDrivingToPeople] Tracking DISABLED" << std::endl;
-        std::cout << "[StartDrivingToPeople] HALTED" << std::endl;
+        // =====================================================
+        // OOK E-STOP CMD VEL STOPPEN
+        // =====================================================
+        pub_estop_cmd_vel_->publish(stop);
+
+        std::cout
+            << "[StartDrivingToPeople] Tracking DISABLED"
+            << std::endl;
+
+        std::cout
+            << "[StartDrivingToPeople] HALTED"
+            << std::endl;
     }
 
 private:
@@ -6197,8 +6391,8 @@ private:
         static std::random_device rd;
         static std::mt19937 gen(rd());
 
-        std::uniform_int_distribution<int> letter_dist(0,25);
-        std::uniform_int_distribution<int> number_dist(0,9);
+        std::uniform_int_distribution<int> letter_dist(0, 25);
+        std::uniform_int_distribution<int> number_dist(0, 9);
 
         char letter =
             'A' + letter_dist(gen);
@@ -6211,16 +6405,30 @@ private:
     }
 
 private:
+
     rclcpp::Node::SharedPtr node_;
 
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_bt_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;
-    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_tracking_enable_;
-    rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr pub_cmd_vel_;
 
-    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr sub_quiz_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_quiz_;
+
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr
+        pub_tracking_enable_;
+
+    rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr
+        pub_cmd_vel_;
+
+    // =====================================================
+    // Publisher voor /estop_cmd_vel
+    // =====================================================
+    rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr
+        pub_estop_cmd_vel_;
+
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr
+        sub_quiz_;
 
     bool received_drive_to_quiz_;
+
     std::string visitor_code_;
 };
 
@@ -6662,7 +6870,7 @@ int main(int argc, char **argv)
     tree.rootBlackboard()->set("restart_tree", false);
 
     std::cout << "--- Starting BT in continuous mode ---" << std::endl;
-    rclcpp::Rate loop_rate(2.0); // definieer hoeveel ticks/sec naar rootnode gaan
+    rclcpp::Rate loop_rate(4.0); // definieer hoeveel ticks/sec naar rootnode gaan
 
     while (rclcpp::ok())
         {

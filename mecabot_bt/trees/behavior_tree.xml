@@ -64,7 +64,7 @@
                                             </Fallback>
                                             
                                             <RobotAtQuiz robotLocation="{robotLocation}"/>
-                                            <WaitQuizToEnd timeout="300.0" skip_drivetoworkarea="{skip_drivetoworkarea}"/>
+                                            <WaitQuizToEnd timeout="180.0" skip_drivetoworkarea="{skip_drivetoworkarea}"/>
                                         </Sequence>
                                         
                                         <Sequence name="MainSTOPSequence">
