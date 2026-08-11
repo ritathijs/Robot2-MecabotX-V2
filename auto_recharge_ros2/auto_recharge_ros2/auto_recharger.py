@@ -519,7 +519,9 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                 self.stop_requested = False
                 self.publish_event("DRIVE-TO-DOCK-SUCCESS")
                 # Goed startbericht ontvangen -> begin van een laadcyclus
+                self.publish_rpi_event("RobotDocking")
                 self.write_laadcyclus("LAADCYCLUS")
+
                 self.start_forced_charging()
                 return
 
