@@ -27,12 +27,6 @@ class AprilTagAbsolutePose(Node):
     def __init__(self):
         super().__init__('apriltag_absolute_pose')
 
-        self.declare_parameter("target_id", 0)
-        self.declare_parameter("tag_size", 0.08)
-
-        self.target_id = int(self.get_parameter("target_id").value)
-        self.tag_size = float(self.get_parameter("tag_size").value)
-
         self.bridge = CvBridge()
 
         self.latest_frame = None
@@ -133,38 +127,76 @@ class AprilTagAbsolutePose(Node):
             self.timer_callback
         )
 
+        ##############################################
+        # Tags laden (meerdere tags mogelijk)
+        ##############################################
+        # self.tags_data wordt een dict: { tag_id (int): {...} }
+        # zodat we in timer_callback per gedetecteerde tag kunnen
+        # opzoeken of het een gekende tag is, en zo ja met welke
+        # locatie/oriëntatie/grootte die overeenkomt.
+
         tags_file = "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/trees/tags.json"
+        self.tags_data = {}
+
         try:
             with open(tags_file) as f:
                 data = json.load(f)
 
-            self.tag_x = float(data["p_x"])
-            self.tag_y = float(data["p_y"])
+            for entry in data["tags"]:
 
-            self.tag_yaw = 2 * math.atan2(
-                data["orien_z"],
-                data["orien_w"]
-            )
+                tag_id = int(entry["id"])
+
+                tag_x = float(entry["p_x"])
+                tag_y = float(entry["p_y"])
+
+                tag_yaw = 2 * math.atan2(
+                    entry["orien_z"],
+                    entry["orien_w"]
+                )
+
+                tag_size = float(entry["tag_size"])
+
+                arrow_dir = np.array([
+                    math.cos(tag_yaw),
+                    math.sin(tag_yaw)
+                ])
+
+                right_dir = np.array([
+                    -math.sin(tag_yaw),
+                    math.cos(tag_yaw)
+                ])
+
+                self.tags_data[tag_id] = {
+                    "x": tag_x,
+                    "y": tag_y,
+                    "yaw": tag_yaw,
+                    "size": tag_size,
+                    "arrow_dir": arrow_dir,
+                    "right_dir": right_dir,
+                }
+
+            if not self.tags_data:
+                raise ValueError("Geen tags gevonden in tags.json")
+
         except Exception as e:
             self.get_logger().error(
                 f"Kon tags.json niet laden/parsen ({e}). "
-                f"Val terug op x=0, y=0, yaw=0."
+                f"Val terug op tag id 0 met x=0, y=0, yaw=0, size=0.08."
             )
-            self.tag_x = 0.0
-            self.tag_y = 0.0
-            self.tag_yaw = 0.0
+            self.tags_data = {
+                0: {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "yaw": 0.0,
+                    "size": 0.08,
+                    "arrow_dir": np.array([1.0, 0.0]),
+                    "right_dir": np.array([0.0, 1.0]),
+                }
+            }
 
-        self.arrow_dir = np.array([
-            math.cos(self.tag_yaw),
-            math.sin(self.tag_yaw)
-        ])
-
-        self.right_dir = np.array([
-            -math.sin(self.tag_yaw),
-            math.cos(self.tag_yaw)
-        ])
-
-        self.get_logger().info("Node started")
+        self.get_logger().info(
+            f"Node started, gekende tag-ids: {list(self.tags_data.keys())}"
+        )
 
     ##########################################################
     # Status schrijven
@@ -383,10 +415,15 @@ class AprilTagAbsolutePose(Node):
 
             for tag in tags:
 
-                if tag.tag_id != self.target_id:
+                # Kijk of dit een gekende tag is (id 0, id 2, ...)
+                # in plaats van te vergelijken met één vaste target_id.
+                tag_info = self.tags_data.get(tag.tag_id)
+
+                if tag_info is None:
                     continue
 
-                half = self.tag_size / 2.0
+                tag_size = tag_info["size"]
+                half = tag_size / 2.0
 
                 obj = np.array([
 
@@ -426,21 +463,26 @@ class AprilTagAbsolutePose(Node):
                 # Positiebepaling
                 ####################################################
 
+                tag_x = tag_info["x"]
+                tag_y = tag_info["y"]
+                arrow_dir = tag_info["arrow_dir"]
+                right_dir = tag_info["right_dir"]
+
                 x = (
-                    self.tag_x
-                    + self.arrow_dir[0] * depth
-                    + self.right_dir[0] * side
+                    tag_x
+                    + arrow_dir[0] * depth
+                    + right_dir[0] * side
                 )
 
                 y = (
-                    self.tag_y
-                    + self.arrow_dir[1] * depth
-                    + self.right_dir[1] * side
+                    tag_y
+                    + arrow_dir[1] * depth
+                    + right_dir[1] * side
                 )
 
                 yaw = math.atan2(
-                    self.arrow_dir[1],
-                    self.arrow_dir[0]
+                    arrow_dir[1],
+                    arrow_dir[0]
                 ) + math.pi
 
                 ####################################################
@@ -471,7 +513,7 @@ class AprilTagAbsolutePose(Node):
                     self.write_status("OK")
 
                 self.get_logger().info(
-                    "Tag gevonden. Reset beëindigd."
+                    f"Tag {tag.tag_id} gevonden. Reset beëindigd."
                 )
 
                 self.publish_done()

@@ -905,6 +905,12 @@ public:
     {
         setOutput("skip_drivetoworkarea", false);
 
+        updateRobotStatus({
+                {"robotActive", false}
+        });
+
+
+
         // Eerst controleren of rijden moet worden overgeslagen
         bool skip = false;
         getInput("skip_drive2charging", skip);

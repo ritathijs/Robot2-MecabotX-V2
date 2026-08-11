@@ -1,0 +1,17 @@
+# Request
+---
+# Response
+bool robot_active
+bool quiz_active
+bool quiz_finished
+bool admin_open
+bool admin_login_open
+bool network_ok
+bool battery_ok
+bool docked
+bool charging
+bool visitors_nearby
+bool in_working_zone
+bool manual_drive
+bool estop_active
+string last_screen
