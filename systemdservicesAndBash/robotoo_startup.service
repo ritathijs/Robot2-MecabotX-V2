@@ -1,0 +1,12 @@
+[Unit]
+Description=Start script voor de robot
+After=network.target
+
+[Service]
+ExecStart=/home/wheeltec/wheeltec_ros2/robotoo_startup.sh
+User=wheeltec
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
