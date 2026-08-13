@@ -248,7 +248,7 @@ int main(int argc, char **argv)
     // GECORRIGEERD: Universeel en sluitend share-pad naar je XML-boom
     auto tree = factory.createTreeFromFile("/home/wheeltec/wheeltec_ros2/install/mecabot_integration/share/mecabot_integration/config/behavior_tree.xml");
 
-    rclcpp::Rate rate(10); // 10 Hz oftewel elke 100 ms een tick
+    rclcpp::Rate rate(2); // 10 Hz oftewel elke 100 ms een tick
 
     while (rclcpp::ok())
     {
