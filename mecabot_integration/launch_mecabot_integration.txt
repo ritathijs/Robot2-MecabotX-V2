@@ -1,0 +1,47 @@
+# 1. Start de C++ Robot Controller
+ros2 launch mecabot_integration rt_robot_controller.launch.py
+
+# 2. Start de C++ Behavior Tree
+ros2 launch mecabot_integration rt_behavior_tree.launch.py
+
+# 3. Start de Python Quiz Socket Bridge
+ros2 launch mecabot_integration quiz_socket_bridge.launch.py
+
+# 4. Start de Python Robot State Manager
+#OPGELET: ROBOT STATE MANAGER DRAAIT ALS EEN PROCESS ONDER QUIZ_SOCKET_BRIDGE 
+#DUS NIET APART OPSTARTEN
+ros2 launch mecabot_integration robot_state_manager.launch.py
+
+# 5. Start de Python Status Reader
+ros2 launch mecabot_integration status_reader.launch.py
+
+
+
+# 1. Schiet alle actieve ROS 2 nodes en daemons neer
+ros2 daemon stop
+pkill -f ros2
+pkill -f mainRT_node
+pkill -f robot_controller
+
+# 2. Schiet alle actieve Python-scripts van jouw package neer
+pkill -f quiz_socket_bridge.py
+pkill -f robot_state_manager.py
+pkill -f status_reader.py
+
+# 3. Sluit alle gnome-terminal vensters die door het script zijn geopend
+pkill gnome-terminal-
+
+
+#BUILDEN
+cd /home/wheeltec/wheeltec_ros2/
+rm -rf build/mecabot_integration install/mecabot_integration
+colcon build --packages-select mecabot_integration --symlink-install
+source install/setup.bash
+
+#SRV bestand aanpassen (variabelen) BIJ WIJZIGING TERUG COMPILEREN
+nano /home/wheeltec/wheeltec_ros2/src/wheeltec_robot_msg/srv/GetRobotState.srv
+cd /home/wheeltec/wheeltec_ros2/
+colcon build --packages-select wheeltec_robot_msg
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+

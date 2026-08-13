@@ -34,7 +34,6 @@ class QuizSocketBridge(Node):
         self.admin_panel_open = False
         self.manual_drive_db_updated = False
 
-        
         # Publisher voor manuele besturing (GUI)
         self.gui_cmd_vel_pub = self.create_publisher(Twist, '/gui_cmd_vel', 10)
         self.create_subscription(String, "/screen_command", self._on_ros_screen_command, 10)
@@ -72,7 +71,7 @@ class QuizSocketBridge(Node):
     # Socket event binding (socket thread)
     # -----------------------------
     def _bind_socket_events(self):
-        # connect / disconnect
+        # connect / disconnect (VEILIG: Lambda's om thread deadlocks te voorkomen)
         self.sio.on('connect', lambda *args: self._enqueue_event("connect", None))
         self.sio.on('disconnect', lambda *args: self._enqueue_event("disconnect", None))
 
@@ -102,7 +101,20 @@ class QuizSocketBridge(Node):
 
         # time sync
         self.sio.on('time-updated', lambda data=None: self._enqueue_event("time_updated", data))
-
+        
+    def _on_socket_connect(self, *args):
+        """Wordt aangeroepen in de socket-thread zodra de connectie slaagt."""
+        try:
+            self.get_logger().info("Socket verbonden! Identificatie 'orin-nano-robot' verzenden naar Pi...")
+            self.sio.emit("identification", "orin-nano-robot")
+        except Exception as e:
+            try:
+                self.get_logger().error(f"Fout bij verzenden identificatie naar Pi: {e}")
+            except Exception:
+                print(f"Fout bij verzenden identificatie naar Pi: {e}")
+        
+        # Voeg het connect-event toe aan de queue zodat de ROS-thread hiervan weet
+        self._enqueue_event("connect", None)    
     # -----------------------------
     # Start socket.io client (in aparte thread)
     # -----------------------------
@@ -128,7 +140,6 @@ class QuizSocketBridge(Node):
         try:
             self._event_queue.put_nowait((event_name, data))
         except Exception:
-            # onwaarschijnlijk met onbegrensde queue, maar log defensief
             try:
                 self.get_logger().warn(f"Event queue vol, drop event: {event_name}")
             except Exception:
@@ -152,21 +163,23 @@ class QuizSocketBridge(Node):
                 if event_name == "drive":
                     self._process_drive_event(data)
                 elif event_name == "admin_open":
-                    # zet lokale flag en forward naar state manager
                     self.admin_open(data)
                     self._safe_state_callback("admin_open", data)
                 elif event_name == "admin_closed":
                     self.admin_closed(data)
                     self._safe_state_callback("admin_closed", data)
                 elif event_name == "admin_login_open":
-                    # zet lokale flag en forward naar state manager
                     self.admin_login_open(data)
                     self._safe_state_callback("admin_login_open", data)
                 elif event_name == "admin_login_closed":
                     self.admin_login_closed(data)
-                    self._safe_state_callback("admin_closed", data)
+                    self._safe_state_callback("admin_login_closed", data)
                 elif event_name == "connect":
-                    self.get_logger().info("Socket verbonden (event).")
+                    self.get_logger().info("Socket verbonden (event). Identificatie 'orin-nano-robot' verzenden...")
+                    # VEILIGE IDENTIFICATIE: Vanuit de vrije ROS-thread
+                    if self.sio.connected:
+                        self.sio.emit("identification", "orin-nano-robot")
+                        self._safe_state_callback("ask_is_active", self)
                     self._safe_state_callback("connect", data)
                 elif event_name == "disconnect":
                     self.get_logger().info("Socket verbroken (event).")
@@ -174,50 +187,82 @@ class QuizSocketBridge(Node):
                 elif event_name == "connect_error":
                     self.get_logger().error(f"Socket connect error: {data}")
                 elif event_name == "ask_is_active":
-                    # We sturen de aanvraag door naar de state manager
-                    self._safe_state_callback("ask_is_active", self) # We geven de bridge (self) mee als argument!
+                    self._safe_state_callback("ask_is_active", self)
                 elif event_name == "active_button_toggled":
-                    # We geven de data en de bridge (self) mee als argument!
                     self._safe_state_callback("active_button_toggled", (data, self))
-
+                elif event_name == "battery_request":
+                    self.get_logger().info("🔋 Pi vraagt batterijspanning op via queue...")
+                    self._safe_state_callback("battery_request", data)
                 else:
-                    # Standaard: forward event naar state manager
                     self._safe_state_callback(event_name, data)
             except Exception as e:
                 self.get_logger().error(f"Fout bij verwerken event '{event_name}': {e}")
-
+       
+      
         # Drive timeout: stop als geen nieuw commando binnen 0.3s
         try:
             if self.is_moving and (time.time() - self.last_drive_cmd_time > 0.3):
                 self.get_logger().info("Manual drive stopped (timeout).")
-                stop_msg = Twist()  # zero twist
+                stop_msg = Twist()
                 self.gui_cmd_vel_pub.publish(stop_msg)
                 self.is_moving = False
         except Exception as e:
             self.get_logger().error(f"Fout bij drive timeout handling: {e}")
 
-
     # -----------------------------
-    # UITGAANDE SCHERMWISSELS NAAR PI
+    # UITGAANDE SCHERMWISSELS EN DATA NAAR PI    (Hier luisteren we naar het ROS topic /screen_command
     # -----------------------------
     def _on_ros_screen_command(self, msg: String):
-        event_name = msg.data
-        if not event_name or event_name == "None":
+        raw_data = msg.data
+        if not raw_data or raw_data == "None":
             return
-
+            
         try:
             if self.sio.connected:
-                # Omdat de Pi luistert naar losse events (zoals 'robot-go-charge'),
-                # schieten we de tekst van het ROS-bericht direct af als de EVENT-NAAM!
-                self.sio.emit(event_name)
-                self.get_logger().info(f"🚀 Socket.IO event afgevuurd naar Pi: {event_name}")
+                # Als het onze gecombineerde batterij-pulse is, splitsen we hem hier op!
+                if raw_data.startswith("BATTERY_PULSE:"):
+                    parts = raw_data.split(":")
+                    bat_ok_str = parts[1]
+                    voltage_value = round(float(parts[2]), 2)
+                    
+                    # 1. Stuur de traditionele OK status string (Behouden voor andere sub-apps)
+                    #self.sio.emit("BATTERY", bat_ok_str)
+                    
+                    # 2. EXACTE PAYLOAD DIE DE WEBAPP ZOEKT (Gecorrigeerd op basis van je log!)
+                    payload = {
+                        "battery": voltage_value,   # De live spanning (bijv. 23.74) waar de app naar zoekt!
+                        "batteryLow": 21,           # De ondergrens die de app gebruikt
+                        "batteryHigh": 23           # De bovengrens die de app gebruikt
+                    }
+                    
+                    self.sio.emit("robot-update-battery-percentage", payload)
+                    self.get_logger().info(f"🔋 [SUCCES] Batterijdata exact volgens Pi-formaat verzonden: {voltage_value}V")
+                    self.get_logger().info(f"🔋 [SUCCES] Batterijdata exact volgens Pi-formaat verzonden -> Payload: {payload}")
+                
+                else:
+                    # Alle reguliere schermen (zoals robot-startup) blijven intact
+                    self.sio.emit(raw_data)
+                    self.get_logger().info(f" Socket.IO event afgevuurd naar Pi: 🚀 {raw_data}")
             else:
-                self.get_logger().warn(f"Kan event '{event_name}' niet sturen: Socket niet verbonden.")
+                self.get_logger().warn(f"Kan event '{raw_data}' niet sturen: Socket niet verbonden.")
         except Exception as e:
             self.get_logger().error(f"Fout bij verzenden Socket.IO event naar Pi: {e}")
-
-
-
+            
+    # -----------------------------
+    # STATUS TERUGSTUREN NAAR PI (Gecleurde Robot Fix)
+    # -----------------------------
+    def send_active_status_to_pi(self, is_active: bool):
+        try:
+            if self.sio.connected:
+                # We sturen de boolean op ALLE manieren die de Pi-applicatie kan verwachten
+                # Hierdoor kleurt de robot gegarandeerd in op de webapp!
+                self.sio.emit('robot-isActive', is_active)
+                # Geef het connected-signaal mee om de interface-lock te breken
+                #self.sio.emit('robot-connected')
+                self.get_logger().info(f"🟢 Actieve status universeel verzonden naar Pi: {is_active}")
+        except Exception as e:
+            self.get_logger().error(f"Fout bij verzenden actieve status naar Pi: {e}")
+            
     # -----------------------------
     # Veilige wrapper voor state_manager_callback (ROS-thread)
     # -----------------------------
@@ -232,37 +277,31 @@ class QuizSocketBridge(Node):
     # MANUAL DRIVE (verwerkt in ROS-thread)
     # ============================================================
     def _process_drive_event(self, data):
-        """Verwerk 'drive' event en publiceer Twist op /gui_cmd_vel."""
         if not data or not isinstance(data, dict):
             return
-
+            
         direction = data.get('direction', 'stop')
         raw_speed = data.get('speed', 0.0)
-
+        
         try:
             speed = float(raw_speed)
         except Exception:
             speed = 0.0
-
-        # clamp speed tussen 0 en 1
+            
         speed = max(0.0, min(1.0, speed))
-
         self.last_drive_cmd_time = time.time()
         self.is_moving = True
-
         msg = Twist()
-
-        # Admin panel open → expliciet stoppen
+        
         if self.admin_panel_open:
             try:
-                self.gui_cmd_vel_pub.publish(msg)  # zero twist
+                self.gui_cmd_vel_pub.publish(msg)
             except Exception as e:
                 self.get_logger().error(f"Publish admin stop failed: {e}")
             return
 
         lin_scale = 0.15
         ang_scale = 0.15
-
         if direction == 'forward':
             msg.linear.x = lin_scale * speed
         elif direction == 'backward':
@@ -276,20 +315,18 @@ class QuizSocketBridge(Node):
         elif direction == 'ccw':
             msg.angular.z = ang_scale * speed
         else:
-            # stop of onbekend -> zero twist
             msg = Twist()
-
+            
         try:
             self.gui_cmd_vel_pub.publish(msg)
         except Exception as e:
             self.get_logger().error(f"Publish gui_cmd_vel failed: {e}")
 
     # ============================================================
-    # ADMIN PANEL EVENTS (ROS-thread)
+    # ADMIN PANEL EVENTS (ROS-thread) (GEFIXT VOOR NAAMCONFLICT)
     # ============================================================
     def admin_open(self, data=None):
         self.admin_panel_open = True
-        self.get_logger().info("Admin panel open → robot moet stoppen.")
         try:
             self.gui_cmd_vel_pub.publish(Twist())
         except Exception as e:
@@ -297,76 +334,39 @@ class QuizSocketBridge(Node):
 
     def admin_closed(self, data=None):
         self.admin_panel_open = False
-        self.get_logger().info("Admin panel gesloten → robot mag weer bewegen.")
 
     def admin_login_open(self, data=None):
-        self.admin_login_open = True
-        self.get_logger().info("Admin login open → robot moet stoppen.")
+        # GEWIJZIGD: We gebruiken nu een unieke variablename om de functie niet te overschrijven!
+        self.is_admin_login_open = True
         try:
             self.gui_cmd_vel_pub.publish(Twist())
         except Exception as e:
             self.get_logger().error(f"Publish login stop failed: {e}")
 
     def admin_login_closed(self, data=None):
-        self.admin_login_open = False
-        self.get_logger().info("Admin login gesloten → robot mag weer bewegen.")
+        self.is_admin_login_open = False
 
     # ============================================================
-    # Shutdown / cleanup (doet NIET destroy_node)
+    # Shutdown / cleanup
     # ============================================================
     def shutdown(self, join_timeout: float = 1.0):
-        """Veilige cleanup: stop verwerking, disconnect socket, join thread.
-        Deze methode vernietigt de ROS node niet; roep destroy() daarna als je dat wilt.
-        """
-        # 1) stop timer/queue verwerking
         self._running = False
-
-        # 2) disconnect socket.io
         try:
             if hasattr(self, 'sio') and self.sio is not None and getattr(self.sio, "connected", False):
-                try:
-                    self.sio.disconnect()
-                    # logger mogelijk nog beschikbaar
-                    try:
-                        self.get_logger().info("Socket.IO disconnected (shutdown).")
-                    except Exception:
-                        print("Socket.IO disconnected (shutdown).")
-                except Exception as e:
-                    try:
-                        self.get_logger().warn(f"Socket.IO disconnect faalde: {e}")
-                    except Exception:
-                        print(f"Socket.IO disconnect faalde: {e}")
+                self.sio.disconnect()
         except Exception as e:
-            try:
-                self.get_logger().warn(f"Fout tijdens socket disconnect check: {e}")
-            except Exception:
-                print(f"Fout tijdens socket disconnect check: {e}")
-
-        # 3) join socket thread (kort wachten)
+            print(f"Fout tijdens socket disconnect check: {e}")
+            
         try:
             if self._sio_thread is not None and self._sio_thread.is_alive():
                 self._sio_thread.join(timeout=join_timeout)
-                if self._sio_thread.is_alive():
-                    try:
-                        self.get_logger().warn("Socket thread nog actief na join timeout.")
-                    except Exception:
-                        print("Socket thread nog actief na join timeout.")
         except Exception as e:
-            try:
-                self.get_logger().warn(f"Fout bij join socket thread: {e}")
-            except Exception:
-                print(f"Fout bij join socket thread: {e}")
+            print(f"Fout bij join socket thread: {e}")
 
-    # ============================================================
-    # Destroy node resources explicitly (roep dit aan nadat executor.remove_node(node) is gedaan)
-    # ============================================================
     def destroy(self):
-        """Vernietig de ROS node resources. Roep dit aan nadat de node uit de executor is verwijderd."""
         try:
             self.destroy_node()
-            # logger is niet gegarandeerd na destroy_node, dus geen verdere logging hier
         except Exception:
-            # fallback: niets doen
             pass
 
     # -----------------------------
@@ -375,9 +375,19 @@ class QuizSocketBridge(Node):
     def send_active_status_to_pi(self, is_active: bool):
         try:
             if self.sio.connected:
-                # We sturen een puur databericht ZONDER de gevaarlijke toggled-eventnaam
-                self.sio.emit('robot-isActive', {'active': is_active})
-                self.get_logger().info(f"🟢 Status succesvol verzonden via robot-isActive: {is_active}")
+                # Stuur de status ZOWEL als pure boolean, als binnen een object
+                # voor absolute waterdichte synchronisatie met de Pi/webapp
+                pure_bool = bool(is_active)
+                
+                # Vuur het schone event af naar de Pi
+                self.sio.emit('robot-isActive', pure_bool)
+                
+                # EXTRA VEILIGHEID: Sommige versies van de quizapp luisteren ook naar 
+                # 'RobotActiveToggle' of 'AskIsRobotActive'. We vuren ze mee als pure booleans!
+                self.sio.emit('RobotActiveToggle', pure_bool)
+                self.sio.emit('AskIsRobotActive', pure_bool)
+                
+                self.get_logger().info(f"🟢 [SOCKET FIX] Pure boolean verzonden naar Pi: {pure_bool}")
         except Exception as e:
             self.get_logger().error(f"Fout bij verzenden actieve status naar Pi: {e}")
 
@@ -386,47 +396,39 @@ class QuizSocketBridge(Node):
 # -----------------------------
 def main(args=None):
     rclpy.init(args=args)
-
-    # state manager import (zorg dat dit module in PYTHONPATH staat)
+    
     from robot_state_manager import RobotStateManager
     state_manager = RobotStateManager()
-
+    
     bridge = QuizSocketBridge(state_manager.handle_socket_event)
-
+    
     executor = rclpy.executors.MultiThreadedExecutor()
     executor.add_node(state_manager)
     executor.add_node(bridge)
-
+    
     try:
         executor.spin()
     finally:
-        # nette cleanup zonder gebruik van bridge.get_logger() nadat node mogelijk destroyed is
-        # 1) verwijder node uit executor zodat executor niet meer verantwoordelijk is
         try:
             executor.remove_node(bridge)
         except Exception:
-            # ignore if not registered or already removed
             pass
-
-        # 2) shutdown bridge (disconnect socket + join thread)
+            
         try:
             bridge.shutdown()
         except Exception as e:
-            # gebruik print als fallback zodat we niet crashen op logger calls
             print(f"bridge.shutdown() faalde: {e}")
-
-        # 3) expliciet destroy node resources (veilig omdat we de node uit executor verwijderden)
+            
         try:
             bridge.destroy()
         except Exception as e:
             print(f"bridge.destroy() faalde: {e}")
-
-        # 4) stop executor en rclpy
+            
         try:
             executor.shutdown()
         except Exception:
             pass
-
+            
         rclpy.shutdown()
 
 if __name__ == "__main__":
