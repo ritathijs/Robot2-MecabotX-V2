@@ -35,7 +35,7 @@ behavior_tree_nodes = {
 	"MDForceCharging":			{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
 
 
-	"StartDrivingToPeople":			{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
+	"StartDrivingToPeople":			{"keepoutfilter_on": "True", "drive_action": "release", "message_frequency": "once"},
 
 	"RobotDriveToChargingStation":	{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "always"},
 	"RobotIsRobotAtChargingStation":   {"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "always"},
@@ -56,7 +56,6 @@ behavior_tree_nodes = {
 
 	"FallbackDriveQuizLocation":			{"keepoutfilter_on": "True",  "drive_action": "estop", "message_frequency": "always"},
 	"FallbackIsRobotAtQuiz":			{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "always"},
-
 
 
 	# --- People Search doelen ---
@@ -174,8 +173,10 @@ class DriveToCoord(Node):
 		
 		if currentnode["keepoutfilter_on"] == "True": 
 			self.keepout_filter(True)
+			self.get_logger().info(f"BehaviorTreeNode ontvangen: '{self.last_BehaviorTreeNode}' → keepoutfilter aan")
 		elif currentnode["keepoutfilter_on"] == "False": 
 			self.keepout_filter(False)
+			self.get_logger().info(f"BehaviorTreeNode ontvangen: '{self.last_BehaviorTreeNode}' → keepoutfilter uit")
 			
 		if currentnode["drive_action"] == "estop":
 			self.emergencystop()

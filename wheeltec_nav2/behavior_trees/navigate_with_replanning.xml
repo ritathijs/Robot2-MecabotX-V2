@@ -1,0 +1,22 @@
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+
+    <!-- Enkel dynamisch herplannen en navigeren. Geen recovery of costmap clears. -->
+    <PipelineSequence name="NavigateWithReplanning">
+      
+      <!-- hz="0.3" betekent dat hij ongeveer elke 3,3 seconden een nieuw pad zoekt om dynamische obstakels te ontwijken -->
+      <RateController hz="0.3">
+        <ComputePathToPose
+            goal="{goal}"
+            path="{path}"
+            planner_id="GridBased"/>
+      </RateController>
+
+      <FollowPath
+          path="{path}"
+          controller_id="FollowPath"/>
+
+    </PipelineSequence>
+
+  </BehaviorTree>
+</root>

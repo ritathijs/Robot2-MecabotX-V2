@@ -63,7 +63,7 @@ class PeopleFollowerNode(Node):
         self.declare_parameter('position_topic',  '/object_tracker/current_position')
 
         # Schakelaar voor het wel of niet publiceren/renderen van de geannoteerde afbeelding (CPU besparing)
-        self.declare_parameter('publish_annotated_img', False)
+        self.declare_parameter('publish_annotated_img', True)
 
         # Verwerkingsfrequentie (hoeveel beelden per seconde YOLO mag verwerken)
         self.declare_parameter('processing_rate_hz', 1.0)
