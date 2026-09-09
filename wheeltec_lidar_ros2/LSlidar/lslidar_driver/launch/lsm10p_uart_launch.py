@@ -20,6 +20,8 @@ def generate_launch_description():
                                 emulate_tty=True,
                                 namespace='',
                                 parameters=[driver_dir],
+                                respawn=True,      #RT toegevoegd op 7/9/2026 wegens verdwijnen van de lslidar_driver_node en robot is verdwaald als gevolg
+                                respawn_delay=2.0,
                                 )
     return LaunchDescription([
         driver_node,
