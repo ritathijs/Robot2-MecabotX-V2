@@ -32,6 +32,7 @@ class QuizSocketBridge(Node):
         self.last_drive_cmd_time = 0.0
         self.is_moving = False
         self.admin_panel_open = False
+        self.is_admin_login_open = False
         self.manual_drive_db_updated = False
 
         # Publisher voor manuele besturing (GUI)
@@ -293,7 +294,7 @@ class QuizSocketBridge(Node):
         self.is_moving = True
         msg = Twist()
         
-        if self.admin_panel_open:
+        if self.admin_panel_open or self.is_admin_login_open:
             try:
                 self.gui_cmd_vel_pub.publish(msg)
             except Exception as e:

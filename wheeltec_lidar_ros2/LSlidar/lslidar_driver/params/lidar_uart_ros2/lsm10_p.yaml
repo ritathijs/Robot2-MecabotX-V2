@@ -14,12 +14,12 @@
     truncated_mode_: 1                                      #多角度裁剪开关：值为0时表示不使用多角度裁剪，默认为0
                                                             #值为1表示使用多角度裁剪，同时angle_disable_min与angle_disable_max设为 0，角度值在/lslidar_driver.cc中修改
     min_range: 0.15                                          #雷达接收距离最小值
-    max_range: 8.0                                        #雷达接收距离最大值 RT: Aangepast 20/9/2026 ORIG: 200.0  (opgelet .0 erachter)/
+    max_range: 200.0                                        #雷达接收距离最大值 RT: Aangepast 20/9/2026 ORIG: 200.0  (opgelet .0 erachter)/
     use_gps_ts: false                                       #雷达是否使用GPS授时
     scan_topic: /scan                                       #设置激光数据topic名称
     interface_selection: serial                             #接口选择:net 为网口,serial 为串口。
     serial_port_: /dev/wheeltec_lidar                              #串口连接时的串口号
-    high_reflection: true                                #M10_P雷达需填写该值,若不确定，请联系技术支持。RT: aangepast 20/9/2026 ORIG:false
+    high_reflection: false                                #M10_P雷达需填写该值,若不确定，请联系技术支持。RT: aangepast 20/9/2026 ORIG:false
     compensation: false				                              #M10系列是否使用角度补偿功能
     pubScan: true                                           #是否发布scan话题
     pubPointCloud2: false                                    #是否发布pointcloud2话题
