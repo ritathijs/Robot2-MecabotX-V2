@@ -4,6 +4,9 @@
 
 #include <std_msgs/msg/string.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <chrono>
+#include <atomic>
+#include <utility>
 
 // =========================================================================
 //  1. ACTION NODES (Acties)
@@ -28,107 +31,445 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
 };
 
-class SendDriveWorkArea : public BT::SyncActionNode {
+class SendDriveWorkArea : public BT::StatefulActionNode
+{
 public:
-    // GECORRIGEERD: BT::NodeConfig veranderd naar BT::NodeConfiguration
-    SendDriveWorkArea(const std::string& name, const BT::NodeConfiguration& config, rclcpp::Node::SharedPtr node)
-        : BT::SyncActionNode(name, config), node_(node) {
-        pub_ = node_->create_publisher<std_msgs::msg::String>("/robot_command", 10);
+    SendDriveWorkArea(
+        const std::string& name,
+        const BT::NodeConfiguration& config,
+        rclcpp::Node::SharedPtr node)
+        : BT::StatefulActionNode(name, config),
+          node_(std::move(node))
+    {
+        command_pub_ =
+            node_->create_publisher<std_msgs::msg::String>(
+                "/robot_command", 10);
+
+        work_area_sub_ =
+            node_->create_subscription<std_msgs::msg::Bool>(
+                "/IsRobotAtWorkArea",
+                10,
+                [this](std_msgs::msg::Bool::SharedPtr msg)
+                {
+                    work_area_reached_ = msg->data;
+                });
     }
-    static BT::PortsList providedPorts() { return {}; }
-    BT::NodeStatus tick() override {
+
+    static BT::PortsList providedPorts()
+    {
+        return {};
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        work_area_reached_ = false;
+        start_time_ = std::chrono::steady_clock::now();
+
         std_msgs::msg::String msg;
         msg.data = "DRIVE_TO_WORK_AREA";
-        pub_->publish(msg);
-        return BT::NodeStatus::SUCCESS;
+        command_pub_->publish(msg);
+
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "Navigatie naar de werkzone gestart.");
+
+        return BT::NodeStatus::RUNNING;
     }
+
+    BT::NodeStatus onRunning() override
+    {
+        if (work_area_reached_)
+        {
+            RCLCPP_INFO(
+                node_->get_logger(),
+                "Werkzone bereikt.");
+
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        const auto elapsed =
+            std::chrono::steady_clock::now() - start_time_;
+
+        if (elapsed >= timeout_)
+        {
+            RCLCPP_ERROR(
+                node_->get_logger(),
+                "Timeout bij navigatie naar de werkzone.");
+
+            return BT::NodeStatus::FAILURE;
+        }
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override
+    {
+        RCLCPP_WARN(
+            node_->get_logger(),
+            "Navigatieactie naar de werkzone is afgebroken.");
+    }
+
 private:
     rclcpp::Node::SharedPtr node_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr command_pub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr work_area_sub_;
+
+    bool work_area_reached_{false};
+
+    std::chrono::steady_clock::time_point start_time_;
+    const std::chrono::seconds timeout_{120};
 };
 
-class SendDriveQuizLocationA : public BT::SyncActionNode {
+class SendDriveQuizLocationA : public BT::StatefulActionNode
+{
 public:
-    // GECORRIGEERD: BT::NodeConfig veranderd naar BT::NodeConfiguration
-    SendDriveQuizLocationA(const std::string& name, const BT::NodeConfiguration& config, rclcpp::Node::SharedPtr node)
-        : BT::SyncActionNode(name, config), node_(node) {
-        pub_ = node_->create_publisher<std_msgs::msg::String>("/robot_command", 10);
+    SendDriveQuizLocationA(
+        const std::string& name,
+        const BT::NodeConfiguration& config,
+        rclcpp::Node::SharedPtr node)
+        : BT::StatefulActionNode(name, config),
+          node_(std::move(node))
+    {
+        command_pub_ =
+            node_->create_publisher<std_msgs::msg::String>(
+                "/robot_command", 10);
+
+        quiz_status_sub_ =
+            node_->create_subscription<std_msgs::msg::Bool>(
+                "/IsRobotAtQuiz",
+                10,
+                [this](std_msgs::msg::Bool::SharedPtr msg)
+                {
+                    quiz_reached_ = msg->data;
+                });
     }
-    static BT::PortsList providedPorts() { return {}; }
-    BT::NodeStatus tick() override {
+
+    static BT::PortsList providedPorts()
+    {
+        return {};
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        quiz_reached_ = false;
+        start_time_ = std::chrono::steady_clock::now();
+
         std_msgs::msg::String msg;
-        msg.data = "DRIVE_QUIZ_LOCATION_A"; 
-        pub_->publish(msg);
-        return BT::NodeStatus::SUCCESS;
+        msg.data = "DRIVE_QUIZ_LOCATION_A";
+        command_pub_->publish(msg);
+
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "Navigatie naar quizlocatie A gestart.");
+
+        return BT::NodeStatus::RUNNING;
     }
+
+    BT::NodeStatus onRunning() override
+    {
+        if (quiz_reached_)
+        {
+            RCLCPP_INFO(
+                node_->get_logger(),
+                "Quizlocatie bereikt.");
+
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        if (std::chrono::steady_clock::now() - start_time_ >= timeout_)
+        {
+            RCLCPP_ERROR(
+                node_->get_logger(),
+                "Timeout bij navigatie naar quizlocatie A.");
+
+            return BT::NodeStatus::FAILURE;
+        }
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override
+    {
+        RCLCPP_WARN(
+            node_->get_logger(),
+            "Navigatieactie naar quizlocatie A is afgebroken.");
+    }
+
 private:
     rclcpp::Node::SharedPtr node_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr command_pub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr quiz_status_sub_;
+
+    bool quiz_reached_{false};
+    std::chrono::steady_clock::time_point start_time_;
+    const std::chrono::seconds timeout_{120};
 };
 
-class SendDriveQuizLocationB : public BT::SyncActionNode {
+class SendDriveQuizLocationB : public BT::StatefulActionNode
+{
 public:
-    // GECORRIGEERD: BT::NodeConfig veranderd naar BT::NodeConfiguration
-    SendDriveQuizLocationB(const std::string& name, const BT::NodeConfiguration& config, rclcpp::Node::SharedPtr node)
-        : BT::SyncActionNode(name, config), node_(node) {
-        pub_ = node_->create_publisher<std_msgs::msg::String>("/robot_command", 10);
+    SendDriveQuizLocationB(
+        const std::string& name,
+        const BT::NodeConfiguration& config,
+        rclcpp::Node::SharedPtr node)
+        : BT::StatefulActionNode(name, config),
+          node_(std::move(node))
+    {
+        command_pub_ =
+            node_->create_publisher<std_msgs::msg::String>(
+                "/robot_command", 10);
+
+        quiz_status_sub_ =
+            node_->create_subscription<std_msgs::msg::Bool>(
+                "/IsRobotAtQuiz",
+                10,
+                [this](std_msgs::msg::Bool::SharedPtr msg)
+                {
+                    quiz_reached_ = msg->data;
+                });
     }
-    static BT::PortsList providedPorts() { return {}; }
-    BT::NodeStatus tick() override {
+
+    static BT::PortsList providedPorts()
+    {
+        return {};
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        quiz_reached_ = false;
+        start_time_ = std::chrono::steady_clock::now();
+
         std_msgs::msg::String msg;
-        msg.data = "DRIVE_QUIZ_LOCATION_B"; 
-        pub_->publish(msg);
-        return BT::NodeStatus::SUCCESS;
+        msg.data = "DRIVE_QUIZ_LOCATION_B";
+        command_pub_->publish(msg);
+
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "Navigatie naar quizlocatie B gestart.");
+
+        return BT::NodeStatus::RUNNING;
     }
+
+    BT::NodeStatus onRunning() override
+    {
+        if (quiz_reached_)
+        {
+            RCLCPP_INFO(
+                node_->get_logger(),
+                "Quizlocatie bereikt.");
+
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        if (std::chrono::steady_clock::now() - start_time_ >= timeout_)
+        {
+            RCLCPP_ERROR(
+                node_->get_logger(),
+                "Timeout bij navigatie naar quizlocatie B.");
+
+            return BT::NodeStatus::FAILURE;
+        }
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override
+    {
+        RCLCPP_WARN(
+            node_->get_logger(),
+            "Navigatieactie naar quizlocatie B is afgebroken.");
+    }
+
 private:
     rclcpp::Node::SharedPtr node_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr command_pub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr quiz_status_sub_;
+
+    bool quiz_reached_{false};
+    std::chrono::steady_clock::time_point start_time_;
+    const std::chrono::seconds timeout_{120};
 };
 
-class ExecuteActiveQuiz : public BT::ActionNodeBase {
+class ExecuteActiveQuiz : public BT::StatefulActionNode
+{
 public:
-    ExecuteActiveQuiz(const std::string& name, const BT::NodeConfiguration& config, rclcpp::Node::SharedPtr node)
-        : BT::ActionNodeBase(name, config), node_(node) {
-        pub_ = node_->create_publisher<std_msgs::msg::String>("/robot_command", 10);
+    ExecuteActiveQuiz(
+        const std::string& name,
+        const BT::NodeConfiguration& config,
+        rclcpp::Node::SharedPtr node)
+        : BT::StatefulActionNode(name, config),
+          node_(std::move(node))
+    {
+        command_pub_ =
+            node_->create_publisher<std_msgs::msg::String>(
+                "/robot_command", 10);
+
+        quiz_finished_sub_ =
+            node_->create_subscription<std_msgs::msg::Bool>(
+                "/quiz_finished",
+                10,
+                [this](std_msgs::msg::Bool::SharedPtr msg)
+                {
+                    if (!msg->data)
+                    {
+                        // De manager meldt dat de nieuwe quiz is gestart.
+                        quiz_started_seen_.store(true);
+                    }
+                    else if (quiz_started_seen_.load())
+                    {
+                        // Alleen een voltooiing ná de start telt.
+                        quiz_finished_.store(true);
+                    }
+                });
     }
-    static BT::PortsList providedPorts() { return {}; }
-    
-    // ActionNodeBase vereist een halt() en een tick()
-    BT::NodeStatus tick() override {
+
+    static BT::PortsList providedPorts()
+    {
+        return {};
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        quiz_started_seen_.store(false);
+        quiz_finished_.store(false);
+
         std_msgs::msg::String msg;
-        msg.data = "START_QUIZ"; 
-        pub_->publish(msg);
-        
-        // Dit mag nu legaal RUNNING teruggeven zonder crash!
-        return BT::NodeStatus::RUNNING; 
+        msg.data = "START_QUIZ";
+        command_pub_->publish(msg);
+
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "Quizstart verstuurd; wachten tot de quiz is afgelopen.");
+
+        return BT::NodeStatus::RUNNING;
     }
-    void halt() override {
-        // Wordt aangeroepen als de BT deze tak geforceerd afbreekt
-        RCLCPP_INFO(node_->get_logger(), "Quiz tak onderbroken.");
+
+    BT::NodeStatus onRunning() override
+    {
+        if (quiz_finished_.load())
+        {
+            RCLCPP_INFO(node_->get_logger(), "Quiz is afgelopen.");
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        return BT::NodeStatus::RUNNING;
     }
+
+    void onHalted() override
+    {
+        RCLCPP_WARN(
+            node_->get_logger(),
+            "Wachten op het quizresultaat is door de Behavior Tree afgebroken.");
+    }
+
 private:
     rclcpp::Node::SharedPtr node_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr command_pub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr quiz_finished_sub_;
+
+    std::atomic_bool quiz_started_seen_{false};
+    std::atomic_bool quiz_finished_{false};
 };
 
 
-class SendDriveToChargingArea : public BT::SyncActionNode {
+class SendDriveToChargingArea : public BT::StatefulActionNode
+{
 public:
-    // GECORRIGEERD: BT::NodeConfig veranderd naar BT::NodeConfiguration
-    SendDriveToChargingArea(const std::string& name, const BT::NodeConfiguration& config, rclcpp::Node::SharedPtr node)
-        : BT::SyncActionNode(name, config), node_(node) {
-        pub_ = node_->create_publisher<std_msgs::msg::String>("/robot_command", 10);
+    SendDriveToChargingArea(
+        const std::string& name,
+        const BT::NodeConfiguration& config,
+        rclcpp::Node::SharedPtr node)
+        : BT::StatefulActionNode(name, config),
+          node_(node)
+    {
+        command_pub_ =
+            node_->create_publisher<std_msgs::msg::String>(
+                "/robot_command", 10);
+
+        charging_area_sub_ =
+            node_->create_subscription<std_msgs::msg::Bool>(
+                "/IsRobotNearChargingStation",
+                10,
+                [this](std_msgs::msg::Bool::SharedPtr msg)
+                {
+                    if (!msg->data)
+                    {
+                        saw_not_at_charging_area_ = true;
+                    }
+                    else if (saw_not_at_charging_area_)
+                    {
+                        charging_area_reached_ = true;
+                    }
+                });
     }
-    static BT::PortsList providedPorts() { return {}; }
-    BT::NodeStatus tick() override {
+
+    static BT::PortsList providedPorts()
+    {
+        return {};
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        charging_area_reached_ = false;
+        saw_not_at_charging_area_ = false;
+        start_time_ = std::chrono::steady_clock::now();
+
         std_msgs::msg::String msg;
-        msg.data = "DRIVE_TO_CHARGING_AREA"; 
-        pub_->publish(msg);
-        return BT::NodeStatus::SUCCESS;
+        msg.data = "DRIVE_TO_CHARGING_AREA";
+        command_pub_->publish(msg);
+
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "Navigatie naar het laadstation-voorpunt gestart.");
+
+        return BT::NodeStatus::RUNNING;
     }
+
+    BT::NodeStatus onRunning() override
+    {
+        if (charging_area_reached_)
+        {
+            RCLCPP_INFO(
+                node_->get_logger(),
+                "Laadstation-voorpunt bereikt.");
+
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        if (std::chrono::steady_clock::now() - start_time_ >= timeout_)
+        {
+            RCLCPP_ERROR(
+                node_->get_logger(),
+                "Timeout bij navigatie naar het laadstation-voorpunt.");
+
+            return BT::NodeStatus::FAILURE;
+        }
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override
+    {
+        RCLCPP_WARN(
+            node_->get_logger(),
+            "Navigatie naar het laadstation-voorpunt is afgebroken.");
+    }
+
 private:
     rclcpp::Node::SharedPtr node_;
-    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr command_pub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr charging_area_sub_;
+
+    bool saw_not_at_charging_area_{false};
+    bool charging_area_reached_{false};
+
+    std::chrono::steady_clock::time_point start_time_;
+    const std::chrono::seconds timeout_{120};
 };
 
 class StartInfraroodDocking : public BT::ActionNodeBase {
@@ -252,8 +593,8 @@ int main(int argc, char **argv)
 
     while (rclcpp::ok())
     {
-        tree.tickRoot();
         rclcpp::spin_some(bt_node); // Verwerkt alle inkomende topic-callbacks atomair
+        tree.tickRoot();
         rate.sleep();
     }
 
