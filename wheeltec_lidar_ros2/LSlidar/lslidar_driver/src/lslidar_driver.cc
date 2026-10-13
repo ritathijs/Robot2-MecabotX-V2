@@ -723,7 +723,7 @@ namespace lslidar_driver
 			invalidValue--;
 		if (invalidValue <= 1)
 		{
-			delete packet_bytes;
+			//delete packet_bytes; RT bug fix
 			return;
 		}
 
@@ -795,12 +795,13 @@ namespace lslidar_driver
 				idx++;
 			}
 		}
-		packet_bytes = {0x00};
+		/*packet_bytes = {0x00};   RT bug fix
 		if (packet_bytes)
 		{
 			packet_bytes = NULL;
 			delete packet_bytes;
 		}
+		*/
 	}
 
 	void LslidarDriver::data_processing_2(unsigned char *packet_bytes, int len) // 处理每一包的数据
@@ -867,7 +868,7 @@ namespace lslidar_driver
 			invalidValue--;
 		if (invalidValue <= 1)
 		{
-			delete packet_bytes;
+			//delete packet_bytes;  RT bug fix
 			return;
 		}
 
@@ -952,12 +953,13 @@ namespace lslidar_driver
 				idx++;
 			}
 		}
-		packet_bytes = {0x00};
+		/*packet_bytes = {0x00};   RT bug fix
 		if (packet_bytes)
 		{
 			packet_bytes = NULL;
 			delete packet_bytes;
 		}
+		*/
 	}
 
 	void LslidarDriver::pubScanThread()
@@ -1406,7 +1408,8 @@ namespace lslidar_driver
 			else
 				LslidarDriver::data_processing(packet_bytes, len);
 		}
-		delete packet_bytes;
+		//delete packet_bytes;
+		delete[] packet_bytes;  //RT bug fix
 		return true;
 	}
 

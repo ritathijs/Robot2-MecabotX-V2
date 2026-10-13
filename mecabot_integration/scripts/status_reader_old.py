@@ -89,8 +89,8 @@ class StatusReader(Node):
         self.battery_low_pub = self.create_publisher(Bool, '/IsBatteryLow', 10)
         self.battery_ok_pub = self.create_publisher(Bool, '/IsBatteryOK', 10)
         
-        # Check elke 5 seconden de txt-file voor de accu
-        self.battery_timer = self.create_timer(5.0, self.check_battery_status)
+        # Check elke 60 seconden de txt-file voor de accu
+        self.battery_timer = self.create_timer(60.0, self.check_battery_status)
         
         self.get_logger().info("StatusReader gestart (Volledig afgestemd op intacte drive_to_coord).")
 
@@ -119,9 +119,13 @@ class StatusReader(Node):
         result_bool.data = succeeded
         
         # GECORRIGEERD: Herkent nu de primaire EN de fallback-node uit de intacte drive_to_coord dictionary
+        self.get_logger().info(f"NAV RAW='{raw}' LAST_NODE='{self.last_node}'")
+        self.work_pub.publish(result_bool)
         if self.last_node in ("DriveQuizLocation", "FallbackDriveQuizLocation"):
+            self.get_logger().info(f"PUBLISHING QUIZ = {succeeded}")
             self.quiz_pub.publish(result_bool)
         elif self.last_node == "DriveWorkArea":
+            self.get_logger().info(f"PUBLISHING WORK AREA = {succeeded}")
             self.work_pub.publish(result_bool)
         elif self.last_node == "RobotDriveToChargingStation":
             self.charge_pub.publish(result_bool)

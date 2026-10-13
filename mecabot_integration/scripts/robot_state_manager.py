@@ -1,352 +1,719 @@
 #!/usr/bin/env python3
+
 from dataclasses import dataclass
 from threading import Lock
+import math
 import time
+from typing import Any
+
 import rclpy
+from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
 from rclpy.node import Node
-from std_msgs.msg import String, Bool, Float32
-from geometry_msgs.msg import Twist
+from std_msgs.msg import Bool, Float32, String
 from wheeltec_robot_msg.srv import GetRobotState
+
 
 @dataclass
 class RobotState:
     robot_active: bool = True
     quiz_active: bool = False
     quiz_finished: bool = False
+
     admin_open: bool = False
     admin_login_open: bool = False
-    admin_login_closed: bool = False
     network_ok: bool = True
+
     battery_ok: bool = True
+    battery_voltage: float = 24.0
+
     docked: bool = False
+    at_station: bool = False
     charging: bool = False
+
     visitors_nearby: bool = False
     in_working_zone: bool = False
     manual_drive: bool = False
     estop_active: bool = False
+
+    localization_valid: bool = False
+    received_amcl: bool = False
+
+    at_quiz: bool = False
+    at_work_area: bool = False
+    active_destination: str | None = None
+
     last_screen: str | None = None
-    # BEST PRACTICE TOEVOEGING:
-    battery_voltage: float = 24.0  # Startwaarde/fallback spanning
+
 
 class RobotStateManager(Node):
+    BATTERY_OK_THRESHOLD = 22.0
+    DRIVE_TIMEOUT_SEC = 0.4
+    ESTOP_DURATION_SEC = 30.0
+
+    # Koppel de namen die door de controller/BT gebruikt worden aan een
+    # bestemming. De naam "follow-robot-screen" wordt door de huidige
+    # controller voor beide quizlocaties gebruikt.
+    DESTINATION_BY_NODE = {
+        "DriveQuizLocation": "quiz",
+        "FallbackDriveQuizLocation": "quiz",
+        "follow-robot-screen": "quiz",
+        "robot-arrived-at-quiz-location": "quiz",
+
+        "DriveWorkArea": "work_area",
+        "FallbackDriveToWorkArea": "work_area",
+        "robot-startup": "work_area",
+
+        "RobotDriveToChargingStation": "charging_station",
+        "FallbackDriveToChargingStation": "charging_station",
+        "robot-go-charge": "charging_station",
+    }
+
     def __init__(self):
         super().__init__("robot_state_manager")
+
         self.state = RobotState()
         self.lock = Lock()
-        self.last_drive_time = None
-        self.drive_timeout_sec = 0.4 # 400 ms → beveiliging voor manual drive
 
-        # Publishers
-        self.screen_pub = self.create_publisher(String, "/screen_command", 10)
-        self.cmd_pub = self.create_publisher(String, "/robot_command", 10)
-        self.drive_pub = self.create_publisher(Twist, "/cmd_vel", 10)
-
-        # Subscriptions
-        self.create_subscription(Float32, "/BatteryAverageVoltage", self.on_battery, 10)
-        self.create_subscription(String, "/bump_status", self.on_bumper, 10)
-        self.create_subscription(Bool, "/visitors_nearby", self.on_visitors, 10)
-        self.create_subscription(Bool, "/in_working_zone", self.on_working_zone, 10)
-        self.create_subscription(Bool, "/dock_state", self.on_docked, 10)
-        self.create_subscription(String, "/BehaviorTreeNode", self.on_behavior_node_changed, 10)
-
-        # Service
-        self.create_service(GetRobotState, "/get_robot_state", self.handle_state_request)
-
-        # ESTOP timer
+        self.last_drive_time: float | None = None
+        self.estop_end_time: float | None = None
         self.estop_timer = None
-        self.estop_end_time = None
 
-        # Manual drive timeout timer
-        self.drive_timeout_timer = self.create_timer(0.1, self._manual_drive_timeout_check)
-        self.get_logger().info("RobotStateManager gestart (Gecorrigeerd & Validatie Actief).")
+        # Uitgaande topics
+        self.screen_pub = self.create_publisher(
+            String, "/screen_command", 10
+        )
+        self.cmd_pub = self.create_publisher(
+            String, "/robot_command", 10
+        )
+        self.drive_pub = self.create_publisher(
+            Twist, "/cmd_vel", 10
+        )
 
-    # ---------------------------
-    # STATE UPDATE CALLBACKS
-    # ---------------------------
-    def on_battery(self, msg: Float32):
+        # Statusoutputs voor de Behavior Tree
+        self.localization_pub = self.create_publisher(
+            Bool, "/IsLocalizationValid", 10
+        )
+        self.quiz_pub = self.create_publisher(
+            Bool, "/IsRobotAtQuiz", 10
+        )
+        self.work_pub = self.create_publisher(
+            Bool, "/IsRobotAtWorkArea", 10
+        )
+        self.charging_station_pub = self.create_publisher(
+            Bool, "/IsRobotNearChargingStation", 10
+        )
+        # Compatibiliteit met de oude topicnaam uit status_reader.py.
+        self.charging_station_legacy_pub = self.create_publisher(
+            Bool, "/IsRobotAtChargingStation", 10
+        )
+        self.charging_pub = self.create_publisher(
+            Bool, "/IsRobotCharging", 10
+        )
+        self.robot_active_pub = self.create_publisher(
+            Bool, "/IsRobotActive", 10
+        )
+        self.battery_ok_pub = self.create_publisher(
+            Bool, "/IsBatteryOK", 10
+        )
+        self.battery_low_pub = self.create_publisher(
+            Bool, "/IsBatteryLow", 10
+        )
+
+        # Sensor-, status- en feedbacktopics
+        self.create_subscription(
+            Float32,
+            "/BatteryAverageVoltage",
+            self.on_battery,
+            10,
+        )
+        self.create_subscription(
+            String,
+            "/bump_status",
+            self.on_bumper,
+            10,
+        )
+        self.create_subscription(
+            Bool,
+            "/visitors_nearby",
+            self.on_visitors,
+            10,
+        )
+        self.create_subscription(
+            Bool,
+            "/in_working_zone",
+            self.on_working_zone,
+            10,
+        )
+        self.create_subscription(
+            Bool,
+            "/dock_state",
+            self.on_docked,
+            10,
+        )
+        self.create_subscription(
+            String,
+            "/BehaviorTreeNode",
+            self.on_behavior_node_changed,
+            10,
+        )
+        self.create_subscription(
+            PoseWithCovarianceStamped,
+            "/amcl_pose",
+            self.on_amcl,
+            10,
+        )
+        self.create_subscription(
+            String,
+            "/reset_done",
+            self.on_localization_reset,
+            10,
+        )
+        self.create_subscription(
+            String,
+            "/auto_recharge_event",
+            self.on_recharge_event,
+            10,
+        )
+        self.create_subscription(
+            Bool,
+            "/RobotActive",
+            self.on_robot_active,
+            10,
+        )
+        self.create_subscription(
+            String,
+            "/drive_to_coord_status",
+            self.on_navigation_status,
+            10,
+        )
+
+        # Service voor het opvragen van de actuele robotstatus
+        self.create_service(
+            GetRobotState,
+            "/get_robot_state",
+            self.handle_state_request,
+        )
+
+        self.drive_timeout_timer = self.create_timer(
+            0.1,
+            self._manual_drive_timeout_check,
+        )
+
+        self._publish_status_snapshot()
+        self.get_logger().info("RobotStateManager gestart.")
+
+    # ------------------------------------------------------------------
+    # Algemene helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _bool_message(value: bool) -> Bool:
+        msg = Bool()
+        msg.data = bool(value)
+        return msg
+
+    def _publish_status_snapshot(self) -> None:
         with self.lock:
-            # Sla de spanning live op in de centrale toestand
-            self.state.battery_voltage = float(msg.data)
-            # Grenswaarde bijvoorbeeld 22.0V
-            self.state.battery_ok = msg.data >= 22.0
+            localization_valid = self.state.localization_valid
+            at_quiz = self.state.at_quiz
+            at_work_area = self.state.at_work_area
+            at_station = self.state.at_station
+            charging = self.state.charging
+            robot_active = self.state.robot_active
+            battery_ok = self.state.battery_ok
 
-    def on_behavior_node_changed(self, msg: String):
-        screen = msg.data
-        if not screen or screen == "None":
-            return
+        self.localization_pub.publish(
+            self._bool_message(localization_valid)
+        )
+        self.quiz_pub.publish(self._bool_message(at_quiz))
+        self.work_pub.publish(self._bool_message(at_work_area))
+
+        station_msg = self._bool_message(at_station)
+        self.charging_station_pub.publish(station_msg)
+        self.charging_station_legacy_pub.publish(station_msg)
+
+        self.charging_pub.publish(self._bool_message(charging))
+        self.robot_active_pub.publish(self._bool_message(robot_active))
+        self.battery_ok_pub.publish(self._bool_message(battery_ok))
+        self.battery_low_pub.publish(self._bool_message(not battery_ok))
+
+    def send_robot_command(self, command: str) -> None:
+        msg = String()
+        msg.data = command
+        self.cmd_pub.publish(msg)
+
+    def _publish_zero_twist(self) -> None:
+        self.drive_pub.publish(Twist())
+
+    # ------------------------------------------------------------------
+    # Sensor- en statuscallbacks
+    # ------------------------------------------------------------------
+
+    def on_battery(self, msg: Float32) -> None:
+        voltage = float(msg.data)
+
         with self.lock:
-            admin_open = self.state.admin_open
-        
-        # Als de admin open is, mag het scherm niet zomaar veranderen
-        if admin_open:
-            return
+            self.state.battery_voltage = voltage
+            self.state.battery_ok = voltage >= self.BATTERY_OK_THRESHOLD
 
-        # Sla op en stuur het scherm dwingend naar de Pi!
-        with self.lock:
-            self.state.last_screen = screen
-        
-        screen_msg = String()
-        screen_msg.data = screen
-        self.screen_pub.publish(screen_msg)
-        self.get_logger().info(f"Onafhankelijke schermwissel doorgezet naar Pi: {screen}")
+        self._publish_status_snapshot()
 
-    def on_bumper(self, msg: String):
-        status_text = msg.data.strip()
-        
-        # Als de driver meldt dat er GEEN botsing is, doen we niks en verlaten we de functie
-        if status_text == "De bumper is niet ingedrukt":
-            return
-            
-        # In alle andere gevallen is er een bumper ECHT ingedrukt!
-        # De ESTOP wordt geactiveerd en de robot stopt direct.
-        self.activate_estop(f"bumper_trigger ({status_text})")
-
-    def on_visitors(self, msg: Bool):
+    def on_visitors(self, msg: Bool) -> None:
         with self.lock:
             self.state.visitors_nearby = msg.data
 
-    def on_working_zone(self, msg: Bool):
+    def on_working_zone(self, msg: Bool) -> None:
         with self.lock:
             self.state.in_working_zone = msg.data
 
-    def on_docked(self, msg: Bool):
+    def on_docked(self, msg: Bool) -> None:
         with self.lock:
             self.state.docked = msg.data
 
-    # ---------------------------
-    # SOCKET EVENTS (Gecorrigeerd voor naamconflict crashes)
-    # ---------------------------
-    def handle_socket_event(self, event: str, data=None):
+    def on_robot_active(self, msg: Bool) -> None:
+        with self.lock:
+            self.state.robot_active = msg.data
+
+        self._publish_status_snapshot()
+
+    def on_amcl(self, msg: PoseWithCovarianceStamped) -> None:
+        covariance = msg.pose.covariance
+        cov_x = covariance[0]
+        cov_y = covariance[7]
+        cov_yaw = covariance[35]
+
+        amcl_good = (
+            cov_x < 0.1
+            and cov_y < 0.1
+            and cov_yaw < 0.1
+        )
+
+        with self.lock:
+            self.state.received_amcl = True
+            self.state.localization_valid = (
+                amcl_good
+                or self.state.at_station
+                or self.state.charging
+            )
+            localization_valid = self.state.localization_valid
+
+        self._publish_status_snapshot()
+        self.get_logger().info(
+            "[Localization] AMCL covariance "
+            f"({cov_x:.3f}, {cov_y:.3f}, {cov_yaw:.3f}); "
+            f"valid={localization_valid}"
+        )
+
+    def on_localization_reset(self, msg: String) -> None:
+        if msg.data.strip().lower() != "done":
+            return
+
+        with self.lock:
+            self.state.localization_valid = True
+
+        self._publish_status_snapshot()
+        self.get_logger().info(
+            "[Localization] Reset bevestigd; lokalisatie geldig."
+        )
+
+    def on_recharge_event(self, msg: String) -> None:
+        event = msg.data
+        self.get_logger().info(f"[Docking] Event ontvangen: {event}")
+
+        with self.lock:
+            if "DRIVE-TO-DOCK-SUCCESS" in event:
+                self.state.at_station = True
+                self.state.localization_valid = True
+
+            elif "ROBOT-CHARGING" in event:
+                self.state.charging = True
+                self.state.at_station = True
+                self.state.docked = True
+                self.state.robot_active = False
+                self.state.localization_valid = True
+
+            elif "DOCK-FAILED" in event:
+                self.state.at_station = False
+                self.state.docked = False
+                self.state.charging = False
+
+        self._publish_status_snapshot()
+
+    def on_behavior_node_changed(self, msg: String) -> None:
+        node_name = msg.data.strip()
+        if not node_name or node_name == "None":
+            return
+
+        destination = self.DESTINATION_BY_NODE.get(node_name)
+
+        with self.lock:
+            admin_open = self.state.admin_open
+            self.state.active_destination = destination
+
+            if destination == "quiz":
+                self.state.at_quiz = False
+            elif destination == "work_area":
+                self.state.at_work_area = False
+            elif destination == "charging_station":
+                self.state.at_station = False
+
+        # In de huidige architectuur wordt dit topic ook gebruikt om
+        # schermwissels naar de Pi door te geven. Dit behoudt dat gedrag.
+        if not admin_open:
+            with self.lock:
+                self.state.last_screen = node_name
+
+            screen_msg = String()
+            screen_msg.data = node_name
+            self.screen_pub.publish(screen_msg)
+
+        self._publish_status_snapshot()
+        self.get_logger().info(
+            f"[Robot] Node ontvangen: {node_name}; "
+            f"bestemming={destination}"
+        )
+
+    def on_navigation_status(self, msg: String) -> None:
+        raw = msg.data.strip()
+        status_text, separator, _rest = raw.partition("-")
+
+        if not separator:
+            self.get_logger().error(
+                f"[Nav2] Ongeldig statusbericht ontvangen: {raw!r}"
+            )
+            return
+
+        try:
+            status_code = int(status_text)
+        except ValueError:
+            self.get_logger().error(
+                f"[Nav2] Statuscode niet te lezen uit: {raw!r}"
+            )
+            return
+
+        # Nav2 GoalStatus: 4=SUCCEEDED, 5=CANCELED, 6=ABORTED.
+        if status_code not in (4, 5, 6):
+            return
+
+        succeeded = status_code == 4
+
+        with self.lock:
+            destination = self.state.active_destination
+
+            if destination == "quiz":
+                self.state.at_quiz = succeeded
+            elif destination == "work_area":
+                self.state.at_work_area = succeeded
+            elif destination == "charging_station":
+                self.state.at_station = succeeded
+            else:
+                self.get_logger().warning(
+                    "[Nav2] Resultaat ontvangen zonder bekende "
+                    "actieve bestemming; status niet aan een locatie gekoppeld."
+                )
+                return
+
+        self._publish_status_snapshot()
+        self.get_logger().info(
+            f"[Nav2] Goal afgerond: status={status_code}, "
+            f"bestemming={destination}, geslaagd={succeeded}"
+        )
+
+    # ------------------------------------------------------------------
+    # Bumper en noodstop
+    # ------------------------------------------------------------------
+
+    def on_bumper(self, msg: String) -> None:
+        status_text = msg.data.strip()
+
+        if status_text == "De bumper is niet ingedrukt":
+            return
+
+        self.activate_estop(f"bumper_trigger ({status_text})")
+
+    def activate_estop(self, reason: str) -> None:
+        with self.lock:
+            if not self.state.estop_active:
+                self.get_logger().warning(
+                    f"ESTOP geactiveerd: {reason}"
+                )
+            self.state.estop_active = True
+
+        self.estop_end_time = (
+            time.monotonic() + self.ESTOP_DURATION_SEC
+        )
+
+        if self.estop_timer is None:
+            self.estop_timer = self.create_timer(
+                0.05,
+                self._estop_tick,
+            )
+
+    def _estop_tick(self) -> None:
+        if self.estop_end_time is not None:
+            if time.monotonic() >= self.estop_end_time:
+                with self.lock:
+                    self.state.estop_active = False
+
+                self.get_logger().info(
+                    "ESTOP-timer verlopen; softwarematige ESTOP vrijgegeven."
+                )
+
+                if self.estop_timer is not None:
+                    self.destroy_timer(self.estop_timer)
+                    self.estop_timer = None
+
+                self.estop_end_time = None
+                return
+
+        self._publish_zero_twist()
+        self.send_robot_command("STOP")
+
+    # ------------------------------------------------------------------
+    # Socket-events vanuit QuizSocketBridge
+    # ------------------------------------------------------------------
+
+    def handle_socket_event(self, event: str, data: Any = None) -> None:
         if event == "quiz_finished":
             with self.lock:
                 self.state.quiz_active = False
                 self.state.quiz_finished = True
+
         elif event == "quiz_inactive":
             with self.lock:
                 self.state.quiz_active = False
+
         elif event == "drive_to_quiz_location":
-            self.send_robot_command("DRIVE_QUIZ_LOCATION")
+            # De huidige robot_controller herkent DRIVE_QUIZ_LOCATION_A/B.
+            # Kies hier niet willekeurig een locatie; pas dit event of de
+            # controller aan om een expliciete A- of B-keuze te gebruiken.
+            self.get_logger().warning(
+                "Event drive_to_quiz_location ontvangen, maar er is "
+                "geen expliciete quizlocatie A/B opgegeven."
+            )
+
         elif event == "screen_request":
             self.handle_screen_request(data)
+
         elif event == "ask_is_active":
             bridge = data
             with self.lock:
                 current_active = self.state.robot_active
-            if bridge:
+
+            if bridge is not None:
                 bridge.send_active_status_to_pi(current_active)
+
         elif event == "active_button_toggled":
-            # data bevat een tuple: (socket_data, bridge-referentie)
-            if data is not None and isinstance(data, tuple):
-                _, bridge = data  # We negeren de socket_data van de Pi volledig!
-                
-                with self.lock:
-                    # Best Practice: Draai de huidige status blindelings om (not)
-                    self.state.robot_active = not self.state.robot_active
-                    new_status = self.state.robot_active
-                
-                self.get_logger().info(f"🔄 Knop ingedrukt op Pi! Status omgekeerd naar: {new_status}")
-                
-                # We sturen de nieuwe status direct terug zodat de knop live van kleur verandert!
-                if bridge:
-                    bridge.send_active_status_to_pi(new_status)
+            if not isinstance(data, tuple) or len(data) != 2:
+                self.get_logger().warning(
+                    "Ongeldige payload voor active_button_toggled."
+                )
+                return
+
+            _socket_data, bridge = data
+
+            with self.lock:
+                self.state.robot_active = not self.state.robot_active
+                new_status = self.state.robot_active
+
+            self._publish_status_snapshot()
+            self.get_logger().info(
+                f"Robot actief-status gewijzigd naar {new_status}."
+            )
+
+            if bridge is not None:
+                bridge.send_active_status_to_pi(new_status)
+
         elif event == "admin_login_open":
             self._handle_admin_login_open()
-        elif event == "admin_login_closed":
-            # GEWIJZIGD: We overschrijven hier geen methodenamen meer!
-            with self.lock:
-                self.state.admin_login_open = False
+
         elif event == "admin_open":
             self._handle_admin_panel_open()
-        elif event == "admin_closed" or event == "admin_login_closed":
 
-            with self.lock:
-                self.state.admin_open = False
-                self.state.admin_login_open = False
-                # Haal direct en in alle situaties het laatst bekende scherm op
-                saved_last_screen = self.state.last_screen
-
-            self.get_logger().info("🔒 Admin panel gesloten. Vorige schermtoestand blindelings herstellen...")
-            
-            msg = String()
-            
-            # Controleer of er een vorig scherm is opgeslagen
-            if saved_last_screen:
-                msg.data = saved_last_screen
-                self.get_logger().info(f"🔄 Scherm hersteld naar: {saved_last_screen}")
-            else:
-                # Alleen als er echt geen vorig scherm bekend is (None), sturen we de startup
-                # RT TO DO: Hier is het misschien best om de status van de robot te checken en dan te beslissen welk scherm we tonen.
-                msg.data = "robot-startup"
-                self.get_logger().info("🤖 Geen vorig scherm bekend -> Fallback naar robot-startup")
-                
-            self.screen_pub.publish(msg)
-            # ==========================================
+        elif event in ("admin_closed", "admin_login_closed"):
+            self._handle_admin_closed()
 
         elif event == "battery_request":
-            self.get_logger().info("📬 Batterij-aanvraag ontvangen! Live pulse berekenen...")
-            with self.lock:
-                bat_ok = self.state.battery_ok
-                v = self.state.battery_voltage  # Dit is de live float, bijv. 23.74
-                self.get_logger().info(f"🔋 [STATE] Live accu-info verzenden -> Status OK: {bat_ok} | Spanning: {v:.2f}V")
+            self._publish_battery_pulse()
 
-            # We sturen de pure status en de ruwe float-waarde mee in de string, gescheiden door een dubbelepunt
-            msg = String()
-            msg.data = f"BATTERY_PULSE:{bat_ok}:{v}"
-            self.screen_pub.publish(msg)
         elif event == "manual_drive":
             self.handle_manual_drive(data)
-        elif event == "time_updated":
-            pass
+
         elif event == "connect":
             with self.lock:
                 self.state.network_ok = True
+
         elif event == "disconnect":
             with self.lock:
                 self.state.network_ok = False
 
-    # ---------------------------
-    # LOGIN / ADMIN FLOW (GEFIXT!)
-    # ---------------------------
-    def _handle_admin_login_open(self):
+        elif event == "time_updated":
+            return
+
+        else:
+            self.get_logger().debug(
+                f"Socket-event genegeerd: {event}"
+            )
+
+    def _handle_admin_login_open(self) -> None:
         with self.lock:
             self.state.admin_login_open = True
+
         self.send_robot_command("STOP")
         self._publish_zero_twist()
 
-    def _handle_admin_panel_open(self):
+    def _handle_admin_panel_open(self) -> None:
         with self.lock:
             self.state.admin_login_open = False
             self.state.admin_open = True
+
         self.send_robot_command("STOP")
         self._publish_zero_twist()
 
-    # ---------------------------
-    # SCHERMLOGICA (GECORRIGEERD: Geen dubbele locks & Actieve Robot-Validatie)
-    # ---------------------------
-    def handle_screen_request(self, data):
+    def _handle_admin_closed(self) -> None:
+        with self.lock:
+            self.state.admin_open = False
+            self.state.admin_login_open = False
+            saved_screen = self.state.last_screen
+
+        screen_msg = String()
+        screen_msg.data = saved_screen or "robot-startup"
+        self.screen_pub.publish(screen_msg)
+
+    def handle_screen_request(self, data: Any) -> None:
         if data is None:
             return
-            
-        # Veiligheid: Pak de schermnaam, of de data nu een dict of een platte string is
+
         if isinstance(data, dict):
             screen = data.get("screen")
         else:
             screen = str(data)
-            
+
+        if not isinstance(screen, str):
+            self.get_logger().warning(
+                "Schermverzoek bevat geen geldige schermnaam."
+            )
+            return
+
+        screen = screen.strip()
         if not screen or screen == "None":
             return
 
-        # Haal alle benodigde variabelen in één keer veilig op uit de lock (voorkomt deadlocks)
         with self.lock:
-            admin_open = self.state.admin_open
-            admin_login_open = self.state.admin_login_open
+            if self.state.admin_open or self.state.admin_login_open:
+                self.get_logger().info(
+                    f"Schermverzoek {screen!r} genegeerd: admin/login is open."
+                )
+                return
 
-        # BLOKKADE-STAP: Als de admin openstaat of men is bezig met inloggen -> Geen schermwissel!
-        if admin_open or admin_login_open:
-            self.get_logger().info(f"⏸️ Schermverzoek '{screen}' gepauzeerd: Admin of Login is geopend.")
-            return
-
-        # ALLES IN ORDE ROUTE: In alle andere gevallen accepteren we het scherm blindelings,
-        # of de robot nu slaapt, rijdt of laadt (de Behavior Tree regelt de juiste pagina).
-        with self.lock:
             self.state.last_screen = screen
 
-        msg = String()
-        msg.data = screen
-        self.screen_pub.publish(msg)
-        self.get_logger().info(f"✅ Schermwissel goedgekeurd door RobotStateManager: {screen}")
-    # ---------------------------
-    # MANUAL DRIVE
-    # ---------------------------
-    def handle_manual_drive(self, data):
+        screen_msg = String()
+        screen_msg.data = screen
+        self.screen_pub.publish(screen_msg)
+
+    # ------------------------------------------------------------------
+    # Handmatige besturing
+    # ------------------------------------------------------------------
+
+    def handle_manual_drive(self, data: Any) -> None:
         with self.lock:
-            admin_open = self.state.admin_open
-            estop = self.state.estop_active
-            docked = self.state.docked
-            robot_active = self.state.robot_active
-        if not admin_open or estop or docked or not robot_active:
+            allowed = (
+                self.state.admin_open
+                and not self.state.estop_active
+                and not self.state.docked
+                and self.state.robot_active
+            )
+
+        if not allowed:
+            self.get_logger().warning(
+                "Handmatige besturing geweigerd door robotstatus."
+            )
             return
+
         self._execute_manual_drive(data)
 
-    def _execute_manual_drive(self, data):
-        if data is None:
+    def _execute_manual_drive(self, data: Any) -> None:
+        if not isinstance(data, dict):
+            self.get_logger().warning(
+                "Handmatig rijcommando moet een object/dictionary zijn."
+            )
             return
-        self.last_drive_time = time.time()
-        twist = Twist()
-        try:
-            twist.linear.x = float(data.get("x", 0.0))
-            twist.linear.y = float(data.get("y", 0.0))
-            twist.angular.z = float(data.get("rotation", 0.0))
-            self.drive_pub.publish(twist)
-        except Exception as e:
-            self.get_logger().error(f"Fout bij publiceren manual drive: {e}")
 
-    def _manual_drive_timeout_check(self):
+        try:
+            linear_x = float(data.get("x", 0.0))
+            linear_y = float(data.get("y", 0.0))
+            angular_z = float(data.get("rotation", 0.0))
+        except (TypeError, ValueError) as exc:
+            self.get_logger().error(
+                f"Ongeldige snelheid in handmatig rijcommando: {exc}"
+            )
+            self._publish_zero_twist()
+            return
+
+        values = (linear_x, linear_y, angular_z)
+        if not all(math.isfinite(value) for value in values):
+            self.get_logger().error(
+                "Handmatig rijcommando bevat een niet-eindige snelheid."
+            )
+            self._publish_zero_twist()
+            return
+
+        twist = Twist()
+        twist.linear.x = linear_x
+        twist.linear.y = linear_y
+        twist.angular.z = angular_z
+
+        self.drive_pub.publish(twist)
+        self.last_drive_time = time.monotonic()
+
+    def _manual_drive_timeout_check(self) -> None:
         if self.last_drive_time is None:
             return
-        elapsed = time.time() - self.last_drive_time
-        if elapsed > self.drive_timeout_sec:
+
+        if time.monotonic() - self.last_drive_time > self.DRIVE_TIMEOUT_SEC:
+            self.get_logger().info(
+                "Handmatige besturing gestopt wegens timeout."
+            )
             self._publish_zero_twist()
             self.send_robot_command("STOP")
             self.last_drive_time = None
 
-    # ============================================================
-    # ESTOP (GECORRIGEERD: Voorkomt rclpy InvalidHandle crashes)
-    # ============================================================
-    def activate_estop(self, reason: str):
+    # ------------------------------------------------------------------
+    # Batterijcommunicatie met QuizSocketBridge
+    # ------------------------------------------------------------------
+
+    def _publish_battery_pulse(self) -> None:
         with self.lock:
-            # Als de noodstop nog niet actief was, loggen we het één keer
-            if not self.state.estop_active:
-                self.get_logger().warn(f"ESTOP geactiveerd wegens: {reason}")
-            self.state.estop_active = True
-            
-        # Verschuif de eindtijd met 30 seconden in de toekomst (veilig zonder destroy_timer)
-        self.estop_end_time = time.time() + 30.0
-        
-        # Start de timer alleen de allereerste keer op als hij nog niet bestaat
-        if self.estop_timer is None:
-            self.estop_timer = self.create_timer(0.05, self.estop_tick)
+            battery_ok = self.state.battery_ok
+            voltage = self.state.battery_voltage
 
-    def estop_tick(self):
-        # Controleer of de stoptijd is verstreken
-        if time.time() >= self.estop_end_time:
-            with self.lock:
-                self.state.estop_active = False
-            self.get_logger().info("ESTOP periode verstreken. Robot vrijgegeven.")
-            
-            # We annuleren de timer niet hard, we stoppen gewoon de sturing
-            if self.estop_timer is not None:
-                self.destroy_timer(self.estop_timer)
-                self.estop_timer = None
-            return
+        msg = String()
+        msg.data = f"BATTERY_PULSE:{battery_ok}:{voltage}"
+        self.screen_pub.publish(msg)
 
-        # Zolang de ESTOP actief is, dwingen we stilstand af
-        self._publish_zero_twist()
-        self.send_robot_command("STOP")
+        self.get_logger().info(
+            f"Batterijstatus verzonden: ok={battery_ok}, "
+            f"spanning={voltage:.2f} V"
+        )
 
-    # ---------------------------
-    # BATTERY
-    # ---------------------------
-    def send_battery_status(self):
+    def send_battery_status(self) -> None:
         with self.lock:
-            bat_ok = self.state.battery_ok
-        msg = String()
-        msg.data = f"BATTERY:{bat_ok}"
-        self.screen_pub.publish(msg)
-        
-    def send_battery_percentage(self):
-        """Meldt aan de bridge dat het batterijpercentage (voltage) verstuurd moet worden."""
-        msg = String()
-        msg.data = "robot-update-battery-percentage"
-        
-        self.get_logger().info("🔋 RobotStateManager: Aanvraag voor robot-update-battery-percentage doorgezet naar bridge.")
-        self.screen_pub.publish(msg)
-        self.get_logger().info(f"🔋 Ruwe batterijspanning doorgegeven naar bridge: {v:.2f}V")
+            battery_ok = self.state.battery_ok
 
-    # ---------------------------
-    # SERVICE VOOR BT
-    # ---------------------------
-    def handle_state_request(self, request, response):
+        msg = String()
+        msg.data = f"BATTERY:{battery_ok}"
+        self.screen_pub.publish(msg)
+
+    def send_battery_percentage(self) -> None:
+        # De bridge verwacht voor batterijdata een BATTERY_PULSE-payload.
+        self._publish_battery_pulse()
+
+    # ------------------------------------------------------------------
+    # Service en afsluiting
+    # ------------------------------------------------------------------
+
+    def handle_state_request(self, _request, response):
         with self.lock:
             response.robot_active = self.state.robot_active
             response.quiz_active = self.state.quiz_active
@@ -358,16 +725,29 @@ class RobotStateManager(Node):
             response.charging = self.state.charging
             response.visitors_nearby = self.state.visitors_nearby
             response.in_working_zone = self.state.in_working_zone
+
         return response
 
-    # ---------------------------
-    # HELPERS
-    # ---------------------------
-    def send_robot_command(self, cmd: str):
-        msg = String()
-        msg.data = cmd
-        self.cmd_pub.publish(msg)
+    def destroy_node(self):
+        if self.estop_timer is not None:
+            self.destroy_timer(self.estop_timer)
+            self.estop_timer = None
 
-    def _publish_zero_twist(self):
-        twist = Twist()
-        self.drive_pub.publish(twist)
+        super().destroy_node()
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = RobotStateManager()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        node.get_logger().info("RobotStateManager gestopt.")
+    finally:
+        node.destroy_node()
+        rclpy.try_shutdown()
+
+
+if __name__ == "__main__":
+    main()
