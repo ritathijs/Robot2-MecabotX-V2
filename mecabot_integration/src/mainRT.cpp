@@ -31,6 +31,36 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
 };
 
+class SetRobotInactive : public BT::SyncActionNode
+{
+public:
+    SetRobotInactive(
+        const std::string& name,
+        const BT::NodeConfiguration& config,
+        rclcpp::Node::SharedPtr node)
+        : BT::SyncActionNode(name, config),
+          active_pub_(node->create_publisher<std_msgs::msg::Bool>(
+              "/RobotActive", 10))
+    {
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {};
+    }
+
+    BT::NodeStatus tick() override
+    {
+        std_msgs::msg::Bool msg;
+        msg.data = false;
+        active_pub_->publish(msg);
+        return BT::NodeStatus::SUCCESS;
+    }
+
+private:
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr active_pub_;
+};
+
 class SendDriveWorkArea : public BT::StatefulActionNode
 {
 public:
@@ -535,6 +565,85 @@ private: \
     bool last_value_ = false; \
 };
 
+#define DEFINE_WAYPOINT_ACTION(ClassName, Command, StatusTopic)             \
+class ClassName : public BT::StatefulActionNode                            \
+{                                                                           \
+public:                                                                     \
+    ClassName(                                                              \
+        const std::string& name,                                            \
+        const BT::NodeConfiguration& config,                               \
+        rclcpp::Node::SharedPtr node)                                       \
+        : BT::StatefulActionNode(name, config),                             \
+          node_(std::move(node))                                            \
+    {                                                                       \
+        command_pub_ = node_->create_publisher<std_msgs::msg::String>(      \
+            "/robot_command", 10);                                         \
+        status_sub_ = node_->create_subscription<std_msgs::msg::Bool>(      \
+            StatusTopic, 10,                                                \
+            [this](std_msgs::msg::Bool::SharedPtr msg)                      \
+            {                                                               \
+                reached_ = msg->data;                                      \
+            });                                                             \
+    }                                                                       \
+                                                                            \
+    static BT::PortsList providedPorts()                                    \
+    {                                                                       \
+        return {};                                                          \
+    }                                                                       \
+                                                                            \
+    BT::NodeStatus onStart() override                                       \
+    {                                                                       \
+        reached_ = false;                                                   \
+        start_time_ = std::chrono::steady_clock::now();                     \
+                                                                            \
+        std_msgs::msg::String msg;                                          \
+        msg.data = Command;                                                 \
+        command_pub_->publish(msg);                                         \
+                                                                            \
+        return BT::NodeStatus::RUNNING;                                     \
+    }                                                                       \
+                                                                            \
+    BT::NodeStatus onRunning() override                                     \
+    {                                                                       \
+        if (reached_)                                                       \
+        {                                                                   \
+            return BT::NodeStatus::SUCCESS;                                \
+        }                                                                   \
+                                                                            \
+        if (std::chrono::steady_clock::now() - start_time_ >= timeout_)     \
+        {                                                                   \
+            RCLCPP_ERROR(                                                   \
+                node_->get_logger(),                                        \
+                "Timeout bij navigatiecommando: %s", Command);             \
+            return BT::NodeStatus::FAILURE;                                \
+        }                                                                   \
+                                                                            \
+        return BT::NodeStatus::RUNNING;                                     \
+    }                                                                       \
+                                                                            \
+    void onHalted() override                                                \
+    {                                                                       \
+        RCLCPP_WARN(                                                        \
+            node_->get_logger(),                                           \
+            "Waypointactie afgebroken: %s", Command);                       \
+    }                                                                       \
+                                                                            \
+private:                                                                    \
+    rclcpp::Node::SharedPtr node_;                                          \
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr command_pub_;       \
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr status_sub_;       \
+    bool reached_{false};                                                   \
+    std::chrono::steady_clock::time_point start_time_;                     \
+    const std::chrono::seconds timeout_{120};                               \
+};
+
+DEFINE_WAYPOINT_ACTION(
+    SendDriveLocationC, "DRIVE_TO_LOCATION_C", "/IsRobotAtLocationC")
+DEFINE_WAYPOINT_ACTION(
+    SendDriveLocationD, "DRIVE_TO_LOCATION_D", "/IsRobotAtLocationD")
+DEFINE_WAYPOINT_ACTION(
+    SendDriveLocationE, "DRIVE_TO_LOCATION_E", "/IsRobotAtLocationE")
+
 DEFINE_CONDITION_NODE(CheckRobotActive, "/IsRobotActive")
 DEFINE_CONDITION_NODE(BatteryOk, "/IsBatteryOK")
 DEFINE_CONDITION_NODE(IsRobotClearFromDock, "/IsLocalizationValid") 
@@ -543,6 +652,10 @@ DEFINE_CONDITION_NODE(WantToStartQuiz, "/WantToStartQuiz")
 DEFINE_CONDITION_NODE(IsRobotAtQuiz, "/IsRobotAtQuiz")
 DEFINE_CONDITION_NODE(IsRobotNearChargingStation, "/IsRobotNearChargingStation")
 DEFINE_CONDITION_NODE(IsRobotCharging, "/IsRobotCharging")
+DEFINE_CONDITION_NODE(IsPersonDetected, "/visitors_nearby")
+DEFINE_CONDITION_NODE(IsRobotAtLocationC, "/IsRobotAtLocationC")
+DEFINE_CONDITION_NODE(IsRobotAtLocationD, "/IsRobotAtLocationD")
+DEFINE_CONDITION_NODE(IsRobotAtLocationE, "/IsRobotAtLocationE")
 
 
 // =========================================================================
@@ -575,6 +688,7 @@ int main(int argc, char **argv)
     REGISTER_BT_NODE(StartDrivingToPeople)
     REGISTER_BT_NODE(CheckingNearbyVisitors)
     REGISTER_BT_NODE(RobotRotationFollowMe)
+    REGISTER_BT_NODE(SetRobotInactive)
 
     // Registreer alle Condities
     REGISTER_BT_NODE(CheckRobotActive)
@@ -585,6 +699,14 @@ int main(int argc, char **argv)
     REGISTER_BT_NODE(IsRobotAtQuiz)
     REGISTER_BT_NODE(IsRobotNearChargingStation)
     REGISTER_BT_NODE(IsRobotCharging)
+
+    REGISTER_BT_NODE(IsPersonDetected)
+    REGISTER_BT_NODE(IsRobotAtLocationC)
+    REGISTER_BT_NODE(IsRobotAtLocationD)
+    REGISTER_BT_NODE(IsRobotAtLocationE)
+    REGISTER_BT_NODE(SendDriveLocationC)
+    REGISTER_BT_NODE(SendDriveLocationD)
+    REGISTER_BT_NODE(SendDriveLocationE)
 
     // GECORRIGEERD: Universeel en sluitend share-pad naar je XML-boom
     auto tree = factory.createTreeFromFile("/home/wheeltec/wheeltec_ros2/install/mecabot_integration/share/mecabot_integration/config/behavior_tree.xml");

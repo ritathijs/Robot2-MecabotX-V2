@@ -40,6 +40,9 @@ class RobotState:
 
     at_quiz: bool = False
     at_work_area: bool = False
+    at_location_c: bool = False
+    at_location_d: bool = False
+    at_location_e: bool = False
     active_destination: str | None = None
 
     last_screen: str | None = None
@@ -66,6 +69,9 @@ class RobotStateManager(Node):
         "RobotDriveToChargingStation": "charging_station",
         "FallbackDriveToChargingStation": "charging_station",
         "robot-go-charge": "charging_station",
+        "DriveLocationC": "location_c",
+        "DriveLocationD": "location_d",
+        "DriveLocationE": "location_e",
     }
 
     def __init__(self):
@@ -87,6 +93,12 @@ class RobotStateManager(Node):
         )
         self.drive_pub = self.create_publisher(
             Twist, "/cmd_vel", 10
+        )
+        self.want_to_start_quiz_pub = self.create_publisher(
+            Bool, "/WantToStartQuiz", 10
+        )
+        self.quiz_finished_pub = self.create_publisher(
+            Bool, "/quiz_finished", 10
         )
 
         # Statusoutputs voor de Behavior Tree
@@ -118,7 +130,15 @@ class RobotStateManager(Node):
         self.battery_low_pub = self.create_publisher(
             Bool, "/IsBatteryLow", 10
         )
-
+        self.location_c_pub = self.create_publisher(
+            Bool, "/IsRobotAtLocationC", 10
+        )
+        self.location_d_pub = self.create_publisher(
+            Bool, "/IsRobotAtLocationD", 10
+        )
+        self.location_e_pub = self.create_publisher(
+            Bool, "/IsRobotAtLocationE", 10
+        )
         # Sensor-, status- en feedbacktopics
         self.create_subscription(
             Float32,
@@ -186,6 +206,12 @@ class RobotStateManager(Node):
             self.on_navigation_status,
             10,
         )
+        self.create_subscription(
+            String,
+            "/robot_command",
+            self.on_robot_command,
+            10,
+        )
 
         # Service voor het opvragen van de actuele robotstatus
         self.create_service(
@@ -221,12 +247,18 @@ class RobotStateManager(Node):
             charging = self.state.charging
             robot_active = self.state.robot_active
             battery_ok = self.state.battery_ok
+            at_location_c = self.state.at_location_c
+            at_location_d = self.state.at_location_d
+            at_location_e = self.state.at_location_e
 
         self.localization_pub.publish(
             self._bool_message(localization_valid)
         )
         self.quiz_pub.publish(self._bool_message(at_quiz))
         self.work_pub.publish(self._bool_message(at_work_area))
+        self.location_c_pub.publish(self._bool_message(at_location_c))
+        self.location_d_pub.publish(self._bool_message(at_location_d))
+        self.location_e_pub.publish(self._bool_message(at_location_e))
 
         station_msg = self._bool_message(at_station)
         self.charging_station_pub.publish(station_msg)
@@ -356,6 +388,12 @@ class RobotStateManager(Node):
                 self.state.at_work_area = False
             elif destination == "charging_station":
                 self.state.at_station = False
+            elif destination == "location_c":
+                self.state.at_location_c = False
+            elif destination == "location_d":
+                self.state.at_location_d = False
+            elif destination == "location_e":
+                self.state.at_location_e = False
 
         # In de huidige architectuur wordt dit topic ook gebruikt om
         # schermwissels naar de Pi door te geven. Dit behoudt dat gedrag.
@@ -406,6 +444,12 @@ class RobotStateManager(Node):
                 self.state.at_work_area = succeeded
             elif destination == "charging_station":
                 self.state.at_station = succeeded
+            elif destination == "location_c":
+                self.state.at_location_c = succeeded
+            elif destination == "location_d":
+                self.state.at_location_d = succeeded
+            elif destination == "location_e":
+                self.state.at_location_e = succeeded
             else:
                 self.get_logger().warning(
                     "[Nav2] Resultaat ontvangen zonder bekende "
@@ -479,18 +523,15 @@ class RobotStateManager(Node):
                 self.state.quiz_active = False
                 self.state.quiz_finished = True
 
+            self.quiz_finished_pub.publish(self._bool_message(True))
+            self.want_to_start_quiz_pub.publish(self._bool_message(False))
+
         elif event == "quiz_inactive":
             with self.lock:
                 self.state.quiz_active = False
 
         elif event == "drive_to_quiz_location":
-            # De huidige robot_controller herkent DRIVE_QUIZ_LOCATION_A/B.
-            # Kies hier niet willekeurig een locatie; pas dit event of de
-            # controller aan om een expliciete A- of B-keuze te gebruiken.
-            self.get_logger().warning(
-                "Event drive_to_quiz_location ontvangen, maar er is "
-                "geen expliciete quizlocatie A/B opgegeven."
-            )
+            self.want_to_start_quiz_pub.publish(self._bool_message(True))
 
         elif event == "screen_request":
             self.handle_screen_request(data)
@@ -502,6 +543,8 @@ class RobotStateManager(Node):
 
             if bridge is not None:
                 bridge.send_active_status_to_pi(current_active)
+
+        # Laat hierna de overige bestaande elif-takken staan.
 
         elif event == "active_button_toggled":
             if not isinstance(data, tuple) or len(data) != 2:
@@ -561,6 +604,16 @@ class RobotStateManager(Node):
 
         self.send_robot_command("STOP")
         self._publish_zero_twist()
+
+    def on_robot_command(self, msg: String) -> None:
+        if msg.data.strip() != "START_QUIZ":
+            return
+
+        with self.lock:
+            self.state.quiz_active = True
+            self.state.quiz_finished = False
+
+        self.quiz_finished_pub.publish(self._bool_message(False))
 
     def _handle_admin_panel_open(self) -> None:
         with self.lock:
