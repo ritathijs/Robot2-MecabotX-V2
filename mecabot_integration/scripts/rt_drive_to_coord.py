@@ -49,21 +49,24 @@ behavior_tree_nodes = {
 	# --- Behavior Tree doelen ---
 	"IsRobotAtQuiz":				{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "always"},
 	"IsRobotAtWorkArea":			{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "once"},
-	"DriveQuizLocation":			{"keepoutfilter_on": "True",  "drive_action": "estop", "message_frequency": "always"},
+	
+    "follow-robot-screen":          {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always",},
 
 	"FallbackDriveToWorkArea":			{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "always"},
 	"FallbackIsRobotAtWorkArea":			{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "always"},
 
 	"FallbackDriveQuizLocation":			{"keepoutfilter_on": "True",  "drive_action": "estop", "message_frequency": "always"},
 	"FallbackIsRobotAtQuiz":			{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "always"},
-
+    "DriveLocationC": {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always"},
+    "DriveLocationD": {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always"},
+    "DriveLocationE": {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always"},
 
 	# --- People Search doelen ---
 	"RobotRotationFollowMe":	  {"keepoutfilter_on": "True",  "drive_action": "peoplesearch", "message_frequency": "always"},
 	
 	"DriveWorkArea":				{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "always"},
 	"DriveQuizLocation":			{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "always"},
-	
+	"robot-arrived-at-quiz-location": {"keepoutfilter_on": "True", "drive_action": "release", "message_frequency": "once",},
 	# --- Default ---
 	"Default":					{"keepoutfilter_on": "none",  "drive_action": "estop", "message_frequency": "always"},
 }

@@ -16,9 +16,9 @@ public:
             std::bind(&RobotController::handle_robot_command, this, std::placeholders::_1));
             
         // Luistert naar de pijltoetsen (GUI besturing) die binnenkomen
-        mux_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
-            "/gui_cmd_vel", rclcpp::QoS(1).reliable(),
-            std::bind(&RobotController::cmd_vel_callback, this, std::placeholders::_1));
+        //mux_sub_ = this->create_subscription<geometry_msgs::msg::Twist>(
+        //    "/gui_cmd_vel", rclcpp::QoS(1).reliable(),
+        //    std::bind(&RobotController::cmd_vel_callback, this, std::placeholders::_1));
 
         // --- PUBLISHERS ---
         // Stuurt de handmatige snelheden door naar het GUI-prioriteitstopic van jullie Drive_Mux
@@ -42,7 +42,7 @@ public:
 
 private:
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr command_sub_;
-    rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr mux_sub_;
+    //rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr mux_sub_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr gui_cmd_vel_pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr dock_pub_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr bt_node_pub_;
@@ -68,17 +68,22 @@ private:
         // DRY-optimalisatie: Zet de statussen en stop lopende handmatige commando's
         manual_drive_active_ = (cmd == "MANUAL_DRIVE");
         publish_manual_flag();
-        stop_robot(); 
+        //stop_robot(); 
 
         if (cmd == "STOP" || cmd == "MANUAL_DRIVE") {
+            stop_robot();
             last_node_ = "None";
             if (cmd == "MANUAL_DRIVE") {
                 RCLCPP_INFO(this->get_logger(), "Manuele besturing (pijltoetsen adminpaneel) actief.");
             }
+            return;
         }
-        else if (cmd == "START_QUIZ")           start_quiz_mode();
+        if (cmd == "START_QUIZ")           start_quiz_mode();
         else if (cmd == "DRIVE_QUIZ_LOCATION_A") drive_to_quiz_location_a();
         else if (cmd == "DRIVE_QUIZ_LOCATION_B") drive_to_quiz_location_b();
+        else if (cmd == "DRIVE_TO_LOCATION_C") drive_to_location_c();
+        else if (cmd == "DRIVE_TO_LOCATION_D") drive_to_location_d();
+        else if (cmd == "DRIVE_TO_LOCATION_E") drive_to_location_e();
         else if (cmd == "DRIVE_TO_WORK_AREA")    drive_to_work_area_a();
         else if (cmd == "DRIVE_TO_CHARGING_AREA") drive_to_charging_area();
         else if (cmd == "DOCK")                  start_docking();
@@ -87,13 +92,13 @@ private:
         }
     }
 
-    void cmd_vel_callback(const geometry_msgs::msg::Twist::SharedPtr msg) {
+    /*void cmd_vel_callback(const geometry_msgs::msg::Twist::SharedPtr msg) {
         // MUX controle: Alleen doorsturen naar de multiplexer als de MANUAL_DRIVE-modus aan staat
         if (manual_drive_active_) {
             gui_cmd_vel_pub_->publish(*msg);
         }
     }
-
+    */
     void publish_manual_flag() {
         std_msgs::msg::Bool b;
         b.data = manual_drive_active_;
@@ -144,6 +149,23 @@ private:
 
     void drive_to_quiz_location_b() {
         last_node_ = "follow-robot-screen"; 
+        send_bt_node_signal(last_node_);
+        publish_pose(-4.064824104309082, 1.6677558422088623, 0.03214270147272485, 0.9994832898763417);
+    }
+    void drive_to_location_c() {
+        last_node_ = "explore-location-c"; 
+        send_bt_node_signal(last_node_);
+        publish_pose(-4.064824104309082, 1.6677558422088623, 0.03214270147272485, 0.9994832898763417);
+    }
+
+    void drive_to_location_d() {
+        last_node_ = "explore-location-d"; 
+        send_bt_node_signal(last_node_);
+        publish_pose(-4.064824104309082, 1.6677558422088623, 0.03214270147272485, 0.9994832898763417);
+    }
+
+    void drive_to_location_e() {
+        last_node_ = "explore-location-e"; 
         send_bt_node_signal(last_node_);
         publish_pose(-4.064824104309082, 1.6677558422088623, 0.03214270147272485, 0.9994832898763417);
     }
