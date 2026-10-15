@@ -1,113 +1,173 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <root BTCPP_format="3" main_tree_to_execute="MainTree">
+
   <BehaviorTree ID="MainTree">
     <Fallback name="GlobalSafetyFallback">
-      
-      <!-- ========================================================= -->
-      <!-- HOOFDFLOW 1: AUTONOME MISSIE (ROBOT IS ACTIEF EN BATTERIJ OK) -->
-      <!-- ========================================================= -->
-      <Sequence name="AutonomeMissie">
-        <CheckRobotActive/>
-        <BatteryOk/>
-        
-        <!-- STAP 1: Undock-beveiliging. Als we net van de lader komen, rijden we eerst naar voren -->
-        <Fallback name="UndockIfNeeded">
-          <IsRobotClearFromDock/>    <!-- Condition: Staan we vrij van de laadpaal? -->
-          <ExecuteUndockDrive/>      <!-- Action: Stuurt "STOP" naar docking / rijdt stukje naar voren -->
-        </Fallback>
 
-        <!-- STAP 2: Werkzone-waakvlag. Zorgen dat we in de juiste zone rijden -->
-        <Fallback name="EnsureWorkingZone">
-          <IsRobotAtWorkArea/>       <!-- Condition: Zijn we fysiek in de werkzone? -->
-          <SendDriveWorkArea/>       <!-- Action: Nav2 doel naar de ingang van de werkzone -->
-        </Fallback>
-
-        <!-- STAP 3: Mission Control (Quizflow vs Bezoekers werven) -->
-        <Fallback name="MissionControl">
-          
-          <!-- TAK A: Er is op 'START' gedrukt op de Pi -> Quiz-modus activeert -->
-          <Sequence name="QuizPreparationAndExecution">
-            <WantToStartQuiz/>       <!-- Condition: True zodra startknop via socket binnenkomt -->
-            
-            <!-- Navigatie naar de quiz: Probeer A, faalt A (bezet)? Probeer B -->
-            <Fallback name="NavigateToQuizLocation">
-              <IsRobotAtQuiz/>       <!-- Condition: Staan we al op het eindpunt? -->
-              <Fallback name="LocationSelector">
-                <SendDriveQuizLocationA/> <!-- Action: Nav2 doel naar primaire quizlocatie -->
-                <SendDriveQuizLocationB/> <!-- Action: Nav2 doel naar reserve quizlocatie -->
-              </Fallback>
-            </Fallback>
-
-            <!-- Aankomst = Quiz start. Blokkeert de robot (Twist=0) en geeft RUNNING zolang de quiz bezig is -->
-            <ExecuteActiveQuiz/> 
-          </Sequence>
-
-          <!-- TAK B: Stand-by / Mensen werven (Alleen actief als Tak A faalt / geen actieve quiz) -->
-          <Sequence name="WervingsFlow">
-            <RobotExplore/>            <!-- Action: Ronddraaien en kijken in de werkzone -->
-            <StartDrivingToPeople/>    <!-- Action: Naar gespotte bezoekers toe rijden -->
-            <CheckingNearbyVisitors/>  <!-- Action: Uitnodiging op scherm tonen via state manager -->
-            <RobotRotationFollowMe/>   <!-- Action: Interactie en rotatie bij de bezoekers -->
-          </Sequence>
-
-        </Fallback>
+      <!-- ========================================= -->
+      <!-- ROBOT STAAT REEDS AAN DE LADER            -->
+      <!-- ========================================= -->
+      <Sequence name="AlreadyCharging">
+        <!-- Hangt de robot fysiek aan de lader? -->
+        <IsRobotCharging/>
+        <!-- Is de robot momenteel INACTIEF? (Indien actief gemaakt met de knop, faalt deze tak) -->
+        <Inverter>
+          <CheckRobotActive/>
+        </Inverter>
+        <!-- Zolang hij laadt en inactief is, blijft hij hier hangen -->
+        <SetRobotInactive/>
       </Sequence>
 
-      <!-- ========================================================= -->
-      <!-- HOOFDFLOW 2: LAADPROCEDURE (GEEN WERKSTATUS OF BATTERIJ LEEG) -->
-      <!-- ========================================================= -->
+      <!-- ========================================= -->
+      <!-- AUTONOME MISSIE                           -->
+      <!-- ========================================= -->
+      <ReactiveSequence name="AutonomeMissie">
+        <CheckRobotActive/>
+        <BatteryOk/>
+
+        <!-- Indien nog tegen de laadpaal, rijd er eerst vandaan -->
+        <Fallback name="UndockIfNeeded">
+          <IsRobotClearFromDock/>
+          <ExecuteUndockDrive/>
+        </Fallback>
+
+        <!-- Naar werkzone indien nodig -->
+        <Fallback name="EnsureWorkingZone">
+          <IsRobotAtWorkArea/>
+          <SendDriveWorkArea/>
+        </Fallback>
+
+        <!-- Missielogica -->
+        <Fallback name="MissionControl">
+
+          <!-- 1. QUIZ (Allerhoogste prioriteit) -->
+          <ReactiveSequence name="QuizPreparationAndExecution">
+            <WantToStartQuiz/>
+            <Fallback name="NavigateToQuizLocation">
+              <IsRobotAtQuiz/>
+              <Fallback name="LocationSelector">
+                <SendDriveQuizLocationA/>
+                <SendDriveQuizLocationB/>
+              </Fallback>
+            </Fallback>
+            <ExecuteActiveQuiz/>
+          </ReactiveSequence>
+
+          <!-- 2. MENS DETECTIE (Prioriteit over reguliere patrouille) -->
+          <ReactiveSequence name="InteractieMetBezoekers">
+            <IsPersonDetected/>
+            <Sequence name="WervingsFlow">
+              <StartDrivingToPeople/>
+              <CheckingNearbyVisitors/>
+              <RobotRotationFollowMe/>
+            </Sequence>
+          </ReactiveSequence>
+
+          <!-- 3. PATROUILLE LUS (C -> D -> E) -->
+          <!-- Gewone Sequence zorgt voor een reset naar punt C na een onderbreking/quiz -->
+          <Sequence name="WervingsPatrouille">
+            
+            <!-- ROUTE EN 20 SEC WACHTEN OP PUNT C -->
+            <ForceSuccess>
+              <Fallback name="AfhandelingPuntC">
+                <Sequence name="WachtOpC">
+                  <IsRobotAtLocationC/>
+                  <Delay delay_msec="20000">
+                    <AlwaysSuccess/>
+                  </Delay>
+                </Sequence>
+                <SendDriveLocationC/>
+              </Fallback>
+            </ForceSuccess>
+
+            <!-- ROUTE EN 20 SEC WACHTEN OP PUNT D -->
+            <ForceSuccess>
+              <Fallback name="AfhandelingPuntD">
+                <Sequence name="WachtOpD">
+                  <IsRobotAtLocationD/>
+                  <Delay delay_msec="20000">
+                    <AlwaysSuccess/>
+                  </Delay>
+                </Sequence>
+                <SendDriveLocationD/>
+              </Fallback>
+            </ForceSuccess>
+
+            <!-- ROUTE EN 20 SEC WACHTEN OP PUNT E -->
+            <ForceSuccess>
+              <Fallback name="AfhandelingPuntE">
+                <Sequence name="WachtOpE">
+                  <IsRobotAtLocationE/>
+                  <Delay delay_msec="20000">
+                    <AlwaysSuccess/>
+                  </Delay>
+                </Sequence>
+                <SendDriveLocationE/>
+              </Fallback>
+            </ForceSuccess>
+
+          </Sequence>
+
+        </Fallback>
+      </ReactiveSequence>
+
+      <!-- ========================================= -->
+      <!-- BATTERIJ ONVOLDOENDE                      -->
+      <!-- ========================================= -->
       <Sequence name="ExitFlow">
-        
-        <!-- STAP 1: Rij via Nav2 door de verboden zone naar de verzamelplek vlak voor het laadstation -->
         <Fallback name="NavigateToChargingArea">
-          <IsRobotNearChargingStation/> <!-- Condition: Staan we klaar voor de infrarood-paal? -->
-          <SendDriveToChargingArea/>   <!-- Action: Nav2 doel naar het punt vlak voor de paal -->
+          <IsRobotNearChargingStation/>
+          <SendDriveToChargingArea/>
         </Fallback>
-
-        <!-- STAP 2: Schakel Nav2 uit en start de fysieke infrarood docking-procedure -->
         <Fallback name="EnsureDocked">
-          <IsRobotCharging/>            <!-- Condition: Koppelvlak-check via batstatus.txt -->
-          <StartInfraroodDocking/>      <!-- Action: Stuurt "START" naar docking / krabt achteruit tegen de paal -->
+          <IsRobotCharging/>
+          <StartInfraroodDocking/>
         </Fallback>
-
-        <!-- STAP 3: Robot staat succesvol aan de lader en blokkeert hier dwingend -->
         <IsRobotCharging/>
+        <SetRobotInactive/>
       </Sequence>
 
     </Fallback>
   </BehaviorTree>
 
   <!-- ========================================================= -->
-  <!-- NODE MODELS (Voor directe compatibiliteit met Groot2)     -->
+  <!-- NODE MODELS                                               -->
   <!-- ========================================================= -->
   <TreeNodesModel>
-    <!-- Globale condities -->
     <Condition ID="CheckRobotActive"/>
     <Condition ID="BatteryOk"/>
-    
-    <!-- Undock & Werkzone -->
+    <Action ID="SetRobotInactive"/>
     <Condition ID="IsRobotClearFromDock"/>
     <Action ID="ExecuteUndockDrive"/>
     <Condition ID="IsRobotAtWorkArea"/>
     <Action ID="SendDriveWorkArea"/>
     
-    <!-- Quizflow -->
+    <!-- Quiz -->
     <Condition ID="WantToStartQuiz"/>
     <Condition ID="IsRobotAtQuiz"/>
     <Action ID="SendDriveQuizLocationA"/>
     <Action ID="SendDriveQuizLocationB"/>
     <Action ID="ExecuteActiveQuiz"/>
     
-    <!-- Wervingsflow -->
-    <Action ID="RobotExplore"/>
+    <!-- Mensen werven -->
+    <Condition ID="IsPersonDetected"/>
     <Action ID="StartDrivingToPeople"/>
     <Action ID="CheckingNearbyVisitors"/>
     <Action ID="RobotRotationFollowMe"/>
     
-    <!-- Laadflow -->
+    <!-- Patrouille -->
+    <Condition ID="IsRobotAtLocationC"/>
+    <Action ID="SendDriveLocationC"/>
+    <Condition ID="IsRobotAtLocationD"/>
+    <Action ID="SendDriveLocationD"/>
+    <Condition ID="IsRobotAtLocationE"/>
+    <Action ID="SendDriveLocationE"/>
+    
+    <!-- Laden -->
     <Condition ID="IsRobotNearChargingStation"/>
     <Action ID="SendDriveToChargingArea"/>
     <Condition ID="IsRobotCharging"/>
     <Action ID="StartInfraroodDocking"/>
   </TreeNodesModel>
 </root>
+
