@@ -15,7 +15,6 @@ def generate_launch_description():
     
     # Genereer de absolute paden naar de 3 Python scripts in de installatiemap
     bridge_script = os.path.join(pkg_share, '../../lib', package_name, 'quiz_socket_bridge.py')
-    manager_script = os.path.join(pkg_share, '../../lib', package_name, 'robot_state_manager.py')
     reader_script = os.path.join(pkg_share, '../../lib', package_name, 'status_reader.py')
     rt_drive_to_coord_script= os.path.join(pkg_share, '../../lib', package_name, 'rt_drive_to_coord.py')
 
@@ -57,16 +56,16 @@ def generate_launch_description():
         }
     )
 
-    # D. Robot State Manager (Gecorrigeerd met PYTHONPATH)
-    robot_state_manager_node = ExecuteProcess(
-        cmd=['python3', manager_script],
-        output='screen',
-        additional_env={
-            'PYTHONPATH': workspace_python_path
-        }
+    # D. AprilTag-poseherstel. De state manager start de reset zodra de
+    # camera- en batterijstatus beschikbaar zijn.
+    apriltag_node = Node(
+        package='april_tabloo',
+        executable='april_tabloo',
+        name='april_tabloo',
+        output='screen'
     )
 
-    # E. Status Reader (Gecorrigeerd met PYTHONPATH)
+    # E. Status Reader
     status_reader_node = ExecuteProcess(
         cmd=['python3', reader_script],
         output='screen',
@@ -75,7 +74,7 @@ def generate_launch_description():
         }
     )
     
-    # F. Drive_to_coord(Gecorrigeerd met PYTHONPATH)
+    # F. Drive_to_coord
     rt_drive_to_coord_node = ExecuteProcess(
         cmd=['python3', rt_drive_to_coord_script],
         output='screen',
@@ -84,13 +83,12 @@ def generate_launch_description():
         }
     )
 
-    # Voeg alle 5 de nodes samen in de ROS 2 Launch Description
+    # QuizSocketBridge start zelf de RobotStateManager.
     return LaunchDescription([
         robot_controller_node,
         behavior_tree_node,
         quiz_socket_bridge_node,
-        robot_state_manager_node,
+        apriltag_node,
         status_reader_node,
         rt_drive_to_coord_node
     ])
-

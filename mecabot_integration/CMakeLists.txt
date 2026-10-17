@@ -51,6 +51,7 @@ install(TARGETS
 install(PROGRAMS
   scripts/quiz_socket_bridge.py
   scripts/robot_state_manager.py
+  scripts/rt_auto_recharger.py
   scripts/status_reader.py
   DESTINATION lib/${PROJECT_NAME}
 )
@@ -73,4 +74,3 @@ if(BUILD_TESTING)
 endif()
 
 ament_package()
-

@@ -12,23 +12,60 @@
 //  1. ACTION NODES (Acties)
 // =========================================================================
 
-class ExecuteUndockDrive : public BT::SyncActionNode {
+class ExecuteUndockDrive : public BT::StatefulActionNode {
 public:
-    // GECORRIGEERD: BT::NodeConfig veranderd naar BT::NodeConfiguration
     ExecuteUndockDrive(const std::string& name, const BT::NodeConfiguration& config, rclcpp::Node::SharedPtr node)
-        : BT::SyncActionNode(name, config), node_(node) {
-        pub_ = node_->create_publisher<std_msgs::msg::String>("/DockingCommand", 10);
+        : BT::StatefulActionNode(name, config), node_(std::move(node)) {
+        pub_ = node_->create_publisher<std_msgs::msg::String>("/charge_XSTOP", 10);
+        event_sub_ = node_->create_subscription<std_msgs::msg::String>(
+            "/auto_recharge_event", 10,
+            [this](std_msgs::msg::String::SharedPtr msg) {
+                if (msg->data.size() >= std::string("ROBOT-UNDOCKED").size() &&
+                    msg->data.compare(
+                        msg->data.size() - std::string("ROBOT-UNDOCKED").size(),
+                        std::string("ROBOT-UNDOCKED").size(),
+                        "ROBOT-UNDOCKED") == 0) {
+                    undocked_ = true;
+                }
+            });
     }
     static BT::PortsList providedPorts() { return {}; }
-    BT::NodeStatus tick() override {
+    BT::NodeStatus onStart() override {
+        undocked_ = false;
         std_msgs::msg::String msg;
-        msg.data = "STOP"; 
+        msg.data = "XSTOPS";
         pub_->publish(msg);
-        return BT::NodeStatus::SUCCESS;
+        start_time_ = std::chrono::steady_clock::now();
+        RCLCPP_INFO(node_->get_logger(), "Loskoppelen van het laadstation gestart.");
+        return BT::NodeStatus::RUNNING;
+    }
+
+    BT::NodeStatus onRunning() override {
+        if (undocked_) {
+            RCLCPP_INFO(node_->get_logger(), "Robot is los van het laadstation.");
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        if (std::chrono::steady_clock::now() - start_time_ >= timeout_) {
+            RCLCPP_ERROR(
+                node_->get_logger(),
+                "Timeout: geen bevestiging ontvangen dat de robot los is van het laadstation.");
+            return BT::NodeStatus::FAILURE;
+        }
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override {
+        RCLCPP_WARN(node_->get_logger(), "Loskoppelactie afgebroken.");
     }
 private:
     rclcpp::Node::SharedPtr node_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr event_sub_;
+    bool undocked_{false};
+    std::chrono::steady_clock::time_point start_time_;
+    const std::chrono::seconds timeout_{15};
 };
 
 class SetRobotInactive : public BT::SyncActionNode
@@ -502,28 +539,76 @@ private:
     const std::chrono::seconds timeout_{120};
 };
 
-class StartInfraroodDocking : public BT::ActionNodeBase {
+class StartInfraroodDocking : public BT::StatefulActionNode {
 public:
     StartInfraroodDocking(const std::string& name, const BT::NodeConfiguration& config, rclcpp::Node::SharedPtr node)
-        : BT::ActionNodeBase(name, config), node_(node) {
-        pub_ = node_->create_publisher<std_msgs::msg::String>("/DockingCommand", 10);
+        : BT::StatefulActionNode(name, config), node_(std::move(node)) {
+        pub_ = node_->create_publisher<std_msgs::msg::String>("/force_charge", 10);
+        charging_sub_ = node_->create_subscription<std_msgs::msg::Bool>(
+            "/IsRobotCharging", 10,
+            [this](std_msgs::msg::Bool::SharedPtr msg) {
+                charging_ = msg->data;
+            });
+        event_sub_ = node_->create_subscription<std_msgs::msg::String>(
+            "/auto_recharge_event", 10,
+            [this](std_msgs::msg::String::SharedPtr msg) {
+                constexpr char failure_event[] = "DOCKING-FAILED";
+                if (msg->data.size() >= sizeof(failure_event) - 1 &&
+                    msg->data.compare(
+                        msg->data.size() - (sizeof(failure_event) - 1),
+                        sizeof(failure_event) - 1,
+                        failure_event) == 0) {
+                    docking_failed_ = true;
+                }
+            });
     }
     static BT::PortsList providedPorts() { return {}; }
     
-    BT::NodeStatus tick() override {
+    BT::NodeStatus onStart() override {
+        charging_ = false;
+        docking_failed_ = false;
+        start_time_ = std::chrono::steady_clock::now();
+
         std_msgs::msg::String msg;
-        msg.data = "START"; 
+        msg.data = "0START";
         pub_->publish(msg);
-        
-        // Dit mag nu legaal RUNNING teruggeven zonder crash!
-        return BT::NodeStatus::RUNNING; 
+
+        RCLCPP_INFO(node_->get_logger(), "IR-docking gestart via /force_charge.");
+        return BT::NodeStatus::RUNNING;
     }
-    void halt() override {
-        RCLCPP_INFO(node_->get_logger(), "Docking procedure onderbroken.");
+
+    BT::NodeStatus onRunning() override {
+        if (charging_) {
+            RCLCPP_INFO(node_->get_logger(), "Laden bevestigd; IR-docking geslaagd.");
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        if (docking_failed_) {
+            RCLCPP_ERROR(node_->get_logger(), "IR-docking is mislukt.");
+            return BT::NodeStatus::FAILURE;
+        }
+
+        if (std::chrono::steady_clock::now() - start_time_ >= timeout_) {
+            RCLCPP_ERROR(node_->get_logger(), "Timeout tijdens IR-docking.");
+            return BT::NodeStatus::FAILURE;
+        }
+
+        return BT::NodeStatus::RUNNING;
     }
+
+    void onHalted() override {
+        RCLCPP_WARN(node_->get_logger(), "IR-dockingactie afgebroken.");
+    }
+
 private:
     rclcpp::Node::SharedPtr node_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr charging_sub_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr event_sub_;
+    bool charging_{false};
+    bool docking_failed_{false};
+    std::chrono::steady_clock::time_point start_time_;
+    const std::chrono::seconds timeout_{200};
 };
 
 // Dummy of placeholder acties voor de wervingsflow
@@ -644,9 +729,45 @@ DEFINE_WAYPOINT_ACTION(
 DEFINE_WAYPOINT_ACTION(
     SendDriveLocationE, "DRIVE_TO_LOCATION_E", "/IsRobotAtLocationE")
 
+class RobotStateReady : public BT::ConditionNode
+{
+public:
+    RobotStateReady(
+        const std::string& name,
+        const BT::NodeConfiguration& config,
+        rclcpp::Node::SharedPtr node)
+        : BT::ConditionNode(name, config),
+          node_(std::move(node))
+    {
+        auto qos = rclcpp::QoS(1).transient_local();
+        status_sub_ = node_->create_subscription<std_msgs::msg::Bool>(
+            "/IsRobotStateReady",
+            qos,
+            [this](std_msgs::msg::Bool::SharedPtr msg)
+            {
+                ready_ = msg->data;
+            });
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {};
+    }
+
+    BT::NodeStatus tick() override
+    {
+        return ready_ ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
+    }
+
+private:
+    rclcpp::Node::SharedPtr node_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr status_sub_;
+    bool ready_{false};
+};
+
 DEFINE_CONDITION_NODE(CheckRobotActive, "/IsRobotActive")
 DEFINE_CONDITION_NODE(BatteryOk, "/IsBatteryOK")
-DEFINE_CONDITION_NODE(IsRobotClearFromDock, "/IsLocalizationValid") 
+DEFINE_CONDITION_NODE(IsRobotDocked, "/IsRobotDocked")
 DEFINE_CONDITION_NODE(IsRobotAtWorkArea, "/IsRobotAtWorkArea")
 DEFINE_CONDITION_NODE(WantToStartQuiz, "/WantToStartQuiz") 
 DEFINE_CONDITION_NODE(IsRobotAtQuiz, "/IsRobotAtQuiz")
@@ -693,7 +814,8 @@ int main(int argc, char **argv)
     // Registreer alle Condities
     REGISTER_BT_NODE(CheckRobotActive)
     REGISTER_BT_NODE(BatteryOk)
-    REGISTER_BT_NODE(IsRobotClearFromDock)
+    REGISTER_BT_NODE(IsRobotDocked)
+    REGISTER_BT_NODE(RobotStateReady)
     REGISTER_BT_NODE(IsRobotAtWorkArea)
     REGISTER_BT_NODE(WantToStartQuiz)
     REGISTER_BT_NODE(IsRobotAtQuiz)

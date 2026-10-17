@@ -5,12 +5,13 @@ ros2 launch mecabot_integration rt_robot_controller.launch.py
 ros2 launch mecabot_integration rt_behavior_tree.launch.py
 
 # 3. Start de Python Quiz Socket Bridge
+# De bridge start ook de Robot State Manager.
 ros2 launch mecabot_integration quiz_socket_bridge.launch.py
 
-# 4. Start de Python Robot State Manager
-#OPGELET: ROBOT STATE MANAGER DRAAIT ALS EEN PROCESS ONDER QUIZ_SOCKET_BRIDGE 
-#DUS NIET APART OPSTARTEN
-ros2 launch mecabot_integration robot_state_manager.launch.py
+# 4. Start de AprilTag detector/reset-node. De state manager vraagt zelf
+# de locatiereset aan; start robot_position_reset hierbij NIET, want die
+# heeft bij een mislukte tagdetectie een XSTOP-fallback.
+ros2 run april_tabloo april_tabloo
 
 # 5. Start de Python Status Reader
 ros2 launch mecabot_integration status_reader.launch.py
@@ -44,4 +45,3 @@ cd /home/wheeltec/wheeltec_ros2/
 colcon build --packages-select wheeltec_robot_msg
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-

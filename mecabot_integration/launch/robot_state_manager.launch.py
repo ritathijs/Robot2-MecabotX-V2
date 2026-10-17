@@ -3,6 +3,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import ExecuteProcess
+from launch_ros.actions import Node
 
 def generate_launch_description():
     package_name = 'mecabot_integration'
@@ -13,6 +14,12 @@ def generate_launch_description():
     workspace_python_path = "/home/wheeltec/wheeltec_ros2/install/wheeltec_robot_msg/local/lib/python3.10/dist-packages:" + current_python_path
 
     return LaunchDescription([
+        Node(
+            package='april_tabloo',
+            executable='april_tabloo',
+            name='april_tabloo',
+            output='screen'
+        ),
         ExecuteProcess(
             cmd=['python3', script_path],
             output='screen',
@@ -21,5 +28,4 @@ def generate_launch_description():
             }
         )
     ])
-
 

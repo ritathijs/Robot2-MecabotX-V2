@@ -9,13 +9,14 @@ from typing import Any
 import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
 from rclpy.node import Node
-from std_msgs.msg import Bool, Float32, String
+from rclpy.qos import DurabilityPolicy, QoSProfile
+from std_msgs.msg import Bool, Float32, String, UInt8
 from wheeltec_robot_msg.srv import GetRobotState
 
 
 @dataclass
 class RobotState:
-    robot_active: bool = True
+    robot_active: bool = False
     quiz_active: bool = False
     quiz_finished: bool = False
 
@@ -23,10 +24,15 @@ class RobotState:
     admin_login_open: bool = False
     network_ok: bool = True
 
-    battery_ok: bool = True
+    battery_ok: bool = False
     battery_voltage: float = 24.0
+    battery_status_received: bool = False
 
     docked: bool = False
+    charging_current: float = 0.0
+    charging_current_received: bool = False
+    infrared_detected: bool = False
+    infrared_status_received: bool = False
     at_station: bool = False
     charging: bool = False
 
@@ -37,6 +43,14 @@ class RobotState:
 
     localization_valid: bool = False
     received_amcl: bool = False
+    startup_location_resolved: bool = False
+    localization_recovery_requested: bool = False
+    localization_recovery_started_at: float | None = None
+    startup_pose_x: float | None = None
+    startup_pose_y: float | None = None
+    startup_reset_done_received: bool = False
+    startup_location_failed: bool = False
+    lost_screen_sent: bool = False
 
     at_quiz: bool = False
     at_work_area: bool = False
@@ -50,8 +64,17 @@ class RobotState:
 
 class RobotStateManager(Node):
     BATTERY_OK_THRESHOLD = 22.0
+    DOCKED_AVERAGE_VOLTAGE_THRESHOLD = 24.5
+    CHARGING_CURRENT_THRESHOLD = 0.1
     DRIVE_TIMEOUT_SEC = 0.4
     ESTOP_DURATION_SEC = 30.0
+    STARTUP_SENSOR_TIMEOUT_SEC = 30.0
+    LOCALIZATION_RECOVERY_TIMEOUT_SEC = 8.0
+    APRILTAG_LOCATION_ANCHORS = {
+        "work_area": (3.2080953121185303, -5.83170747756958),
+        "charging_area": (11.58133316040039, -15.486642837524414),
+    }
+    APRILTAG_LOCATION_RADIUS = 3.0
 
     # Koppel de namen die door de controller/BT gebruikt worden aan een
     # bestemming. De naam "follow-robot-screen" wordt door de huidige
@@ -83,6 +106,7 @@ class RobotStateManager(Node):
         self.last_drive_time: float | None = None
         self.estop_end_time: float | None = None
         self.estop_timer = None
+        self.startup_started_at = time.monotonic()
 
         # Uitgaande topics
         self.screen_pub = self.create_publisher(
@@ -90,6 +114,9 @@ class RobotStateManager(Node):
         )
         self.cmd_pub = self.create_publisher(
             String, "/robot_command", 10
+        )
+        self.localization_reset_pub = self.create_publisher(
+            String, "/reset_active", 10
         )
         self.drive_pub = self.create_publisher(
             Twist, "/cmd_vel", 10
@@ -120,6 +147,16 @@ class RobotStateManager(Node):
         )
         self.charging_pub = self.create_publisher(
             Bool, "/IsRobotCharging", 10
+        )
+        self.docked_pub = self.create_publisher(
+            Bool, "/IsRobotDocked", 10
+        )
+        readiness_qos = QoSProfile(
+            depth=1,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+        )
+        self.robot_state_ready_pub = self.create_publisher(
+            Bool, "/IsRobotStateReady", readiness_qos
         )
         self.robot_active_pub = self.create_publisher(
             Bool, "/IsRobotActive", 10
@@ -165,9 +202,15 @@ class RobotStateManager(Node):
             10,
         )
         self.create_subscription(
-            Bool,
-            "/dock_state",
-            self.on_docked,
+            Float32,
+            "/robot_charging_current",
+            self.on_charging_current,
+            10,
+        )
+        self.create_subscription(
+            UInt8,
+            "/robot_red_flag",
+            self.on_infrared_status,
             10,
         )
         self.create_subscription(
@@ -180,6 +223,12 @@ class RobotStateManager(Node):
             PoseWithCovarianceStamped,
             "/amcl_pose",
             self.on_amcl,
+            10,
+        )
+        self.create_subscription(
+            PoseWithCovarianceStamped,
+            "/initialpose",
+            self.on_startup_initial_pose,
             10,
         )
         self.create_subscription(
@@ -224,6 +273,10 @@ class RobotStateManager(Node):
             0.1,
             self._manual_drive_timeout_check,
         )
+        self.startup_recovery_timer = self.create_timer(
+            0.1,
+            self._startup_location_check,
+        )
 
         self._publish_status_snapshot()
         self.get_logger().info("RobotStateManager gestart.")
@@ -245,11 +298,17 @@ class RobotStateManager(Node):
             at_work_area = self.state.at_work_area
             at_station = self.state.at_station
             charging = self.state.charging
+            docked = self.state.docked
             robot_active = self.state.robot_active
             battery_ok = self.state.battery_ok
             at_location_c = self.state.at_location_c
             at_location_d = self.state.at_location_d
             at_location_e = self.state.at_location_e
+            startup_sensors_ready = self._startup_sensors_ready_locked()
+            robot_state_ready = (
+                startup_sensors_ready
+                and self.state.startup_location_resolved
+            )
 
         self.localization_pub.publish(
             self._bool_message(localization_valid)
@@ -265,6 +324,10 @@ class RobotStateManager(Node):
         self.charging_station_legacy_pub.publish(station_msg)
 
         self.charging_pub.publish(self._bool_message(charging))
+        self.docked_pub.publish(self._bool_message(docked))
+        self.robot_state_ready_pub.publish(
+            self._bool_message(robot_state_ready)
+        )
         self.robot_active_pub.publish(self._bool_message(robot_active))
         self.battery_ok_pub.publish(self._bool_message(battery_ok))
         self.battery_low_pub.publish(self._bool_message(not battery_ok))
@@ -287,6 +350,8 @@ class RobotStateManager(Node):
         with self.lock:
             self.state.battery_voltage = voltage
             self.state.battery_ok = voltage >= self.BATTERY_OK_THRESHOLD
+            self.state.battery_status_received = True
+            self._update_dock_status_locked()
 
         self._publish_status_snapshot()
 
@@ -298,9 +363,143 @@ class RobotStateManager(Node):
         with self.lock:
             self.state.in_working_zone = msg.data
 
-    def on_docked(self, msg: Bool) -> None:
+    def on_charging_current(self, msg: Float32) -> None:
         with self.lock:
-            self.state.docked = msg.data
+            self.state.charging_current = float(msg.data)
+            self.state.charging_current_received = True
+            self._update_dock_status_locked()
+        self._publish_status_snapshot()
+
+    def on_infrared_status(self, msg: UInt8) -> None:
+        with self.lock:
+            self.state.infrared_detected = msg.data > 0
+            self.state.infrared_status_received = True
+            self._update_dock_status_locked()
+        self._publish_status_snapshot()
+
+    def _update_dock_status_locked(self) -> None:
+        self.state.charging = (
+            self.state.charging_current > self.CHARGING_CURRENT_THRESHOLD
+        )
+        self.state.docked = self.state.charging or (
+            self.state.battery_status_received
+            and self.state.battery_voltage
+            >= self.DOCKED_AVERAGE_VOLTAGE_THRESHOLD
+            and self.state.infrared_detected
+        )
+
+        if self.state.docked:
+            self.state.localization_valid = True
+            self.state.at_station = True
+
+    def _startup_sensors_ready_locked(self) -> bool:
+        return (
+            self.state.battery_status_received
+            and self.state.charging_current_received
+            and (
+                self.state.infrared_status_received
+                or self.state.charging_current
+                > self.CHARGING_CURRENT_THRESHOLD
+            )
+        )
+
+    def _startup_location_check(self) -> None:
+        now = time.monotonic()
+        publish_snapshot = False
+        request_reset = False
+        show_lost_screen = False
+
+        with self.lock:
+            if self.state.startup_location_resolved:
+                if (
+                    self.state.startup_location_failed
+                    and not self.state.lost_screen_sent
+                    and self.cmd_pub.get_subscription_count() > 0
+                ):
+                    self.state.lost_screen_sent = True
+                    show_lost_screen = True
+                else:
+                    return
+            elif self.state.startup_location_failed:
+                if (
+                    not self.state.lost_screen_sent
+                    and self.cmd_pub.get_subscription_count() > 0
+                ):
+                    self.state.lost_screen_sent = True
+                    show_lost_screen = True
+                else:
+                    return
+            else:
+                sensors_ready = self._startup_sensors_ready_locked()
+
+                if sensors_ready:
+                    self._update_dock_status_locked()
+
+                    if self.state.docked:
+                        self.state.at_station = True
+                        self.state.at_work_area = False
+                        self.state.at_quiz = False
+                        self.state.at_location_c = False
+                        self.state.at_location_d = False
+                        self.state.at_location_e = False
+                        self.state.localization_valid = True
+                        self.state.startup_location_resolved = True
+                        self.state.robot_active = False
+                        publish_snapshot = True
+                    elif not self.state.localization_recovery_requested:
+                        if (
+                            self.localization_reset_pub.get_subscription_count()
+                            > 0
+                        ):
+                            msg = String()
+                            msg.data = "active"
+                            self.localization_reset_pub.publish(msg)
+                            self.state.localization_recovery_requested = True
+                            self.state.localization_recovery_started_at = now
+                            request_reset = True
+                        elif (
+                            now - self.startup_started_at
+                            >= self.STARTUP_SENSOR_TIMEOUT_SEC
+                        ):
+                            self.state.startup_location_failed = True
+                            self.state.robot_active = False
+                            publish_snapshot = True
+                    elif (
+                        self.state.localization_recovery_started_at is not None
+                        and now - self.state.localization_recovery_started_at
+                        >= self.LOCALIZATION_RECOVERY_TIMEOUT_SEC
+                    ):
+                        self.state.startup_location_failed = True
+                        self.state.robot_active = False
+                        publish_snapshot = True
+                elif (
+                    now - self.startup_started_at
+                    >= self.STARTUP_SENSOR_TIMEOUT_SEC
+                ):
+                    self.state.startup_location_failed = True
+                    self.state.robot_active = False
+                    publish_snapshot = True
+
+                if (
+                    self.state.startup_location_failed
+                    and not self.state.lost_screen_sent
+                    and self.cmd_pub.get_subscription_count() > 0
+                ):
+                    self.state.lost_screen_sent = True
+                    show_lost_screen = True
+
+        if request_reset:
+            self.get_logger().info(
+                "Geen dockstatus bij opstart; AprilTag-lokalisatie aangevraagd."
+            )
+        if publish_snapshot:
+            self._publish_status_snapshot()
+        if show_lost_screen:
+            self.send_robot_command("SHOW_LOST_SCREEN")
+            self.get_logger().error(
+                "Startlocatie kon niet worden vastgesteld; "
+                "de Behavior Tree blijft geblokkeerd."
+            )
 
     def on_robot_active(self, msg: Bool) -> None:
         with self.lock:
@@ -323,7 +522,7 @@ class RobotStateManager(Node):
         with self.lock:
             self.state.received_amcl = True
             self.state.localization_valid = (
-                amcl_good
+                (amcl_good and self.state.startup_location_resolved)
                 or self.state.at_station
                 or self.state.charging
             )
@@ -341,30 +540,126 @@ class RobotStateManager(Node):
             return
 
         with self.lock:
-            self.state.localization_valid = True
+            if (
+                not self.state.localization_recovery_requested
+                or self.state.docked
+                or self.state.startup_location_failed
+            ):
+                self.get_logger().warning(
+                    "AprilTag-resetbevestiging genegeerd: "
+                    "er is geen actieve opstart-reset."
+                )
+                return
+
+            self.state.startup_reset_done_received = True
+            location = self._resolve_startup_location_locked()
 
         self._publish_status_snapshot()
-        self.get_logger().info(
-            "[Localization] Reset bevestigd; lokalisatie geldig."
-        )
+        if location is None:
+            self.get_logger().info(
+                "[Localization] AprilTag-reset bevestigd; "
+                "wachten op de berekende robotpose."
+            )
+        elif location == "unknown":
+            self.get_logger().error(
+                "[Localization] AprilTag-pose ligt niet binnen 3 m van "
+                "een bekende werk- of laadzone; robot blijft geblokkeerd."
+            )
+        else:
+            self.get_logger().info(
+                f"[Localization] AprilTag-reset bevestigd; "
+                f"startlocatie vastgesteld als {location}."
+            )
+
+    def on_startup_initial_pose(
+        self,
+        msg: PoseWithCovarianceStamped,
+    ) -> None:
+        with self.lock:
+            if (
+                not self.state.localization_recovery_requested
+                or self.state.startup_location_resolved
+                or self.state.startup_location_failed
+            ):
+                return
+
+            self.state.startup_pose_x = float(msg.pose.pose.position.x)
+            self.state.startup_pose_y = float(msg.pose.pose.position.y)
+            if not self.state.startup_reset_done_received:
+                return
+
+            location = self._resolve_startup_location_locked()
+
+        self._publish_status_snapshot()
+        if location == "unknown":
+            self.get_logger().error(
+                "[Localization] AprilTag-pose ligt niet binnen 3 m van "
+                "een bekende werk- of laadzone; robot blijft geblokkeerd."
+            )
+        elif location is not None:
+            self.get_logger().info(
+                f"[Localization] AprilTag-pose vastgesteld als {location}."
+            )
+
+    def _resolve_startup_location_locked(self) -> str | None:
+        if (
+            not self.state.startup_reset_done_received
+            or self.state.startup_pose_x is None
+            or self.state.startup_pose_y is None
+        ):
+            return None
+
+        distances = {
+            location: math.hypot(
+                self.state.startup_pose_x - anchor_x,
+                self.state.startup_pose_y - anchor_y,
+            )
+            for location, (anchor_x, anchor_y)
+            in self.APRILTAG_LOCATION_ANCHORS.items()
+        }
+        location = min(distances, key=distances.get)
+        if distances[location] > self.APRILTAG_LOCATION_RADIUS:
+            self.state.startup_location_failed = True
+            self.state.robot_active = False
+            return "unknown"
+
+        self.state.localization_valid = True
+        self.state.startup_location_resolved = True
+        self.state.at_station = location == "charging_area"
+        self.state.at_work_area = location == "work_area"
+        self.state.at_quiz = False
+        self.state.at_location_c = False
+        self.state.at_location_d = False
+        self.state.at_location_e = False
+        self.state.active_destination = None
+        return location
 
     def on_recharge_event(self, msg: String) -> None:
         event = msg.data
         self.get_logger().info(f"[Docking] Event ontvangen: {event}")
 
         with self.lock:
-            if "DRIVE-TO-DOCK-SUCCESS" in event:
+            if event.endswith("DRIVE-TO-DOCK-SUCCESS"):
                 self.state.at_station = True
                 self.state.localization_valid = True
 
-            elif "ROBOT-CHARGING" in event:
+            elif event.endswith("ROBOT-CHARGING"):
                 self.state.charging = True
                 self.state.at_station = True
                 self.state.docked = True
                 self.state.robot_active = False
                 self.state.localization_valid = True
+                self.state.startup_location_resolved = True
 
-            elif "DOCK-FAILED" in event:
+            elif event.endswith("ROBOT-CHARGING-STOPPED"):
+                self.state.charging = False
+
+            elif event.endswith("ROBOT-UNDOCKED"):
+                self.state.charging = False
+                self.state.docked = False
+                self.state.at_station = False
+
+            elif event.endswith("DOCKING-FAILED") or event.endswith("DOCK-FAILED"):
                 self.state.at_station = False
                 self.state.docked = False
                 self.state.charging = False
@@ -388,6 +683,7 @@ class RobotStateManager(Node):
                 self.state.at_work_area = False
             elif destination == "charging_station":
                 self.state.at_station = False
+                self.state.at_work_area = False
             elif destination == "location_c":
                 self.state.at_location_c = False
             elif destination == "location_d":

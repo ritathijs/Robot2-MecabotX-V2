@@ -475,6 +475,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                 had_active_session = self.force_charge_active
 
                 self.force_charge_active = False
+                self.stop_processed = True
                 # Dit is een expliciet stopbericht: als de laadstroom
                 # hierdoor wegvalt, mag de disconnect callback niet retryen.
                 self.stop_requested = True
@@ -490,8 +491,10 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                 print_and_fixRetract(
                     GREEN + f"Volledige stop (XSTOP/XSTOPS). Naar voor rijden: {drive_forward}." + RESET
                 )
-
                 self.Stop_Charge(drive_forward=drive_forward)
+                self.write_laadstatus("LOS")
+                self.write_laadcyclus("LOS")
+                self.publish_event("ROBOT-UNDOCKED")
 
             else:
                 print_and_fixRetract(
@@ -713,6 +716,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             
             # self.publish_docking_status("DOCKING_DISABLED")
             print_and_fixRetract(YELLOW + "Charging disconnected!" + RESET)
+            self.publish_event("ROBOT-CHARGING-STOPPED")
 
             # Als de laadstroom wegvalt zonder dat een STOP/XSTOP is
             # aangevraagd, is de robot fysiek losgekomen van het station.

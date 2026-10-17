@@ -2,7 +2,9 @@
 <root BTCPP_format="3" main_tree_to_execute="MainTree">
 
   <BehaviorTree ID="MainTree">
-    <Fallback name="GlobalSafetyFallback">
+    <Sequence name="WaitForInitialRobotState">
+      <RobotStateReady/>
+      <Fallback name="GlobalSafetyFallback">
 
       <!-- ========================================= -->
       <!-- ROBOT STAAT REEDS AAN DE LADER            -->
@@ -27,7 +29,9 @@
 
         <!-- Indien nog tegen de laadpaal, rijd er eerst vandaan -->
         <Fallback name="UndockIfNeeded">
-          <IsRobotClearFromDock/>
+          <Inverter>
+            <IsRobotDocked/>
+          </Inverter>
           <ExecuteUndockDrive/>
         </Fallback>
 
@@ -115,6 +119,14 @@
       <!-- BATTERIJ ONVOLDOENDE                      -->
       <!-- ========================================= -->
       <Sequence name="ExitFlow">
+        <Fallback name="ExitRequested">
+          <Inverter>
+            <CheckRobotActive/>
+          </Inverter>
+          <Inverter>
+            <BatteryOk/>
+          </Inverter>
+        </Fallback>
         <Fallback name="NavigateToChargingArea">
           <IsRobotNearChargingStation/>
           <SendDriveToChargingArea/>
@@ -127,7 +139,8 @@
         <SetRobotInactive/>
       </Sequence>
 
-    </Fallback>
+      </Fallback>
+    </Sequence>
   </BehaviorTree>
 
   <!-- ========================================================= -->
@@ -137,7 +150,8 @@
     <Condition ID="CheckRobotActive"/>
     <Condition ID="BatteryOk"/>
     <Action ID="SetRobotInactive"/>
-    <Condition ID="IsRobotClearFromDock"/>
+    <Condition ID="IsRobotDocked"/>
+    <Condition ID="RobotStateReady"/>
     <Action ID="ExecuteUndockDrive"/>
     <Condition ID="IsRobotAtWorkArea"/>
     <Action ID="SendDriveWorkArea"/>
@@ -170,4 +184,3 @@
     <Action ID="StartInfraroodDocking"/>
   </TreeNodesModel>
 </root>
-
