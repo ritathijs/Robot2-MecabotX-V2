@@ -92,6 +92,9 @@ class RobotStateManager(Node):
         "DriveLocationC": "location_c",
         "DriveLocationD": "location_d",
         "DriveLocationE": "location_e",
+        "explore-location-c": "location_c",
+        "explore-location-d": "location_d",
+        "explore-location-e": "location_e",
     }
 
     def __init__(self):
@@ -607,21 +610,28 @@ class RobotStateManager(Node):
             return
 
         with self.lock:
-            if (
-                not self.state.localization_recovery_requested
-                or self.state.docked
-                or self.state.startup_location_failed
-            ):
-                self.get_logger().warning(
-                    "AprilTag-resetbevestiging genegeerd: "
-                    "er is geen actieve opstart-reset."
-                )
-                return
+            startup_reset_pending = (
+                self.state.localization_recovery_requested
+                and not self.state.startup_location_resolved
+                and not self.state.docked
+                and not self.state.startup_location_failed
+            )
 
-            self.state.startup_reset_done_received = True
-            location = self._resolve_startup_location_locked()
+            if startup_reset_pending:
+                self.state.startup_reset_done_received = True
+                location = self._resolve_startup_location_locked()
+            else:
+                self.state.localization_valid = True
+                location = None
 
         self._publish_status_snapshot()
+        if not startup_reset_pending:
+            self.get_logger().info(
+                "[Localization] AprilTag-posecorrectie tijdens normaal "
+                "gebruik bevestigd."
+            )
+            return
+
         if location is None:
             self.get_logger().info(
                 "[Localization] AprilTag-reset bevestigd; "
@@ -751,6 +761,11 @@ class RobotStateManager(Node):
             admin_open = self.state.admin_open
             self.state.active_destination = destination
 
+            if destination is not None:
+                self.state.at_location_c = False
+                self.state.at_location_d = False
+                self.state.at_location_e = False
+
             if destination == "quiz":
                 self.state.at_quiz = False
             elif destination == "work_area":
@@ -768,11 +783,10 @@ class RobotStateManager(Node):
         # In de huidige architectuur wordt dit topic ook gebruikt om
         # schermwissels naar de Pi door te geven. Dit behoudt dat gedrag.
         if not admin_open:
-            screen_name = (
-                "robot-startup"
-                if node_name == "DriveWorkArea"
-                else node_name
-            )
+            screen_name = "robot-startup" if (
+                node_name == "DriveWorkArea"
+                or node_name.startswith("explore-location-")
+            ) else node_name
             with self.lock:
                 self.state.last_screen = screen_name
 

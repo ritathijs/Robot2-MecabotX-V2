@@ -6,6 +6,11 @@
       <RobotStateReady/>
       <Fallback name="GlobalSafetyFallback">
 
+      <Sequence name="VerdwaaldDoorAprilTag">
+        <IsAprilTagLost/>
+        <HoldAprilTagLost/>
+      </Sequence>
+
       <!-- ========================================= -->
       <!-- ROBOT STAAT REEDS AAN DE LADER            -->
       <!-- ========================================= -->
@@ -89,6 +94,7 @@
               <Fallback name="AfhandelingPuntD">
                 <Sequence name="WachtOpD">
                   <IsRobotAtLocationD/>
+                  <CheckAprilTagAtLocationD/>
                   <Delay delay_msec="20000">
                     <AlwaysSuccess/>
                   </Delay>
@@ -102,6 +108,7 @@
               <Fallback name="AfhandelingPuntE">
                 <Sequence name="WachtOpE">
                   <IsRobotAtLocationE/>
+                  <CompletePatrolCycle/>
                   <Delay delay_msec="20000">
                     <AlwaysSuccess/>
                   </Delay>
@@ -152,6 +159,8 @@
     <Action ID="SetRobotInactive"/>
     <Condition ID="IsRobotDocked"/>
     <Condition ID="RobotStateReady"/>
+    <Condition ID="IsAprilTagLost"/>
+    <Action ID="HoldAprilTagLost"/>
     <Action ID="ExecuteUndockDrive"/>
     <Condition ID="IsRobotAtWorkArea"/>
     <Action ID="SendDriveWorkArea"/>
@@ -174,8 +183,10 @@
     <Action ID="SendDriveLocationC"/>
     <Condition ID="IsRobotAtLocationD"/>
     <Action ID="SendDriveLocationD"/>
+    <Action ID="CheckAprilTagAtLocationD"/>
     <Condition ID="IsRobotAtLocationE"/>
     <Action ID="SendDriveLocationE"/>
+    <Action ID="CompletePatrolCycle"/>
     
     <!-- Laden -->
     <Condition ID="IsRobotNearChargingStation"/>

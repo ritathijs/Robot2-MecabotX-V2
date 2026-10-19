@@ -6,6 +6,7 @@
 #include <std_msgs/msg/bool.hpp>
 #include <chrono>
 #include <atomic>
+#include <memory>
 #include <utility>
 
 // =========================================================================
@@ -96,6 +97,265 @@ public:
 
 private:
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr active_pub_;
+};
+
+struct AprilTagPatrolState
+{
+    bool tag_seen_since_cycle_completion{false};
+    bool lost{false};
+    unsigned int consecutive_cycles_without_tag{0};
+};
+
+class CheckAprilTagAtLocationD : public BT::StatefulActionNode
+{
+public:
+    CheckAprilTagAtLocationD(
+        const std::string& name,
+        const BT::NodeConfiguration& config,
+        rclcpp::Node::SharedPtr node,
+        std::shared_ptr<AprilTagPatrolState> patrol_state)
+        : BT::StatefulActionNode(name, config),
+          node_(std::move(node)),
+          patrol_state_(std::move(patrol_state))
+    {
+        reset_pub_ =
+            node_->create_publisher<std_msgs::msg::String>(
+                "/reset_active", 10);
+        result_sub_ =
+            node_->create_subscription<std_msgs::msg::String>(
+                "/reset_done",
+                10,
+                [this](std_msgs::msg::String::SharedPtr msg)
+                {
+                    if (!check_active_) {
+                        return;
+                    }
+
+                    if (msg->data == "done") {
+                        tag_found_ = true;
+                        patrol_state_->tag_seen_since_cycle_completion = true;
+                    } else if (msg->data == "not_found") {
+                        tag_missing_ = true;
+                    }
+                });
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {};
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        check_active_ = true;
+        tag_found_ = false;
+        tag_missing_ = false;
+        start_time_ = std::chrono::steady_clock::now();
+
+        std_msgs::msg::String msg;
+        msg.data = "active";
+        reset_pub_->publish(msg);
+
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "AprilTag-controle bij punt D gestart; maximaal 5 seconden.");
+        return BT::NodeStatus::RUNNING;
+    }
+
+    BT::NodeStatus onRunning() override
+    {
+        if (tag_found_) {
+            finish_check();
+            RCLCPP_INFO(
+                node_->get_logger(),
+                "AprilTag bij punt D gevonden; posecorrectie ontvangen.");
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        if (tag_missing_ ||
+            std::chrono::steady_clock::now() - start_time_ >= response_timeout_) {
+            finish_check();
+            RCLCPP_WARN(
+                node_->get_logger(),
+                "AprilTag niet gevonden bij punt D; deze ronde telt als "
+                "een gemiste controle.");
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override
+    {
+        finish_check();
+        RCLCPP_WARN(
+            node_->get_logger(),
+            "AprilTag-controle bij punt D afgebroken.");
+    }
+
+private:
+    void finish_check()
+    {
+        if (!check_active_) {
+            return;
+        }
+
+        check_active_ = false;
+        std_msgs::msg::String msg;
+        msg.data = "inactive";
+        reset_pub_->publish(msg);
+    }
+
+    rclcpp::Node::SharedPtr node_;
+    std::shared_ptr<AprilTagPatrolState> patrol_state_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr reset_pub_;
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr result_sub_;
+    bool check_active_{false};
+    bool tag_found_{false};
+    bool tag_missing_{false};
+    std::chrono::steady_clock::time_point start_time_;
+    const std::chrono::seconds response_timeout_{6};
+};
+
+class CompletePatrolCycle : public BT::StatefulActionNode
+{
+public:
+    CompletePatrolCycle(
+        const std::string& name,
+        const BT::NodeConfiguration& config,
+        rclcpp::Node::SharedPtr node,
+        std::shared_ptr<AprilTagPatrolState> patrol_state)
+        : BT::StatefulActionNode(name, config),
+          node_(std::move(node)),
+          patrol_state_(std::move(patrol_state)),
+          command_pub_(node_->create_publisher<std_msgs::msg::String>(
+              "/robot_command", 10))
+    {
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {};
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        if (patrol_state_->tag_seen_since_cycle_completion) {
+            patrol_state_->consecutive_cycles_without_tag = 0;
+            RCLCPP_INFO(
+                node_->get_logger(),
+                "Patrouilleronde voltooid: AprilTag gezien; "
+                "teller gemiste rondes teruggezet.");
+        } else {
+            ++patrol_state_->consecutive_cycles_without_tag;
+            RCLCPP_WARN(
+                node_->get_logger(),
+                "Patrouilleronde voltooid zonder AprilTag (%u/5).",
+                patrol_state_->consecutive_cycles_without_tag);
+        }
+        patrol_state_->tag_seen_since_cycle_completion = false;
+
+        if (patrol_state_->consecutive_cycles_without_tag < 5) {
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        RCLCPP_ERROR(
+            node_->get_logger(),
+            "Robot gestopt: gedurende vijf volledige C-D-E-rondes is geen "
+            "AprilTag gezien; verdwaald-status geactiveerd.");
+
+        patrol_state_->lost = true;
+        std_msgs::msg::String command;
+        command.data = "SHOW_LOST_SCREEN";
+        command_pub_->publish(command);
+        return BT::NodeStatus::RUNNING;
+    }
+
+    BT::NodeStatus onRunning() override
+    {
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override
+    {
+        RCLCPP_WARN(
+            node_->get_logger(),
+            "Afhandeling van de AprilTag-vermistestatus afgebroken.");
+    }
+
+private:
+    rclcpp::Node::SharedPtr node_;
+    std::shared_ptr<AprilTagPatrolState> patrol_state_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr command_pub_;
+};
+
+class IsAprilTagLost : public BT::ConditionNode
+{
+public:
+    IsAprilTagLost(
+        const std::string& name,
+        const BT::NodeConfiguration& config,
+        std::shared_ptr<AprilTagPatrolState> patrol_state)
+        : BT::ConditionNode(name, config),
+          patrol_state_(std::move(patrol_state))
+    {
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {};
+    }
+
+    BT::NodeStatus tick() override
+    {
+        return patrol_state_->lost
+            ? BT::NodeStatus::SUCCESS
+            : BT::NodeStatus::FAILURE;
+    }
+
+private:
+    std::shared_ptr<AprilTagPatrolState> patrol_state_;
+};
+
+class HoldAprilTagLost : public BT::StatefulActionNode
+{
+public:
+    HoldAprilTagLost(
+        const std::string& name,
+        const BT::NodeConfiguration& config,
+        rclcpp::Node::SharedPtr node)
+        : BT::StatefulActionNode(name, config),
+          node_(std::move(node))
+    {
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {};
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        RCLCPP_ERROR(
+            node_->get_logger(),
+            "BT blijft geblokkeerd: AprilTag-vermistestatus actief.");
+        return BT::NodeStatus::RUNNING;
+    }
+
+    BT::NodeStatus onRunning() override
+    {
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override
+    {
+        RCLCPP_WARN(
+            node_->get_logger(),
+            "AprilTag-vermistatus is door een BT-herstart verlaten.");
+    }
+
+private:
+    rclcpp::Node::SharedPtr node_;
 };
 
 class SendDriveWorkArea : public BT::StatefulActionNode
@@ -797,6 +1057,8 @@ int main(int argc, char **argv)
             return std::make_unique<ClassName>(name, config, bt_node); \
         });
 
+    auto april_tag_patrol_state = std::make_shared<AprilTagPatrolState>();
+
     // Registreer alle Acties
     REGISTER_BT_NODE(ExecuteUndockDrive)
     REGISTER_BT_NODE(SendDriveWorkArea)
@@ -810,6 +1072,31 @@ int main(int argc, char **argv)
     REGISTER_BT_NODE(CheckingNearbyVisitors)
     REGISTER_BT_NODE(RobotRotationFollowMe)
     REGISTER_BT_NODE(SetRobotInactive)
+    REGISTER_BT_NODE(HoldAprilTagLost)
+    factory.registerBuilder<CheckAprilTagAtLocationD>(
+        "CheckAprilTagAtLocationD",
+        [bt_node, april_tag_patrol_state](
+            const std::string& name,
+            const BT::NodeConfiguration& config) {
+            return std::make_unique<CheckAprilTagAtLocationD>(
+                name, config, bt_node, april_tag_patrol_state);
+        });
+    factory.registerBuilder<CompletePatrolCycle>(
+        "CompletePatrolCycle",
+        [bt_node, april_tag_patrol_state](
+            const std::string& name,
+            const BT::NodeConfiguration& config) {
+            return std::make_unique<CompletePatrolCycle>(
+                name, config, bt_node, april_tag_patrol_state);
+        });
+    factory.registerBuilder<IsAprilTagLost>(
+        "IsAprilTagLost",
+        [april_tag_patrol_state](
+            const std::string& name,
+            const BT::NodeConfiguration& config) {
+            return std::make_unique<IsAprilTagLost>(
+                name, config, april_tag_patrol_state);
+        });
 
     // Registreer alle Condities
     REGISTER_BT_NODE(CheckRobotActive)

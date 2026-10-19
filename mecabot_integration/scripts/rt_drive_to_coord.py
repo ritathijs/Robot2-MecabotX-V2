@@ -23,50 +23,19 @@ behavior_tree_nodes = {
 	# drive_action: "estop" / "release" / "behaviortree" / "peoplesearch"
 	# message_frequency: "always" / "once"
 
-	# --- Oplaad statussen ---
-	"DriveToChargingStation":	  {"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
-	"StatusDriveToChargingDock":	{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
-	"IsRobotCharging":			{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
-	"IsBatteryFull":				{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
-	"BatteryCharged":			  {"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
-	"RobotWaitInChargingStation":   {"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
-	"StopRobotCharging":			{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
-	"ManualDriving":				{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
-	"MDForceCharging":			{"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
+	# These names are published by robot_controller.cpp. Keepout changes only
+	# when crossing between the work area and the charging station.
+	"DriveWorkArea": {"keepoutfilter_on": "False", "drive_action": "behaviortree", "message_frequency": "always"},
+	"robot-go-charge": {"keepoutfilter_on": "False", "drive_action": "behaviortree", "message_frequency": "always"},
+	"robot-docking": {"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
 
+	"follow-robot-screen": {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always"},
+	"robot-arrived-at-quiz-location": {"keepoutfilter_on": "True", "drive_action": "release", "message_frequency": "once"},
+	"explore-location-c": {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always"},
+	"explore-location-d": {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always"},
+	"explore-location-e": {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always"},
+	"robot-error-drive": {"keepoutfilter_on": "none", "drive_action": "estop", "message_frequency": "always"},
 
-	"StartDrivingToPeople":			{"keepoutfilter_on": "True", "drive_action": "release", "message_frequency": "once"},
-
-	"RobotDriveToChargingStation":	{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "always"},
-	"RobotIsRobotAtChargingStation":   {"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "always"},
-
-	"FallbackDriveToChargingStation":	{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "always"},
-	"FallbackIsRobotAtChargingStation":   {"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "always"},
-
-	"CheckingNearbyVisitors":	{"keepoutfilter_on": "True", "drive_action": "release", "message_frequency": "once"},
-
-
-	# --- Behavior Tree doelen ---
-	"IsRobotAtQuiz":				{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "always"},
-	"IsRobotAtWorkArea":			{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "once"},
-	
-    "follow-robot-screen":          {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always",},
-
-	"FallbackDriveToWorkArea":			{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "always"},
-	"FallbackIsRobotAtWorkArea":			{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "always"},
-
-	"FallbackDriveQuizLocation":			{"keepoutfilter_on": "True",  "drive_action": "estop", "message_frequency": "always"},
-	"FallbackIsRobotAtQuiz":			{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "always"},
-    "DriveLocationC": {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always"},
-    "DriveLocationD": {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always"},
-    "DriveLocationE": {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always"},
-
-	# --- People Search doelen ---
-	"RobotRotationFollowMe":	  {"keepoutfilter_on": "True",  "drive_action": "peoplesearch", "message_frequency": "always"},
-
-	"DriveWorkArea":				{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "always"},
-	"DriveQuizLocation":			{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "always"},
-	"robot-arrived-at-quiz-location": {"keepoutfilter_on": "True", "drive_action": "release", "message_frequency": "once",},
 	# --- Default ---
 	"Default":					{"keepoutfilter_on": "none",  "drive_action": "estop", "message_frequency": "always"},
 }
@@ -176,10 +145,8 @@ class DriveToCoord(Node):
 		
 		if currentnode["keepoutfilter_on"] == "True": 
 			self.keepout_filter(True)
-			self.get_logger().info(f"BehaviorTreeNode ontvangen: '{self.last_BehaviorTreeNode}' → keepoutfilter aan")
 		elif currentnode["keepoutfilter_on"] == "False": 
 			self.keepout_filter(False)
-			self.get_logger().info(f"BehaviorTreeNode ontvangen: '{self.last_BehaviorTreeNode}' → keepoutfilter uit")
 			
 		if currentnode["drive_action"] == "estop":
 			self.emergencystop()
@@ -202,6 +169,8 @@ class DriveToCoord(Node):
 			msg = Bool()
 			msg.data = state
 			self.keepout_filter_pub.publish(msg)
+			mode = "aan" if state else "uit"
+			self.get_logger().info(f"Keepoutfilter omgeschakeld: {mode}")
 	
 	def emergencystop(self):
 		# Robot laten stoppen door 0 te sturen op /estop_cmd_vel
@@ -342,6 +311,4 @@ def main(args=None):
 
 if __name__ == '__main__':
 	main()
-
-
 

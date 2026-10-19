@@ -36,10 +36,8 @@ class AprilTagAbsolutePose(Node):
         # voordat we het opgeven i.p.v. voor altijd te blijven hangen.
         self.subscriber_wait_timeout = 10.0
 
-        # Maximale tijd (s) die een reset-poging in totaal mag duren,
-        # ongeacht of er al camera-frames binnenkomen. Dit voorkomt dat
-        # de node oneindig blijft hangen als de camera bij startup nog
-        # geen beeld levert (attempts telt dan anders nooit mee).
+        # Maximale tijd (s) voor een lokalisatiecontrole, ook als er geen
+        # camerabeelden beschikbaar komen.
         self.reset_timeout = 5.0
         self.reset_start_time = None
 
@@ -62,8 +60,6 @@ class AprilTagAbsolutePose(Node):
         ##############################################
 
         self.reset_active = False
-        self.max_attempts = 5
-        self.attempts = 0
 
         self.pose_pub = self.create_publisher(
             PoseWithCovarianceStamped,
@@ -249,11 +245,12 @@ class AprilTagAbsolutePose(Node):
 
     def reset_callback(self, msg):
         try:
-            if msg.data.lower() == "active":
+            if msg.data.strip().lower() == "active":
 
                 self.reset_active = True
-                self.attempts = 0
                 self.reset_start_time = time.time()
+                self.latest_frame = None
+                self.done_sent = False
 
                 self.get_logger().info(
                     "Reset ACTIVE ontvangen."
@@ -305,11 +302,11 @@ class AprilTagAbsolutePose(Node):
 
     ##########################################################
 
-    def publish_done(self):
+    def publish_done(self, result):
         try:
             if self.done_sent:
                 self.get_logger().info(
-                    "DONE al verstuurd, overslaan."
+                    "Resetresultaat al verstuurd, overslaan."
                 )
                 return
 
@@ -329,14 +326,14 @@ class AprilTagAbsolutePose(Node):
                 time.sleep(0.1)
 
             msg = String()
-            msg.data = "done"
+            msg.data = result
 
             self.done_pub.publish(msg)
 
             self.done_sent = True
 
             self.get_logger().info(
-                "Sent first DONE on /reset_done"
+                f"Reset result sent on /reset_done: {result}"
             )
         except Exception as e:
             self.get_logger().error(f"publish_done mislukt: {e}")
@@ -399,8 +396,8 @@ class AprilTagAbsolutePose(Node):
                 self.first_reset_done = True
 
                 self.reset_active = False
-                self.attempts = 0
                 self.reset_start_time = None
+                self.publish_done("not_found")
                 return
 
             if self.latest_frame is None:
@@ -417,12 +414,6 @@ class AprilTagAbsolutePose(Node):
             )
 
             tags = self.detector.detect(gray)
-
-            self.attempts += 1
-
-            self.get_logger().info(
-                f"Detectiepoging {self.attempts}/{self.max_attempts}"
-            )
 
             for tag in tags:
 
@@ -527,42 +518,20 @@ class AprilTagAbsolutePose(Node):
                     f"Tag {tag.tag_id} gevonden. Reset beëindigd."
                 )
 
-                self.publish_done()
+                self.publish_done("done")
 
                 self.reset_active = False
-                self.attempts = 0
                 self.reset_start_time = None
 
                 return
-
-            ########################################################
-            # Geen tag gevonden na alle pogingen
-            ########################################################
-
-            if self.attempts >= self.max_attempts:
-
-                self.get_logger().warn(
-                    "Geen AprilTag gevonden na 5 pogingen."
-                )
-
-                # eerste opdracht of volgende opdrachten:
-                # altijd NOK bij mislukking
-
-                self.write_status("NOK")
-
-                self.first_reset_done = True
-
-                self.reset_active = False
-                self.attempts = 0
-                self.reset_start_time = None
 
         except Exception as e:
             self.get_logger().error(f"timer_callback fout: {e}")
             # Sluit de lopende resetpoging netjes af i.p.v. oneindig te blijven hangen
             self.write_status("NOK")
             self.reset_active = False
-            self.attempts = 0
             self.reset_start_time = None
+            self.publish_done("not_found")
 
 
 ##############################################################
