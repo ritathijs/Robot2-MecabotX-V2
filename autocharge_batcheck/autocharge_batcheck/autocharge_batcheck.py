@@ -52,6 +52,7 @@ class AutochargeBatcheck(Node):
 
 
         self.voltage_window = deque(maxlen=WINDOW_SIZE)
+        self.initial_average_published = False
 
 
         self.load_voltage_config()
@@ -175,6 +176,12 @@ class AutochargeBatcheck(Node):
 
         self.voltage_window.append(voltage)
 
+        if (
+            not self.initial_average_published
+            and len(self.voltage_window) == WINDOW_SIZE
+        ):
+            self.publish_average_voltage()
+            self.initial_average_published = True
 
         avg_voltage = self.get_average_voltage()
 
