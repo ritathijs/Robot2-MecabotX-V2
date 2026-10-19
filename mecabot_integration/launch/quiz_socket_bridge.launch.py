@@ -8,6 +8,9 @@ def generate_launch_description():
     package_name = 'mecabot_integration'
     pkg_share = get_package_share_directory(package_name)
     script_path = os.path.join(pkg_share, '../../lib', package_name, 'quiz_socket_bridge.py') # Of je andere scriptnaam
+    locations_config = os.path.join(
+        pkg_share, 'config', 'robot_locations.yaml'
+    )
 
     # GECORRIGEERD: Haal het huidige Python-zoekpad op en voeg de map met de custom services toe!
     current_python_path = os.environ.get('PYTHONPATH', '')
@@ -15,7 +18,10 @@ def generate_launch_description():
 
     return LaunchDescription([
         ExecuteProcess(
-            cmd=['python3', script_path],
+            cmd=[
+                'python3', script_path,
+                '--ros-args', '--params-file', locations_config,
+            ],
             output='screen',
             # HIER GEBEURT HET: We dwingen Python om in de gegenereerde service-map te kijken
             additional_env={
@@ -24,4 +30,3 @@ def generate_launch_description():
             }
         )
     ])
-

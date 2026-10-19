@@ -9,6 +9,7 @@ from typing import Any
 import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import Bool, Float32, String, UInt8
 from wheeltec_robot_msg.srv import GetRobotState
@@ -22,6 +23,7 @@ class RobotState:
 
     admin_open: bool = False
     admin_login_open: bool = False
+    robot_reboot_lock: bool = True
     network_ok: bool = True
 
     battery_ok: bool = False
@@ -70,10 +72,6 @@ class RobotStateManager(Node):
     ESTOP_DURATION_SEC = 30.0
     STARTUP_SENSOR_TIMEOUT_SEC = 30.0
     LOCALIZATION_RECOVERY_TIMEOUT_SEC = 8.0
-    APRILTAG_LOCATION_ANCHORS = {
-        "work_area": (3.2080953121185303, -5.83170747756958),
-        "charging_area": (11.58133316040039, -15.486642837524414),
-    }
     APRILTAG_LOCATION_RADIUS = 3.0
 
     # Koppel de namen die door de controller/BT gebruikt worden aan een
@@ -87,7 +85,6 @@ class RobotStateManager(Node):
 
         "DriveWorkArea": "work_area",
         "FallbackDriveToWorkArea": "work_area",
-        "robot-startup": "work_area",
 
         "RobotDriveToChargingStation": "charging_station",
         "FallbackDriveToChargingStation": "charging_station",
@@ -106,7 +103,16 @@ class RobotStateManager(Node):
         self.last_drive_time: float | None = None
         self.estop_end_time: float | None = None
         self.estop_timer = None
+        self.admin_pause_timer = None
         self.startup_started_at = time.monotonic()
+        self.apriltag_location_anchors = {
+            "work_area": self._declare_apriltag_pose(
+                "apriltag_work_area_pose"
+            ),
+            "charging_area": self._declare_apriltag_pose(
+                "apriltag_charging_station_pose"
+            ),
+        }
 
         # Uitgaande topics
         self.screen_pub = self.create_publisher(
@@ -121,6 +127,10 @@ class RobotStateManager(Node):
         self.drive_pub = self.create_publisher(
             Twist, "/cmd_vel", 10
         )
+        self.admin_pause_pub = self.create_publisher(
+            Twist, "/estop_cmd_vel", 10
+        )
+        self._start_admin_pause()
         self.want_to_start_quiz_pub = self.create_publisher(
             Bool, "/WantToStartQuiz", 10
         )
@@ -291,6 +301,36 @@ class RobotStateManager(Node):
         msg.data = bool(value)
         return msg
 
+    def _declare_apriltag_pose(
+        self,
+        name: str,
+    ) -> tuple[float, float]:
+        pose = self.declare_parameter(
+            name,
+            Parameter.Type.DOUBLE_ARRAY,
+        ).value
+        if (
+            not isinstance(pose, (list, tuple))
+            or len(pose) != 3
+        ):
+            raise ValueError(
+                f"Parameter {name!r} must contain [x, y, yaw]."
+            )
+
+        try:
+            x, y, yaw = (float(value) for value in pose)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Parameter {name!r} must contain numeric [x, y, yaw]."
+            ) from exc
+
+        if not all(math.isfinite(value) for value in (x, y, yaw)):
+            raise ValueError(
+                f"Parameter {name!r} must contain finite [x, y, yaw]."
+            )
+
+        return x, y
+
     def _publish_status_snapshot(self) -> None:
         with self.lock:
             localization_valid = self.state.localization_valid
@@ -339,6 +379,33 @@ class RobotStateManager(Node):
 
     def _publish_zero_twist(self) -> None:
         self.drive_pub.publish(Twist())
+
+    def _publish_admin_pause(self) -> None:
+        self.admin_pause_pub.publish(Twist())
+
+    def _start_admin_pause(self) -> None:
+        self._publish_admin_pause()
+        if self.admin_pause_timer is None:
+            self.admin_pause_timer = self.create_timer(
+                0.05,
+                self._publish_admin_pause,
+            )
+
+    def _stop_admin_pause(self, force: bool = False) -> None:
+        with self.lock:
+            pause_required = (
+                self.state.admin_open
+                or self.state.admin_login_open
+                or self.state.robot_reboot_lock
+            )
+
+        if pause_required and not force:
+            self._publish_admin_pause()
+            return
+
+        if self.admin_pause_timer is not None:
+            self.destroy_timer(self.admin_pause_timer)
+            self.admin_pause_timer = None
 
     # ------------------------------------------------------------------
     # Sensor- en statuscallbacks
@@ -562,8 +629,8 @@ class RobotStateManager(Node):
             )
         elif location == "unknown":
             self.get_logger().error(
-                "[Localization] AprilTag-pose ligt niet binnen 3 m van "
-                "een bekende werk- of laadzone; robot blijft geblokkeerd."
+                "[Localization] AprilTag-pose kan niet eenduidig aan een "
+                "werk- of laadzone worden gekoppeld; robot blijft geblokkeerd."
             )
         else:
             self.get_logger().info(
@@ -593,8 +660,8 @@ class RobotStateManager(Node):
         self._publish_status_snapshot()
         if location == "unknown":
             self.get_logger().error(
-                "[Localization] AprilTag-pose ligt niet binnen 3 m van "
-                "een bekende werk- of laadzone; robot blijft geblokkeerd."
+                "[Localization] AprilTag-pose kan niet eenduidig aan een "
+                "werk- of laadzone worden gekoppeld; robot blijft geblokkeerd."
             )
         elif location is not None:
             self.get_logger().info(
@@ -615,8 +682,13 @@ class RobotStateManager(Node):
                 self.state.startup_pose_y - anchor_y,
             )
             for location, (anchor_x, anchor_y)
-            in self.APRILTAG_LOCATION_ANCHORS.items()
+            in self.apriltag_location_anchors.items()
         }
+        if abs(distances["work_area"] - distances["charging_area"]) <= 1e-6:
+            self.state.startup_location_failed = True
+            self.state.robot_active = False
+            return "unknown"
+
         location = min(distances, key=distances.get)
         if distances[location] > self.APRILTAG_LOCATION_RADIUS:
             self.state.startup_location_failed = True
@@ -627,6 +699,8 @@ class RobotStateManager(Node):
         self.state.startup_location_resolved = True
         self.state.at_station = location == "charging_area"
         self.state.at_work_area = location == "work_area"
+        if self.state.at_work_area:
+            self.state.robot_active = True
         self.state.at_quiz = False
         self.state.at_location_c = False
         self.state.at_location_d = False
@@ -694,11 +768,16 @@ class RobotStateManager(Node):
         # In de huidige architectuur wordt dit topic ook gebruikt om
         # schermwissels naar de Pi door te geven. Dit behoudt dat gedrag.
         if not admin_open:
+            screen_name = (
+                "robot-startup"
+                if node_name == "DriveWorkArea"
+                else node_name
+            )
             with self.lock:
-                self.state.last_screen = node_name
+                self.state.last_screen = screen_name
 
             screen_msg = String()
-            screen_msg.data = node_name
+            screen_msg.data = screen_name
             self.screen_pub.publish(screen_msg)
 
         self._publish_status_snapshot()
@@ -771,7 +850,11 @@ class RobotStateManager(Node):
 
         self.activate_estop(f"bumper_trigger ({status_text})")
 
-    def activate_estop(self, reason: str) -> None:
+    def activate_estop(
+        self,
+        reason: str,
+        duration_sec: float = ESTOP_DURATION_SEC,
+    ) -> None:
         with self.lock:
             if not self.state.estop_active:
                 self.get_logger().warning(
@@ -780,7 +863,7 @@ class RobotStateManager(Node):
             self.state.estop_active = True
 
         self.estop_end_time = (
-            time.monotonic() + self.ESTOP_DURATION_SEC
+            time.monotonic() + duration_sec
         )
 
         if self.estop_timer is None:
@@ -866,6 +949,52 @@ class RobotStateManager(Node):
         elif event == "admin_login_open":
             self._handle_admin_login_open()
 
+        elif event == "temporary_stop":
+            with self.lock:
+                admin_pause_active = (
+                    self.state.admin_open or self.state.admin_login_open
+                )
+
+            if admin_pause_active:
+                self.get_logger().info(
+                    "Tijdelijke stop genegeerd: admin/login-pauze is actief."
+                )
+                return
+
+            if not isinstance(data, dict):
+                self.get_logger().warning(
+                    "robot-stop-for-x-time bevat geen geldige payload."
+                )
+                return
+
+            try:
+                duration_sec = float(data.get("time")) / 1000.0
+            except (TypeError, ValueError):
+                self.get_logger().warning(
+                    "robot-stop-for-x-time bevat geen geldige tijdsduur."
+                )
+                return
+
+            if not math.isfinite(duration_sec) or duration_sec <= 0:
+                self.get_logger().warning(
+                    "robot-stop-for-x-time moet een positieve, eindige tijd bevatten."
+                )
+                return
+
+            self.activate_estop(
+                "tijdelijke stop aangevraagd via Pi",
+                duration_sec,
+            )
+
+        elif event == "robot_login_open":
+            self._handle_robot_login_open()
+
+        elif event == "robot_login_closed":
+            self._handle_robot_login_closed()
+
+        elif event == "robot_screen_state":
+            self._handle_robot_screen_state(data)
+
         elif event == "admin_open":
             self._handle_admin_panel_open()
 
@@ -898,8 +1027,71 @@ class RobotStateManager(Node):
         with self.lock:
             self.state.admin_login_open = True
 
+        self._start_admin_pause()
         self.send_robot_command("STOP")
         self._publish_zero_twist()
+
+    def _handle_robot_login_open(self) -> None:
+        with self.lock:
+            if self.state.admin_open:
+                return
+            self.state.admin_login_open = True
+
+        self._start_admin_pause()
+        self.send_robot_command("STOP")
+        self._publish_zero_twist()
+
+    def _handle_robot_login_closed(self) -> None:
+        with self.lock:
+            was_login_open = self.state.admin_login_open
+            admin_open = self.state.admin_open
+            self.state.admin_login_open = False
+            saved_screen = self.state.last_screen
+
+        if not admin_open:
+            self._stop_admin_pause()
+            if was_login_open:
+                screen_msg = String()
+                screen_msg.data = saved_screen or "robot-startup"
+                self.screen_pub.publish(screen_msg)
+
+    def _handle_robot_screen_state(self, data: Any) -> None:
+        if (
+            not isinstance(data, dict)
+            or not isinstance(data.get("adminOpen"), bool)
+            or not isinstance(data.get("adminLoginOpen"), bool)
+            or not isinstance(data.get("robotRebootLock"), bool)
+        ):
+            self.get_logger().warning(
+                "Ongeldige robot-screen-state ontvangen; status niet aangepast."
+            )
+            return
+
+        admin_open = data["adminOpen"]
+        admin_login_open = data["adminLoginOpen"] and not admin_open
+        robot_reboot_lock = data["robotRebootLock"]
+
+        with self.lock:
+            previously_open = (
+                self.state.admin_open
+                or self.state.admin_login_open
+                or self.state.robot_reboot_lock
+            )
+            self.state.admin_open = admin_open
+            self.state.admin_login_open = admin_login_open
+            self.state.robot_reboot_lock = robot_reboot_lock
+            saved_screen = self.state.last_screen
+
+        if admin_open or admin_login_open or robot_reboot_lock:
+            self._start_admin_pause()
+            self.send_robot_command("STOP")
+            self._publish_zero_twist()
+        else:
+            self._stop_admin_pause()
+            if previously_open:
+                screen_msg = String()
+                screen_msg.data = saved_screen or "robot-startup"
+                self.screen_pub.publish(screen_msg)
 
     def on_robot_command(self, msg: String) -> None:
         if msg.data.strip() != "START_QUIZ":
@@ -916,6 +1108,7 @@ class RobotStateManager(Node):
             self.state.admin_login_open = False
             self.state.admin_open = True
 
+        self._start_admin_pause()
         self.send_robot_command("STOP")
         self._publish_zero_twist()
 
@@ -924,6 +1117,8 @@ class RobotStateManager(Node):
             self.state.admin_open = False
             self.state.admin_login_open = False
             saved_screen = self.state.last_screen
+
+        self._stop_admin_pause()
 
         screen_msg = String()
         screen_msg.data = saved_screen or "robot-startup"
@@ -969,6 +1164,7 @@ class RobotStateManager(Node):
         with self.lock:
             allowed = (
                 self.state.admin_open
+                and not self.state.robot_reboot_lock
                 and not self.state.estop_active
                 and not self.state.docked
                 and self.state.robot_active
@@ -1081,6 +1277,8 @@ class RobotStateManager(Node):
         if self.estop_timer is not None:
             self.destroy_timer(self.estop_timer)
             self.estop_timer = None
+
+        self._stop_admin_pause(force=True)
 
         super().destroy_node()
 

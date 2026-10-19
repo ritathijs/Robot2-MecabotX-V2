@@ -1,5 +1,6 @@
 
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 
 from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import PoseWithCovarianceStamped
@@ -12,10 +13,8 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
 import cv2
 import numpy as np
-import json
 import math
 import time
-import os
 
 
 def quat_from_yaw(yaw):
@@ -135,26 +134,48 @@ class AprilTagAbsolutePose(Node):
         # opzoeken of het een gekende tag is, en zo ja met welke
         # locatie/oriëntatie/grootte die overeenkomt.
 
-        tags_file = "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/trees/tags.json"
         self.tags_data = {}
 
         try:
-            with open(tags_file) as f:
-                data = json.load(f)
+            tag_ids = self.declare_parameter(
+                "tag_ids", Parameter.Type.INTEGER_ARRAY
+            ).value
+            tag_sizes = self.declare_parameter(
+                "tag_sizes", Parameter.Type.DOUBLE_ARRAY
+            ).value
+            tag_poses = self.declare_parameter(
+                "tag_poses", Parameter.Type.DOUBLE_ARRAY
+            ).value
 
-            for entry in data["tags"]:
-
-                tag_id = int(entry["id"])
-
-                tag_x = float(entry["p_x"])
-                tag_y = float(entry["p_y"])
-
-                tag_yaw = 2 * math.atan2(
-                    entry["orien_z"],
-                    entry["orien_w"]
+            if (
+                not isinstance(tag_ids, (list, tuple))
+                or not isinstance(tag_sizes, (list, tuple))
+                or not isinstance(tag_poses, (list, tuple))
+                or not tag_ids
+                or len(tag_sizes) != len(tag_ids)
+                or len(tag_poses) != 3 * len(tag_ids)
+                or len(set(tag_ids)) != len(tag_ids)
+            ):
+                raise ValueError(
+                    "tag_ids, tag_sizes en tag_poses moeten dezelfde "
+                    "tagcount beschrijven; elke pose is [x, y, yaw]."
                 )
 
-                tag_size = float(entry["tag_size"])
+            for index, raw_tag_id in enumerate(tag_ids):
+                tag_id = int(raw_tag_id)
+                tag_size = float(tag_sizes[index])
+                tag_x, tag_y, tag_yaw = (
+                    float(value)
+                    for value in tag_poses[index * 3:index * 3 + 3]
+                )
+
+                if tag_id < 0 or tag_size <= 0.0 or not all(
+                    math.isfinite(value)
+                    for value in (tag_size, tag_x, tag_y, tag_yaw)
+                ):
+                    raise ValueError(
+                        f"Ongeldige AprilTag-configuratie voor tag {tag_id}."
+                    )
 
                 arrow_dir = np.array([
                     math.cos(tag_yaw),
@@ -176,23 +197,13 @@ class AprilTagAbsolutePose(Node):
                 }
 
             if not self.tags_data:
-                raise ValueError("Geen tags gevonden in tags.json")
+                raise ValueError("Geen AprilTags geconfigureerd.")
 
         except Exception as e:
             self.get_logger().error(
-                f"Kon tags.json niet laden/parsen ({e}). "
-                f"Val terug op tag id 0 met x=0, y=0, yaw=0, size=0.08."
+                f"AprilTag-configuratie ongeldig: {e}"
             )
-            self.tags_data = {
-                0: {
-                    "x": 0.0,
-                    "y": 0.0,
-                    "yaw": 0.0,
-                    "size": 0.08,
-                    "arrow_dir": np.array([1.0, 0.0]),
-                    "right_dir": np.array([0.0, 1.0]),
-                }
-            }
+            raise
 
         self.get_logger().info(
             f"Node started, gekende tag-ids: {list(self.tags_data.keys())}"

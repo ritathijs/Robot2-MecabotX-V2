@@ -12,6 +12,9 @@ def generate_launch_description():
     
     # Haal de dynamische share map op (werkt op elke robot via Git)
     pkg_share = get_package_share_directory(package_name)
+    locations_config = os.path.join(
+        pkg_share, 'config', 'robot_locations.yaml'
+    )
     
     # Genereer de absolute paden naar de 3 Python scripts in de installatiemap
     bridge_script = os.path.join(pkg_share, '../../lib', package_name, 'quiz_socket_bridge.py')
@@ -31,6 +34,7 @@ def generate_launch_description():
         package=package_name,
         executable='rt_robot_controller',
         name='robot_controller',
+        parameters=[locations_config],
         output='screen'
     )
 
@@ -48,7 +52,10 @@ def generate_launch_description():
 
     # C. Quiz Socket Bridge (Gecorrigeerd met Pi IP en PYTHONPATH)
     quiz_socket_bridge_node = ExecuteProcess(
-        cmd=['python3', bridge_script],
+        cmd=[
+            'python3', bridge_script,
+            '--ros-args', '--params-file', locations_config,
+        ],
         output='screen',
         additional_env={
             'QUIZ_SERVER_URL': 'http://10.0.0.11:80', # <--- VERANDER DIT naar het echte IP van de Pi!
@@ -62,6 +69,7 @@ def generate_launch_description():
         package='april_tabloo',
         executable='april_tabloo',
         name='april_tabloo',
+        parameters=[locations_config],
         output='screen'
     )
 

@@ -63,7 +63,7 @@ behavior_tree_nodes = {
 
 	# --- People Search doelen ---
 	"RobotRotationFollowMe":	  {"keepoutfilter_on": "True",  "drive_action": "peoplesearch", "message_frequency": "always"},
-	
+
 	"DriveWorkArea":				{"keepoutfilter_on": "False",  "drive_action": "behaviortree", "message_frequency": "always"},
 	"DriveQuizLocation":			{"keepoutfilter_on": "True",  "drive_action": "behaviortree", "message_frequency": "always"},
 	"robot-arrived-at-quiz-location": {"keepoutfilter_on": "True", "drive_action": "release", "message_frequency": "once",},
@@ -342,8 +342,6 @@ def main(args=None):
 
 if __name__ == '__main__':
 	main()
-
-
 
 
 

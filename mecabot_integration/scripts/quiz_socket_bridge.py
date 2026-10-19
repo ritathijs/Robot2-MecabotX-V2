@@ -3,7 +3,7 @@ import os
 import time
 import queue
 import threading
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 
 import rclpy
 from rclpy.node import Node
@@ -33,10 +33,17 @@ class QuizSocketBridge(Node):
         self.is_moving = False
         self.admin_panel_open = False
         self.is_admin_login_open = False
+        self.robot_reboot_lock = True
         self.manual_drive_db_updated = False
 
         # Publisher voor manuele besturing (GUI)
         self.gui_cmd_vel_pub = self.create_publisher(Twist, '/gui_cmd_vel', 10)
+        self.create_subscription(
+            Bool,
+            "/IsRobotActive",
+            self._on_robot_active_status,
+            10,
+        )
         self.create_subscription(String, "/screen_command", self._on_ros_screen_command, 10)
 
         # Queue voor thread-safe event verwerking (socket thread -> ROS thread)
@@ -89,10 +96,13 @@ class QuizSocketBridge(Node):
         self.sio.on('robot-activeButtonToggled', lambda data=None: self._enqueue_event("active_button_toggled", data))
 
         # admin / safety
-        self.sio.on('robot-stop-for-x-time', lambda data=None: self._enqueue_event("admin_login_open", data))
+        self.sio.on('robot-stop-for-x-time', lambda data=None: self._enqueue_event("temporary_stop", data))
         self.sio.on('login_canceled', lambda data=None: self._enqueue_event("admin_login_closed", data))
         self.sio.on('admin-panel-open', lambda data=None: self._enqueue_event("admin_open", data))
         self.sio.on('admin-panel-closed', lambda data=None: self._enqueue_event("admin_closed", data))
+        self.sio.on('robot-login-open', lambda data=None: self._enqueue_event("robot_login_open", data))
+        self.sio.on('robot-login-closed', lambda data=None: self._enqueue_event("robot_login_closed", data))
+        self.sio.on('robot-screen-state', lambda data=None: self._enqueue_event("robot_screen_state", data))
 
         # battery
         self.sio.on('robot-get-battery-percentage', lambda data=None: self._enqueue_event("battery_request", data))
@@ -172,9 +182,30 @@ class QuizSocketBridge(Node):
                 elif event_name == "admin_login_open":
                     self.admin_login_open(data)
                     self._safe_state_callback("admin_login_open", data)
+                elif event_name == "temporary_stop":
+                    self._safe_state_callback("temporary_stop", data)
                 elif event_name == "admin_login_closed":
                     self.admin_login_closed(data)
                     self._safe_state_callback("admin_login_closed", data)
+                elif event_name == "robot_login_open":
+                    self.admin_login_open(data)
+                    self._safe_state_callback("robot_login_open", data)
+                elif event_name == "robot_login_closed":
+                    self.admin_login_closed(data)
+                    self._safe_state_callback("robot_login_closed", data)
+                elif event_name == "robot_screen_state":
+                    if (
+                        isinstance(data, dict)
+                        and isinstance(data.get("adminOpen"), bool)
+                        and isinstance(data.get("adminLoginOpen"), bool)
+                        and isinstance(data.get("robotRebootLock"), bool)
+                    ):
+                        self.admin_panel_open = data["adminOpen"]
+                        self.is_admin_login_open = (
+                            data["adminLoginOpen"] and not self.admin_panel_open
+                        )
+                        self.robot_reboot_lock = data["robotRebootLock"]
+                    self._safe_state_callback("robot_screen_state", data)
                 elif event_name == "connect":
                     self.get_logger().info("Socket verbonden (event). Identificatie 'orin-nano-robot' verzenden...")
                     # VEILIGE IDENTIFICATIE: Vanuit de vrije ROS-thread
@@ -263,7 +294,10 @@ class QuizSocketBridge(Node):
                 self.get_logger().info(f"🟢 Actieve status universeel verzonden naar Pi: {is_active}")
         except Exception as e:
             self.get_logger().error(f"Fout bij verzenden actieve status naar Pi: {e}")
-            
+
+    def _on_robot_active_status(self, msg: Bool) -> None:
+        self.send_active_status_to_pi(msg.data)
+
     # -----------------------------
     # Veilige wrapper voor state_manager_callback (ROS-thread)
     # -----------------------------
@@ -294,7 +328,11 @@ class QuizSocketBridge(Node):
         self.is_moving = True
         msg = Twist()
         
-        if self.admin_panel_open or self.is_admin_login_open:
+        if (
+            self.admin_panel_open
+            or self.is_admin_login_open
+            or self.robot_reboot_lock
+        ):
             try:
                 self.gui_cmd_vel_pub.publish(msg)
             except Exception as e:

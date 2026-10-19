@@ -9,6 +9,9 @@ def generate_launch_description():
     package_name = 'mecabot_integration'
     pkg_share = get_package_share_directory(package_name)
     script_path = os.path.join(pkg_share, '../../lib', package_name, 'robot_state_manager.py')
+    locations_config = os.path.join(
+        pkg_share, 'config', 'robot_locations.yaml'
+    )
 
     current_python_path = os.environ.get('PYTHONPATH', '')
     workspace_python_path = "/home/wheeltec/wheeltec_ros2/install/wheeltec_robot_msg/local/lib/python3.10/dist-packages:" + current_python_path
@@ -18,14 +21,17 @@ def generate_launch_description():
             package='april_tabloo',
             executable='april_tabloo',
             name='april_tabloo',
+            parameters=[locations_config],
             output='screen'
         ),
         ExecuteProcess(
-            cmd=['python3', script_path],
+            cmd=[
+                'python3', script_path,
+                '--ros-args', '--params-file', locations_config,
+            ],
             output='screen',
             additional_env={
                 'PYTHONPATH': workspace_python_path
             }
         )
     ])
-
