@@ -13,8 +13,8 @@ ros2 launch mecabot_integration quiz_socket_bridge.launch.py
 # heeft bij een mislukte tagdetectie een XSTOP-fallback.
 ros2 run april_tabloo april_tabloo
 
-# 5. Start de Python Status Reader
-ros2 launch mecabot_integration status_reader.launch.py
+# De statusverwerking zit in RobotStateManager, gestart door de Quiz Socket Bridge.
+# Start geen aparte status_reader-node.
 
 
 
@@ -27,7 +27,6 @@ pkill -f robot_controller
 # 2. Schiet alle actieve Python-scripts van jouw package neer
 pkill -f quiz_socket_bridge.py
 pkill -f robot_state_manager.py
-pkill -f status_reader.py
 
 # 3. Sluit alle gnome-terminal vensters die door het script zijn geopend
 pkill gnome-terminal-

@@ -42,6 +42,9 @@ class RobotState:
     in_working_zone: bool = False
     manual_drive: bool = False
     estop_active: bool = False
+    bumper_pressed: bool = False
+    quiz_options_pause: bool = False
+    visitor_tracking_paused: bool = False
 
     localization_valid: bool = False
     received_amcl: bool = False
@@ -130,6 +133,9 @@ class RobotStateManager(Node):
         self.drive_pub = self.create_publisher(
             Twist, "/cmd_vel", 10
         )
+        self.tracking_enable_pub = self.create_publisher(
+            Bool, "/tracking_enable", 10
+        )
         self.admin_pause_pub = self.create_publisher(
             Twist, "/estop_cmd_vel", 10
         )
@@ -139,6 +145,9 @@ class RobotStateManager(Node):
         )
         self.quiz_finished_pub = self.create_publisher(
             Bool, "/quiz_finished", 10
+        )
+        self.visitor_no_response_pub = self.create_publisher(
+            Bool, "/visitor_no_response", 10
         )
 
         # Statusoutputs voor de Behavior Tree
@@ -154,7 +163,7 @@ class RobotStateManager(Node):
         self.charging_station_pub = self.create_publisher(
             Bool, "/IsRobotNearChargingStation", 10
         )
-        # Compatibiliteit met de oude topicnaam uit status_reader.py.
+        # Compatibility with the legacy charging-station topic name.
         self.charging_station_legacy_pub = self.create_publisher(
             Bool, "/IsRobotAtChargingStation", 10
         )
@@ -206,6 +215,18 @@ class RobotStateManager(Node):
             Bool,
             "/visitors_nearby",
             self.on_visitors,
+            10,
+        )
+        self.create_subscription(
+            Bool,
+            "/visitor_tracking_paused",
+            self.on_visitor_tracking_paused,
+            10,
+        )
+        self.create_subscription(
+            Bool,
+            "/reset_patrol_locations",
+            self.on_patrol_cycle_complete,
             10,
         )
         self.create_subscription(
@@ -344,6 +365,19 @@ class RobotStateManager(Node):
             docked = self.state.docked
             robot_active = self.state.robot_active
             battery_ok = self.state.battery_ok
+            tracking_enabled = (
+                robot_active
+                and battery_ok
+                and at_work_area
+                and localization_valid
+                and not docked
+                and not self.state.estop_active
+                and not self.state.quiz_options_pause
+                and not self.state.admin_open
+                and not self.state.admin_login_open
+                and not self.state.robot_reboot_lock
+                and not self.state.visitor_tracking_paused
+            )
             at_location_c = self.state.at_location_c
             at_location_d = self.state.at_location_d
             at_location_e = self.state.at_location_e
@@ -374,6 +408,9 @@ class RobotStateManager(Node):
         self.robot_active_pub.publish(self._bool_message(robot_active))
         self.battery_ok_pub.publish(self._bool_message(battery_ok))
         self.battery_low_pub.publish(self._bool_message(not battery_ok))
+        self.tracking_enable_pub.publish(
+            self._bool_message(tracking_enabled)
+        )
 
     def send_robot_command(self, command: str) -> None:
         msg = String()
@@ -428,6 +465,24 @@ class RobotStateManager(Node):
     def on_visitors(self, msg: Bool) -> None:
         with self.lock:
             self.state.visitors_nearby = msg.data
+
+    def on_visitor_tracking_paused(self, msg: Bool) -> None:
+        with self.lock:
+            self.state.visitor_tracking_paused = msg.data
+
+        self._publish_status_snapshot()
+
+    def on_patrol_cycle_complete(self, msg: Bool) -> None:
+        if not msg.data:
+            return
+
+        with self.lock:
+            self.state.at_location_c = False
+            self.state.at_location_d = False
+            self.state.at_location_e = False
+            self.state.active_destination = None
+
+        self._publish_status_snapshot()
 
     def on_working_zone(self, msg: Bool) -> None:
         with self.lock:
@@ -762,31 +817,54 @@ class RobotStateManager(Node):
             self.state.active_destination = destination
 
             if destination is not None:
-                self.state.at_location_c = False
-                self.state.at_location_d = False
-                self.state.at_location_e = False
+                if destination == "quiz":
+                    self.state.at_location_c = False
+                    self.state.at_location_d = False
+                    self.state.at_location_e = False
+                    self.state.at_quiz = False
+                elif destination == "work_area":
+                    self.state.at_location_c = False
+                    self.state.at_location_d = False
+                    self.state.at_location_e = False
+                    self.state.at_work_area = False
+                elif destination == "charging_station":
+                    self.state.at_location_c = False
+                    self.state.at_location_d = False
+                    self.state.at_location_e = False
+                    self.state.at_station = False
+                    self.state.at_work_area = False
+                elif destination == "location_c":
+                    self.state.at_location_c = False
+                elif destination == "location_d":
+                    self.state.at_location_d = False
+                elif destination == "location_e":
+                    self.state.at_location_e = False
 
-            if destination == "quiz":
-                self.state.at_quiz = False
-            elif destination == "work_area":
-                self.state.at_work_area = False
-            elif destination == "charging_station":
-                self.state.at_station = False
-                self.state.at_work_area = False
-            elif destination == "location_c":
-                self.state.at_location_c = False
-            elif destination == "location_d":
-                self.state.at_location_d = False
-            elif destination == "location_e":
-                self.state.at_location_e = False
+        # Patrol navigation is part of explore mode; keep the visitor start
+        # screen visible instead of switching back to the startup screen.
+        patrol_destination = destination in {
+            "location_c",
+            "location_d",
+            "location_e",
+        }
+        if patrol_destination:
+            with self.lock:
+                screen_changed = self.state.last_screen != "robot-explore"
+                self.state.last_screen = "robot-explore"
 
-        # In de huidige architectuur wordt dit topic ook gebruikt om
-        # schermwissels naar de Pi door te geven. Dit behoudt dat gedrag.
-        if not admin_open:
-            screen_name = "robot-startup" if (
-                node_name == "DriveWorkArea"
-                or node_name.startswith("explore-location-")
-            ) else node_name
+            if screen_changed and not admin_open:
+                screen_msg = String()
+                screen_msg.data = "robot-explore"
+                self.screen_pub.publish(screen_msg)
+        elif not admin_open and node_name not in (
+            "RobotRotationFollowMe",
+            "robot-arrived-at-visitors",
+        ):
+            screen_name = (
+                "robot-startup"
+                if node_name == "DriveWorkArea"
+                else node_name
+            )
             with self.lock:
                 self.state.last_screen = screen_name
 
@@ -860,9 +938,21 @@ class RobotStateManager(Node):
         status_text = msg.data.strip()
 
         if status_text == "De bumper is niet ingedrukt":
+            with self.lock:
+                self.state.bumper_pressed = False
             return
 
-        self.activate_estop(f"bumper_trigger ({status_text})")
+        with self.lock:
+            newly_pressed = not self.state.bumper_pressed
+            self.state.bumper_pressed = True
+
+        if not newly_pressed:
+            return
+
+        self.get_logger().warning(
+            f"Bumper gedetecteerd: {status_text}; "
+            "de bumpercontroller stuurt de stop-/uitwijkbeweging."
+        )
 
     def activate_estop(
         self,
@@ -875,6 +965,7 @@ class RobotStateManager(Node):
                     f"ESTOP geactiveerd: {reason}"
                 )
             self.state.estop_active = True
+        self._publish_status_snapshot()
 
         self.estop_end_time = (
             time.monotonic() + duration_sec
@@ -887,24 +978,34 @@ class RobotStateManager(Node):
             )
 
     def _estop_tick(self) -> None:
+        status_changed = False
         if self.estop_end_time is not None:
             if time.monotonic() >= self.estop_end_time:
                 with self.lock:
                     self.state.estop_active = False
+                self.estop_end_time = None
+                status_changed = True
 
                 self.get_logger().info(
                     "ESTOP-timer verlopen; softwarematige ESTOP vrijgegeven."
                 )
 
-                if self.estop_timer is not None:
-                    self.destroy_timer(self.estop_timer)
-                    self.estop_timer = None
-
-                self.estop_end_time = None
-                return
+        with self.lock:
+            stop_required = (
+                self.state.estop_active or self.state.quiz_options_pause
+            )
+        if not stop_required:
+            if self.estop_timer is not None:
+                self.destroy_timer(self.estop_timer)
+                self.estop_timer = None
+            if status_changed:
+                self._publish_status_snapshot()
+            return
 
         self._publish_zero_twist()
         self.send_robot_command("STOP")
+        if status_changed:
+            self._publish_status_snapshot()
 
     # ------------------------------------------------------------------
     # Socket-events vanuit QuizSocketBridge
@@ -1000,6 +1101,46 @@ class RobotStateManager(Node):
                 duration_sec,
             )
 
+        elif event == "quiz_options_pause":
+            if not isinstance(data, bool):
+                self.get_logger().warning(
+                    "robot-quiz-options-pause moet een boolean bevatten."
+                )
+                return
+
+            with self.lock:
+                self.state.quiz_options_pause = data
+                estop_active = self.state.estop_active
+
+            if data and self.estop_timer is None:
+                self.estop_timer = self.create_timer(
+                    0.05,
+                    self._estop_tick,
+                )
+            elif not data and not estop_active:
+                if self.estop_timer is not None:
+                    self.destroy_timer(self.estop_timer)
+                    self.estop_timer = None
+                self.estop_end_time = None
+
+            self._publish_status_snapshot()
+            self.get_logger().info(
+                "Robotpauze voor quizkeuzes "
+                + ("geactiveerd." if data else "vrijgegeven.")
+            )
+
+        elif event == "visitor_no_response":
+            if data is not True:
+                self.get_logger().warning(
+                    "robot-visitor-no-response moet true bevatten."
+                )
+                return
+
+            self.visitor_no_response_pub.publish(self._bool_message(True))
+            self.get_logger().info(
+                "Geen reactie op quizkeuzes; de huidige bezoeker wordt losgelaten."
+            )
+
         elif event == "robot_login_open":
             self._handle_robot_login_open()
 
@@ -1044,6 +1185,7 @@ class RobotStateManager(Node):
         self._start_admin_pause()
         self.send_robot_command("STOP")
         self._publish_zero_twist()
+        self._publish_status_snapshot()
 
     def _handle_robot_login_open(self) -> None:
         with self.lock:
@@ -1064,6 +1206,7 @@ class RobotStateManager(Node):
 
         if not admin_open:
             self._stop_admin_pause()
+            self._publish_status_snapshot()
             if was_login_open:
                 screen_msg = String()
                 screen_msg.data = saved_screen or "robot-startup"
@@ -1106,6 +1249,7 @@ class RobotStateManager(Node):
                 screen_msg = String()
                 screen_msg.data = saved_screen or "robot-startup"
                 self.screen_pub.publish(screen_msg)
+        self._publish_status_snapshot()
 
     def on_robot_command(self, msg: String) -> None:
         if msg.data.strip() != "START_QUIZ":
@@ -1125,6 +1269,7 @@ class RobotStateManager(Node):
         self._start_admin_pause()
         self.send_robot_command("STOP")
         self._publish_zero_twist()
+        self._publish_status_snapshot()
 
     def _handle_admin_closed(self) -> None:
         with self.lock:
@@ -1137,6 +1282,7 @@ class RobotStateManager(Node):
         screen_msg = String()
         screen_msg.data = saved_screen or "robot-startup"
         self.screen_pub.publish(screen_msg)
+        self._publish_status_snapshot()
 
     def handle_screen_request(self, data: Any) -> None:
         if data is None:

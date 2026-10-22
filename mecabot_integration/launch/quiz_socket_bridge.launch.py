@@ -12,10 +12,6 @@ def generate_launch_description():
         pkg_share, 'config', 'robot_locations.yaml'
     )
 
-    # GECORRIGEERD: Haal het huidige Python-zoekpad op en voeg de map met de custom services toe!
-    current_python_path = os.environ.get('PYTHONPATH', '')
-    workspace_python_path = "/home/wheeltec/wheeltec_ros2/install/wheeltec_robot_msg/local/lib/python3.10/dist-packages:" + current_python_path
-
     return LaunchDescription([
         ExecuteProcess(
             cmd=[
@@ -23,10 +19,8 @@ def generate_launch_description():
                 '--ros-args', '--params-file', locations_config,
             ],
             output='screen',
-            # HIER GEBEURT HET: We dwingen Python om in de gegenereerde service-map te kijken
             additional_env={
-                'QUIZ_SERVER_URL': 'http://10.0.0.11:80',
-                'PYTHONPATH': workspace_python_path
+                'QUIZ_SERVER_URL': 'http://10.0.0.11:80'
             }
         )
     ])

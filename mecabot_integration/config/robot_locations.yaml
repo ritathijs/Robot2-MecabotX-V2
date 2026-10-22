@@ -18,3 +18,13 @@ april_tabloo:
     tag_ids: [0, 2]
     tag_sizes: [0.08, 0.20]
     tag_poses: [3.2080953121185303, -5.83170747756958, 0.7860673445242651, 11.58133316040039, -15.486642837524414, -0.8102691728514168]
+
+auto_recharger:
+  ros__parameters:
+    # Runtime data/config files live outside the installed ROS package.
+    data_directory: /home/wheeltec/.local/share/mecabot
+
+drive_mux:
+  ros__parameters:
+    data_directory: /home/wheeltec/.local/share/mecabot
+

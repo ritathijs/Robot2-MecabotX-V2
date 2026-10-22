@@ -1,13 +1,12 @@
 
 import rclpy
 from rclpy.node import Node
+from pathlib import Path
 from geometry_msgs.msg import Twist
 from rclpy.duration import Duration
 from std_msgs.msg import String
 
-import os
-
-laadcyclus_file = "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/laadcyclus_status.txt"
+DEFAULT_DATA_DIRECTORY = "/home/wheeltec/.local/share/mecabot_rt"
 
 # Terminal kleuren
 GREEN = "\033[92m"
@@ -23,6 +22,16 @@ class driveMux(Node):
 
     def __init__(self):
         super().__init__('drive_mux')
+
+        self.declare_parameter("data_directory", DEFAULT_DATA_DIRECTORY)
+        self.data_directory = Path(
+            self.get_parameter("data_directory").value
+        ).expanduser()
+        if not self.data_directory.is_absolute():
+            raise ValueError("data_directory must be an absolute path")
+        self.laadcyclus_file = (
+            self.data_directory / "laadcyclus_status.txt"
+        )
 
         past_time = self.get_clock().now() - Duration(seconds=5)
 
@@ -107,17 +116,17 @@ class driveMux(Node):
 
     def chargehp_callback(self, msg):
         self.lastmessage_chargehp = self.get_clock().now()
-        if 7 >= self.currentPriority():
+        if 6 >= self.currentPriority():
             self.publish_command(msg, "CHARGEHP")
 
     def gui_callback(self, msg):
         self.lastmessage_gui = self.get_clock().now()
-        if 6 >= self.currentPriority():
+        if 5 >= self.currentPriority():
             self.publish_command(msg, "GUI")
 
     def estop_callback(self, msg):
         self.lastmessage_estop = self.get_clock().now()
-        if 5 >= self.currentPriority():
+        if 7 >= self.currentPriority():
             self.publish_command(msg, "ESTOP")
 
     def turn_callback(self, msg):
@@ -132,7 +141,7 @@ class driveMux(Node):
 
     def bumper_ignoren(self):
         try:
-            with open(laadcyclus_file, "r") as f:
+            with open(self.laadcyclus_file, "r") as f:
                 status = f.read().strip().upper()
             return status == "LAADCYCLUS"
         except Exception:
@@ -142,7 +151,7 @@ class driveMux(Node):
         self.lastmessage_bump = self.get_clock().now()
         if self.bumper_ignoren():
             return
-        if 2 >= self.currentPriority():
+        if 6.5 >= self.currentPriority():
             self.publish_command(msg, "BUMP")
 
     def search_callback(self, msg):
@@ -174,29 +183,29 @@ class driveMux(Node):
     def currentPriority(self):
         now = self.get_clock().now()
 
-        # 1. CHARGEHP (Hoogste)
-        if now - self.lastmessage_chargehp <= Duration(seconds=1.0):
+        # 1. ESTOP (Hoogste)
+        if now - self.lastmessage_estop <= Duration(seconds=0.5):
             return 7
 
-        # 2. GUI
-        elif now - self.lastmessage_gui <= Duration(seconds=2):
+        # 2. BUMPER: supersedes all motion except a real ESTOP
+        elif self.bump_effectively_blocking():
+            return 6.5
+
+        # 3. CHARGEHP
+        elif now - self.lastmessage_chargehp <= Duration(seconds=1.0):
             return 6
 
-        # 3. ESTOP
-        elif now - self.lastmessage_estop <= Duration(seconds=0.5):
+        # 4. GUI
+        elif now - self.lastmessage_gui <= Duration(seconds=2):
             return 5
 
-        # 4. TURN
+        # 5. TURN
         elif now - self.lastmessage_turn <= Duration(seconds=2):
             return 4
 
-        # 5. CHARGE
+        # 6. CHARGE
         elif now - self.lastmessage_charge <= Duration(seconds=0.5):
             return 3
-
-        # 6. BUMP
-        elif self.bump_effectively_blocking():
-            return 2
 
         # 7. SEARCH
         elif now - self.lastmessage_search <= Duration(seconds=0.5):
@@ -260,9 +269,9 @@ class driveMux(Node):
 
         # Bronnenlijst in volgorde van prioriteit
         sources = [
+            ("ESTOP", self.lastmessage_estop, 0.5),
             ("CHARGEHP", self.lastmessage_chargehp, 0.5),
             ("GUI", self.lastmessage_gui, 2),
-            ("ESTOP", self.lastmessage_estop, 0.5),
             ("TURN", self.lastmessage_turn, 2),
             ("CHARGE", self.lastmessage_charge, 0.5),
             # BUMP wordt apart afgehandeld
@@ -274,8 +283,8 @@ class driveMux(Node):
 
         for name, time_msg, timeout in sources:
 
-            # Voeg BUMP in op de juiste plek in de print-lijst (na CHARGE)
-            if name == "SEARCH":
+            # Voeg BUMP in op de juiste plek in de print-lijst (na ESTOP)
+            if name == "CHARGEHP":
                 bump_age = (now - self.lastmessage_bump).nanoseconds / 1e9
 
                 if self.bump_effectively_blocking():
@@ -328,4 +337,3 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
-

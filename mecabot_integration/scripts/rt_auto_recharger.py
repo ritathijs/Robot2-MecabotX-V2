@@ -49,15 +49,9 @@ import yaml
 
 import math
 import os
+from pathlib import Path
 
-#存放充电桩位置的文件位置
-json_file='/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/Charger_Position.json'
-yaml_file='/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/robot_info.yaml'
-batstatus_file = "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/batstatus.txt"
-laadstatus_file = "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/laadstatus.txt"
-
-# NIEUW: file waarin we bijhouden of de robot in een laadcyclus zit (LAADCYCLUS) of los staat (LOS)
-laadcyclus_file = "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/laadcyclus_status.txt"
+DEFAULT_DATA_DIRECTORY = "/home/wheeltec/.local/share/mecabot_rt"
 
 
 #print_and_fixRetract相关，用于打印带颜色的信息
@@ -108,6 +102,21 @@ class AutoRecharger(Node):
         
         #创建节点
         super().__init__("auto_recharger")
+
+        self.declare_parameter("data_directory", DEFAULT_DATA_DIRECTORY)
+        self.data_directory = Path(
+            self.get_parameter("data_directory").value
+        ).expanduser()
+        if not self.data_directory.is_absolute():
+            raise ValueError("data_directory must be an absolute path")
+        self.data_directory.mkdir(parents=True, exist_ok=True)
+
+        self.json_file = self.data_directory / "Charger_Position.json"
+        self.yaml_file = self.data_directory / "robot_info.yaml"
+        self.laadcyclus_file = self.data_directory / "laadcyclus_status.txt"
+        self.get_logger().info(
+            f"Runtime recharge data directory: {self.data_directory}"
+        )
 
         print_and_fixRetract('Automatic charging node start!')
 
@@ -234,7 +243,11 @@ class AutoRecharger(Node):
 
  
         #De locatiegegevens van laadpalen uit een JSON-bestand ophalen
-        with open(json_file,'r')as fp:
+        if not self.json_file.is_file():
+            raise FileNotFoundError(
+                f"Required charger position file not found: {self.json_file}"
+            )
+        with open(self.json_file, 'r') as fp:
             self.json_data = json.load(fp)
 
         self.robot_security_off_pub = self.create_publisher(Int8,'/chassis_security',   10) 
@@ -326,23 +339,6 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
     def write_battery_status(self, status):
         pass
-            # """
-            # Schrijft BATTERY-LOW of BATTERY-OK naar batstatus.txt.
-            # Schrijft alleen wanneer de status veranderd is.
-            # """
-
-            # if status == self.last_batstatus:
-            #     return
-
-            # try:
-            #     with open(batstatus_file, "w") as f:
-            #         f.write(status)
-
-            #     self.last_batstatus = status
-            #     print_and_fixRetract(GREEN + f"Battery status opgeslagen: {status}" + RESET)
-
-            # except Exception as e:
-            #     print_and_fixRetract(RED + f"Fout bij schrijven batstatus.txt: {e}" + RESET)
 
     
     # Stuurt msg naar auto_recharge_event (BT)
@@ -379,19 +375,11 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         self.set_charge.call_async(req).add_done_callback(self.wait_server_callback)
         print_and_fixRetract(f'正在关闭自动回充功能, 请求已发送...')
 
-    def write_laadstatus(self, tekst):
-        try:
-            with open(laadstatus_file, "w") as f:
-                f.write(tekst)
-            print_and_fixRetract(GREEN + f"Laadstatus geschreven: {tekst}" + RESET)
-        except Exception as e:
-            print_and_fixRetract(RED + f"Fout schrijven laadstatus: {e}" + RESET)
-
     # NIEUW: schrijft LAADCYCLUS (start van een laadcyclus / robot staat tegen het station)
     # of LOS (stopbericht verwerkt, robot is losgekoppeld) naar laadcyclus_file
     def write_laadcyclus(self, tekst):
         try:
-            with open(laadcyclus_file, "w") as f:
+            with open(self.laadcyclus_file, "w") as f:
                 f.write(tekst)
             print_and_fixRetract(GREEN + f"Laadcyclus status geschreven: {tekst}" + RESET)
         except Exception as e:
@@ -492,7 +480,6 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                     GREEN + f"Volledige stop (XSTOP/XSTOPS). Naar voor rijden: {drive_forward}." + RESET
                 )
                 self.Stop_Charge(drive_forward=drive_forward)
-                self.write_laadstatus("LOS")
                 self.write_laadcyclus("LOS")
                 self.publish_event("ROBOT-UNDOCKED")
 
@@ -551,10 +538,6 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         # STOP
         elif command == "STOP":
             # Hier wordt vastgelegd dat de robot NIET (meer) tegen het station staat.
-            # Dit is de bestaande write en blijft ongewijzigd; hier wordt NIETS extra's
-            # naar onze laadcyclus_file geschreven.
-            self.write_laadstatus("LOS")
-
             if self.stop_processed:
                 print_and_fixRetract(
                     YELLOW + f"STOP genegeerd: stop reeds uitgevoerd (sessie {self.charge_session_id})." + RESET
@@ -702,7 +685,6 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             # self.publish_docking_status("DOCKING_DISABLED")
             self.publish_event("ROBOT-CHARGING")
             self.publish_rpi_event("RobotCharging")
-            self.write_laadstatus("LADEN")
 
             # Hier wordt vastgelegd dat de robot tegen het station staat (er loopt
             # effectief laadstroom) -> ook LAADCYCLUS wegschrijven naar onze file
@@ -843,13 +825,13 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
 
             # Save naar JSON file (persistent storage)
 
-        with open(json_file, 'w') as fp:
+        with open(self.json_file, 'w') as fp:
             json.dump(position_dic, fp, ensure_ascii=False)
             print_and_fixRetract("New charging pile position saved.")
            
          # Reload latest data in memory
 
-        with open(json_file,'r')as fp:
+        with open(self.json_file, 'r') as fp:
             self.json_data = json.load(fp)
 
         #发布最新的充电桩位置话题
@@ -1187,7 +1169,12 @@ def main():
             autorecharger.declare_parameter('diff_point', 1.2)
             autorecharger.declare_parameter('diff_angle', -15)
 
-            with open(yaml_file, 'r') as file:
+            if not autorecharger.yaml_file.is_file():
+                raise FileNotFoundError(
+                    f"Required robot configuration file not found: "
+                    f"{autorecharger.yaml_file}"
+                )
+            with open(autorecharger.yaml_file, 'r') as file:
                 params = yaml.safe_load(file)
 
             autorecharger.robot['BatteryCapacity'] = params['robot_info']['BatteryCapacity']

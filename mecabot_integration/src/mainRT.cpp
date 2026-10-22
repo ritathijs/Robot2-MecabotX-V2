@@ -1,7 +1,10 @@
 #include <rclcpp/rclcpp.hpp>
+#include <ament_index_cpp/get_package_share_directory.hpp>
 #include <behaviortree_cpp_v3/bt_factory.h>
 #include <behaviortree_cpp_v3/xml_parsing.h>
 
+#include <geometry_msgs/msg/twist.hpp>
+#include <std_msgs/msg/float32.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <chrono>
@@ -229,7 +232,9 @@ public:
           node_(std::move(node)),
           patrol_state_(std::move(patrol_state)),
           command_pub_(node_->create_publisher<std_msgs::msg::String>(
-              "/robot_command", 10))
+              "/robot_command", 10)),
+          patrol_reset_pub_(node_->create_publisher<std_msgs::msg::Bool>(
+              "/reset_patrol_locations", 10))
     {
     }
 
@@ -256,6 +261,9 @@ public:
         patrol_state_->tag_seen_since_cycle_completion = false;
 
         if (patrol_state_->consecutive_cycles_without_tag < 5) {
+            std_msgs::msg::Bool reset;
+            reset.data = true;
+            patrol_reset_pub_->publish(reset);
             return BT::NodeStatus::SUCCESS;
         }
 
@@ -287,6 +295,7 @@ private:
     rclcpp::Node::SharedPtr node_;
     std::shared_ptr<AprilTagPatrolState> patrol_state_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr command_pub_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr patrol_reset_pub_;
 };
 
 class IsAprilTagLost : public BT::ConditionNode
@@ -871,21 +880,478 @@ private:
     const std::chrono::seconds timeout_{200};
 };
 
-// Dummy of placeholder acties voor de wervingsflow
-#define DEFINE_DUMMY_ACTION(ClassName) \
-class ClassName : public BT::SyncActionNode { \
-public: \
-    ClassName(const std::string& name, const BT::NodeConfiguration& config, rclcpp::Node::SharedPtr node) \
-        : BT::SyncActionNode(name, config), node_(node) {} \
-    static BT::PortsList providedPorts() { return {}; } \
-    BT::NodeStatus tick() override { return BT::NodeStatus::SUCCESS; } \
-private: rclcpp::Node::SharedPtr node_; \
+class VisitorTargetMonitor
+{
+public:
+    explicit VisitorTargetMonitor(rclcpp::Node::SharedPtr node)
+    {
+        target_distance_sub_ =
+            node->create_subscription<std_msgs::msg::Float32>(
+                "/target_distance",
+                10,
+                [this](std_msgs::msg::Float32::SharedPtr msg)
+                {
+                    latest_distance_ = msg->data;
+                    last_update_ = std::chrono::steady_clock::now();
+                    has_update_ = true;
+
+                    if (ignore_current_person_) {
+                        if (latest_distance_ <= 0.0F) {
+                            ++clear_samples_;
+                            if (clear_samples_ >= required_clear_samples_) {
+                                ignore_current_person_ = false;
+                                clear_samples_ = 0;
+                            }
+                        } else {
+                            clear_samples_ = 0;
+                        }
+                    }
+                });
+    }
+
+    bool has_fresh_sample() const
+    {
+        return has_update_ &&
+            std::chrono::steady_clock::now() - last_update_ <= sample_timeout_;
+    }
+
+    bool person_detected() const
+    {
+        return has_fresh_sample() &&
+            latest_distance_ > 0.0F &&
+            !ignore_current_person_;
+    }
+
+    float distance() const
+    {
+        return latest_distance_;
+    }
+
+    void ignore_current_person()
+    {
+        ignore_current_person_ = true;
+        clear_samples_ = 0;
+    }
+
+private:
+    rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr target_distance_sub_;
+    float latest_distance_{0.0F};
+    bool has_update_{false};
+    bool ignore_current_person_{false};
+    unsigned int clear_samples_{0};
+    const unsigned int required_clear_samples_{2};
+    std::chrono::steady_clock::time_point last_update_{};
+    const std::chrono::seconds sample_timeout_{3};
 };
 
-DEFINE_DUMMY_ACTION(RobotExplore)
-DEFINE_DUMMY_ACTION(StartDrivingToPeople)
-DEFINE_DUMMY_ACTION(CheckingNearbyVisitors)
-DEFINE_DUMMY_ACTION(RobotRotationFollowMe)
+class IsPersonDetected : public BT::ConditionNode
+{
+public:
+    IsPersonDetected(
+        const std::string& name,
+        const BT::NodeConfiguration& config,
+        std::shared_ptr<VisitorTargetMonitor> target_monitor)
+        : BT::ConditionNode(name, config),
+          target_monitor_(std::move(target_monitor))
+    {
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {};
+    }
+
+    BT::NodeStatus tick() override
+    {
+        return target_monitor_->person_detected()
+            ? BT::NodeStatus::SUCCESS
+            : BT::NodeStatus::FAILURE;
+    }
+
+private:
+    std::shared_ptr<VisitorTargetMonitor> target_monitor_;
+};
+
+class StartDrivingToPeople : public BT::SyncActionNode
+{
+public:
+    StartDrivingToPeople(
+        const std::string& name,
+        const BT::NodeConfiguration& config,
+        rclcpp::Node::SharedPtr node)
+        : BT::SyncActionNode(name, config),
+          screen_pub_(node->create_publisher<std_msgs::msg::String>(
+              "/screen_command", 10))
+    {
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {};
+    }
+
+    BT::NodeStatus tick() override
+    {
+        std_msgs::msg::String screen;
+        screen.data = "robot-go-to-visitors";
+        screen_pub_->publish(screen);
+        RCLCPP_INFO(
+            rclcpp::get_logger("behavior_tree_node"),
+            "Bezoeker gedetecteerd; de robot nadert de persoon.");
+        return BT::NodeStatus::SUCCESS;
+    }
+
+private:
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr screen_pub_;
+};
+
+class CheckingNearbyVisitors : public BT::StatefulActionNode
+{
+public:
+    CheckingNearbyVisitors(
+        const std::string& name,
+        const BT::NodeConfiguration& config,
+        rclcpp::Node::SharedPtr node,
+        std::shared_ptr<VisitorTargetMonitor> target_monitor)
+        : BT::StatefulActionNode(name, config),
+          node_(std::move(node)),
+          target_monitor_(std::move(target_monitor)),
+          behavior_node_pub_(node_->create_publisher<std_msgs::msg::String>(
+              "/BehaviorTreeNode", 10)),
+          screen_pub_(node_->create_publisher<std_msgs::msg::String>(
+              "/screen_command", 10))
+    {
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {};
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        start_time_ = std::chrono::steady_clock::now();
+        last_person_seen_ = start_time_;
+        following_person_ = false;
+
+        publish_behavior_node("robot-arrived-at-visitors");
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "Navigatie naar de bezoeker gestart; doelafstand is maximaal 1,8 m.");
+        return BT::NodeStatus::RUNNING;
+    }
+
+    BT::NodeStatus onRunning() override
+    {
+        const auto now = std::chrono::steady_clock::now();
+        if (target_monitor_->person_detected()) {
+            last_person_seen_ = now;
+
+            if (target_monitor_->distance() <= stop_distance_) {
+                publish_behavior_node("robot-arrived-at-visitors");
+                publish_screen("robot-arrived-at-visitors");
+                following_person_ = false;
+                RCLCPP_INFO(
+                    node_->get_logger(),
+                    "Bezoeker bereikt; navigatie gestopt op circa 1,8 m.");
+                return BT::NodeStatus::SUCCESS;
+            }
+
+            if (!following_person_) {
+                publish_behavior_node("RobotRotationFollowMe");
+                following_person_ = true;
+            }
+        } else if (
+            following_person_ &&
+            now - last_person_seen_ >= target_lost_timeout_) {
+            publish_behavior_node("robot-arrived-at-visitors");
+            publish_screen("robot-explore");
+            RCLCPP_WARN(
+                node_->get_logger(),
+                "Bezoeker niet langer zichtbaar tijdens naderen; patrouille hervat.");
+            return BT::NodeStatus::FAILURE;
+        } else if (
+            !following_person_ &&
+            now - start_time_ >= initial_detection_timeout_) {
+            RCLCPP_WARN(
+                node_->get_logger(),
+                "Geen actuele bezoekerpositie ontvangen; patrouille hervat.");
+            return BT::NodeStatus::FAILURE;
+        }
+
+        if (now - start_time_ >= approach_timeout_) {
+            publish_behavior_node("robot-arrived-at-visitors");
+            RCLCPP_WARN(
+                node_->get_logger(),
+                "Timeout bij het naderen van de bezoeker; patrouille hervat.");
+            return BT::NodeStatus::FAILURE;
+        }
+
+        return BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override
+    {
+        publish_behavior_node("robot-arrived-at-visitors");
+        RCLCPP_WARN(
+            node_->get_logger(),
+            "Bezoekersnadering onderbroken.");
+    }
+
+private:
+    void publish_behavior_node(const std::string& name)
+    {
+        std_msgs::msg::String msg;
+        msg.data = name;
+        behavior_node_pub_->publish(msg);
+    }
+
+    void publish_screen(const std::string& name)
+    {
+        std_msgs::msg::String msg;
+        msg.data = name;
+        screen_pub_->publish(msg);
+    }
+
+    rclcpp::Node::SharedPtr node_;
+    std::shared_ptr<VisitorTargetMonitor> target_monitor_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr behavior_node_pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr screen_pub_;
+    bool following_person_{false};
+    std::chrono::steady_clock::time_point start_time_;
+    std::chrono::steady_clock::time_point last_person_seen_;
+    const float stop_distance_{1.8F};
+    const std::chrono::seconds initial_detection_timeout_{5};
+    const std::chrono::seconds target_lost_timeout_{3};
+    const std::chrono::seconds approach_timeout_{120};
+};
+
+class RobotRotationFollowMe : public BT::StatefulActionNode
+{
+public:
+    RobotRotationFollowMe(
+        const std::string& name,
+        const BT::NodeConfiguration& config,
+        rclcpp::Node::SharedPtr node,
+        std::shared_ptr<VisitorTargetMonitor> target_monitor)
+        : BT::StatefulActionNode(name, config),
+          node_(std::move(node)),
+          target_monitor_(std::move(target_monitor)),
+          no_response_sub_(node_->create_subscription<std_msgs::msg::Bool>(
+              "/visitor_no_response",
+              10,
+              [this](std_msgs::msg::Bool::SharedPtr msg)
+              {
+                  no_response_received_ = msg->data;
+              }))
+    {
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {};
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        no_response_received_ = false;
+        start_time_ = std::chrono::steady_clock::now();
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "Wachten op reactie van de bezoeker (maximaal 25 seconden).");
+        return BT::NodeStatus::RUNNING;
+    }
+
+    BT::NodeStatus onRunning() override
+    {
+        if (no_response_received_) {
+            target_monitor_->ignore_current_person();
+            RCLCPP_INFO(
+                node_->get_logger(),
+                "Keuzescherm verlopen; bezoeker wordt losgelaten en de zoekrotatie start.");
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        if (std::chrono::steady_clock::now() - start_time_ < response_timeout_) {
+            return BT::NodeStatus::RUNNING;
+        }
+
+        target_monitor_->ignore_current_person();
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "Geen START ontvangen binnen 25 seconden; bezoeker wordt tijdelijk "
+            "genegeerd tijdens de rotatie.");
+        return BT::NodeStatus::SUCCESS;
+    }
+
+    void onHalted() override
+    {
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "Wachten op bezoekersreactie onderbroken door een hogere BT-prioriteit.");
+    }
+
+private:
+    rclcpp::Node::SharedPtr node_;
+    std::shared_ptr<VisitorTargetMonitor> target_monitor_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr no_response_sub_;
+    bool no_response_received_{false};
+    std::chrono::steady_clock::time_point start_time_;
+    const std::chrono::seconds response_timeout_{25};
+};
+
+class VisitorNoResponseRecovery : public BT::StatefulActionNode
+{
+public:
+    VisitorNoResponseRecovery(
+        const std::string& name,
+        const BT::NodeConfiguration& config,
+        rclcpp::Node::SharedPtr node,
+        std::shared_ptr<VisitorTargetMonitor> target_monitor)
+        : BT::StatefulActionNode(name, config),
+          node_(std::move(node)),
+          target_monitor_(std::move(target_monitor)),
+          behavior_node_pub_(node_->create_publisher<std_msgs::msg::String>(
+              "/BehaviorTreeNode", 10)),
+          tracking_pause_pub_(node_->create_publisher<std_msgs::msg::Bool>(
+              "/visitor_tracking_paused", 10)),
+          turn_pub_(node_->create_publisher<geometry_msgs::msg::Twist>(
+              "/turn_cmd_vel", 10)),
+          search_pub_(node_->create_publisher<geometry_msgs::msg::Twist>(
+              "/search_cmd_vel", 10)),
+          screen_pub_(node_->create_publisher<std_msgs::msg::String>(
+              "/screen_command", 10))
+    {
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {};
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        phase_ = Phase::QuarterTurn;
+        phase_start_ = std::chrono::steady_clock::now();
+        target_monitor_->ignore_current_person();
+        publish_behavior_node("robot-arrived-at-visitors");
+        publish_tracking_pause(true);
+
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "Bezoeker reageerde niet: tracking gepauzeerd voor een kwartslag "
+            "van circa 90 graden.");
+        return BT::NodeStatus::RUNNING;
+    }
+
+    BT::NodeStatus onRunning() override
+    {
+        const auto now = std::chrono::steady_clock::now();
+        if (phase_ == Phase::QuarterTurn) {
+            if (now - phase_start_ < quarter_turn_duration_) {
+                publish_angular_velocity(turn_pub_, quarter_turn_speed_);
+                return BT::NodeStatus::RUNNING;
+            }
+
+            publish_stop(turn_pub_);
+            publish_tracking_pause(false);
+            phase_ = Phase::VisitorScan;
+            phase_start_ = now;
+            RCLCPP_INFO(
+                node_->get_logger(),
+                "Kwartslag voltooid; tracking actief tijdens verdere zoekrotatie.");
+        }
+
+        if (target_monitor_->person_detected()) {
+            publish_stop(search_pub_);
+            publish_screen("robot-go-to-visitors");
+            RCLCPP_INFO(
+                node_->get_logger(),
+                "Nieuwe bezoeker gezien tijdens de zoekrotatie; robot gaat "
+                "opnieuw naderen.");
+            return BT::NodeStatus::SUCCESS;
+        }
+
+        if (now - phase_start_ < visitor_scan_duration_) {
+            publish_angular_velocity(search_pub_, visitor_scan_speed_);
+            return BT::NodeStatus::RUNNING;
+        }
+
+        publish_stop(search_pub_);
+        publish_screen("robot-explore");
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "Zoekrotatie voltooid zonder nieuwe bezoeker; patrouille wordt hervat.");
+        return BT::NodeStatus::SUCCESS;
+    }
+
+    void onHalted() override
+    {
+        publish_stop(turn_pub_);
+        publish_stop(search_pub_);
+        publish_tracking_pause(false);
+        RCLCPP_WARN(
+            node_->get_logger(),
+            "Bezoekers-herstelrotatie onderbroken.");
+    }
+
+private:
+    enum class Phase
+    {
+        QuarterTurn,
+        VisitorScan
+    };
+
+    void publish_behavior_node(const std::string& name)
+    {
+        std_msgs::msg::String msg;
+        msg.data = name;
+        behavior_node_pub_->publish(msg);
+    }
+
+    void publish_tracking_pause(bool paused)
+    {
+        std_msgs::msg::Bool msg;
+        msg.data = paused;
+        tracking_pause_pub_->publish(msg);
+    }
+
+    void publish_screen(const std::string& name)
+    {
+        std_msgs::msg::String msg;
+        msg.data = name;
+        screen_pub_->publish(msg);
+    }
+
+    static void publish_angular_velocity(
+        const rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr& publisher,
+        double angular_velocity)
+    {
+        geometry_msgs::msg::Twist msg;
+        msg.angular.z = angular_velocity;
+        publisher->publish(msg);
+    }
+
+    static void publish_stop(
+        const rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr& publisher)
+    {
+        publisher->publish(geometry_msgs::msg::Twist());
+    }
+
+    rclcpp::Node::SharedPtr node_;
+    std::shared_ptr<VisitorTargetMonitor> target_monitor_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr behavior_node_pub_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr tracking_pause_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr turn_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr search_pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr screen_pub_;
+    Phase phase_{Phase::QuarterTurn};
+    std::chrono::steady_clock::time_point phase_start_;
+    const double quarter_turn_speed_{0.3};
+    const std::chrono::seconds quarter_turn_duration_{5};
+    const double visitor_scan_speed_{0.25};
+    const std::chrono::seconds visitor_scan_duration_{38};
+};
 
 
 // =========================================================================
@@ -1033,7 +1499,6 @@ DEFINE_CONDITION_NODE(WantToStartQuiz, "/WantToStartQuiz")
 DEFINE_CONDITION_NODE(IsRobotAtQuiz, "/IsRobotAtQuiz")
 DEFINE_CONDITION_NODE(IsRobotNearChargingStation, "/IsRobotNearChargingStation")
 DEFINE_CONDITION_NODE(IsRobotCharging, "/IsRobotCharging")
-DEFINE_CONDITION_NODE(IsPersonDetected, "/visitors_nearby")
 DEFINE_CONDITION_NODE(IsRobotAtLocationC, "/IsRobotAtLocationC")
 DEFINE_CONDITION_NODE(IsRobotAtLocationD, "/IsRobotAtLocationD")
 DEFINE_CONDITION_NODE(IsRobotAtLocationE, "/IsRobotAtLocationE")
@@ -1058,6 +1523,8 @@ int main(int argc, char **argv)
         });
 
     auto april_tag_patrol_state = std::make_shared<AprilTagPatrolState>();
+    auto visitor_target_monitor =
+        std::make_shared<VisitorTargetMonitor>(bt_node);
 
     // Registreer alle Acties
     REGISTER_BT_NODE(ExecuteUndockDrive)
@@ -1067,12 +1534,40 @@ int main(int argc, char **argv)
     REGISTER_BT_NODE(ExecuteActiveQuiz)
     REGISTER_BT_NODE(SendDriveToChargingArea)
     REGISTER_BT_NODE(StartInfraroodDocking)
-    REGISTER_BT_NODE(RobotExplore)
-    REGISTER_BT_NODE(StartDrivingToPeople)
-    REGISTER_BT_NODE(CheckingNearbyVisitors)
-    REGISTER_BT_NODE(RobotRotationFollowMe)
     REGISTER_BT_NODE(SetRobotInactive)
     REGISTER_BT_NODE(HoldAprilTagLost)
+    factory.registerBuilder<StartDrivingToPeople>(
+        "StartDrivingToPeople",
+        [bt_node](
+            const std::string& name,
+            const BT::NodeConfiguration& config) {
+            return std::make_unique<StartDrivingToPeople>(
+                name, config, bt_node);
+        });
+    factory.registerBuilder<CheckingNearbyVisitors>(
+        "CheckingNearbyVisitors",
+        [bt_node, visitor_target_monitor](
+            const std::string& name,
+            const BT::NodeConfiguration& config) {
+            return std::make_unique<CheckingNearbyVisitors>(
+                name, config, bt_node, visitor_target_monitor);
+        });
+    factory.registerBuilder<RobotRotationFollowMe>(
+        "RobotRotationFollowMe",
+        [bt_node, visitor_target_monitor](
+            const std::string& name,
+            const BT::NodeConfiguration& config) {
+            return std::make_unique<RobotRotationFollowMe>(
+                name, config, bt_node, visitor_target_monitor);
+        });
+    factory.registerBuilder<VisitorNoResponseRecovery>(
+        "VisitorNoResponseRecovery",
+        [bt_node, visitor_target_monitor](
+            const std::string& name,
+            const BT::NodeConfiguration& config) {
+            return std::make_unique<VisitorNoResponseRecovery>(
+                name, config, bt_node, visitor_target_monitor);
+        });
     factory.registerBuilder<CheckAprilTagAtLocationD>(
         "CheckAprilTagAtLocationD",
         [bt_node, april_tag_patrol_state](
@@ -1109,16 +1604,25 @@ int main(int argc, char **argv)
     REGISTER_BT_NODE(IsRobotNearChargingStation)
     REGISTER_BT_NODE(IsRobotCharging)
 
-    REGISTER_BT_NODE(IsPersonDetected)
     REGISTER_BT_NODE(IsRobotAtLocationC)
     REGISTER_BT_NODE(IsRobotAtLocationD)
     REGISTER_BT_NODE(IsRobotAtLocationE)
     REGISTER_BT_NODE(SendDriveLocationC)
     REGISTER_BT_NODE(SendDriveLocationD)
     REGISTER_BT_NODE(SendDriveLocationE)
+    factory.registerBuilder<IsPersonDetected>(
+        "IsPersonDetected",
+        [visitor_target_monitor](
+            const std::string& name,
+            const BT::NodeConfiguration& config) {
+            return std::make_unique<IsPersonDetected>(
+                name, config, visitor_target_monitor);
+        });
 
-    // GECORRIGEERD: Universeel en sluitend share-pad naar je XML-boom
-    auto tree = factory.createTreeFromFile("/home/wheeltec/wheeltec_ros2/install/mecabot_integration/share/mecabot_integration/config/behavior_tree.xml");
+    const auto behavior_tree_path =
+        ament_index_cpp::get_package_share_directory("mecabot_integration") +
+        "/config/behavior_tree.xml";
+    auto tree = factory.createTreeFromFile(behavior_tree_path);
 
     rclcpp::Rate rate(2); // 10 Hz oftewel elke 100 ms een tick
 

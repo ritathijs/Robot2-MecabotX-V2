@@ -45,6 +45,12 @@ class QuizSocketBridge(Node):
             10,
         )
         self.create_subscription(String, "/screen_command", self._on_ros_screen_command, 10)
+        self.create_subscription(
+            String,
+            "/bump_status",
+            self._on_bump_status,
+            10,
+        )
 
         # Queue voor thread-safe event verwerking (socket thread -> ROS thread)
         self._event_queue: "queue.Queue[tuple[str, object]]" = queue.Queue()
@@ -97,6 +103,8 @@ class QuizSocketBridge(Node):
 
         # admin / safety
         self.sio.on('robot-stop-for-x-time', lambda data=None: self._enqueue_event("temporary_stop", data))
+        self.sio.on('robot-quiz-options-pause', lambda data=None: self._enqueue_event("quiz_options_pause", data))
+        self.sio.on('robot-visitor-no-response', lambda data=None: self._enqueue_event("visitor_no_response", data))
         self.sio.on('login_canceled', lambda data=None: self._enqueue_event("admin_login_closed", data))
         self.sio.on('admin-panel-open', lambda data=None: self._enqueue_event("admin_open", data))
         self.sio.on('admin-panel-closed', lambda data=None: self._enqueue_event("admin_closed", data))
@@ -294,6 +302,17 @@ class QuizSocketBridge(Node):
                 self.get_logger().info(f"🟢 Actieve status universeel verzonden naar Pi: {is_active}")
         except Exception as e:
             self.get_logger().error(f"Fout bij verzenden actieve status naar Pi: {e}")
+
+    def _on_bump_status(self, msg: String) -> None:
+        if not self.sio.connected:
+            return
+
+        try:
+            self.sio.emit("robot-bumper-status", {"msg": msg.data})
+        except Exception as e:
+            self.get_logger().error(
+                f"Fout bij doorsturen bumperstatus naar Pi: {e}"
+            )
 
     def _on_robot_active_status(self, msg: Bool) -> None:
         self.send_active_status_to_pi(msg.data)

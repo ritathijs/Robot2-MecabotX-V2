@@ -69,11 +69,12 @@
               <StartDrivingToPeople/>
               <CheckingNearbyVisitors/>
               <RobotRotationFollowMe/>
+              <VisitorNoResponseRecovery/>
             </Sequence>
           </ReactiveSequence>
 
           <!-- 3. PATROUILLE LUS (C -> D -> E) -->
-          <!-- Gewone Sequence zorgt voor een reset naar punt C na een onderbreking/quiz -->
+          <!-- Quiz- en werkzonewissels resetten naar C; bezoekersinteractie behoudt de ronde. -->
           <Sequence name="WervingsPatrouille">
             
             <!-- ROUTE EN 20 SEC WACHTEN OP PUNT C -->
@@ -108,10 +109,10 @@
               <Fallback name="AfhandelingPuntE">
                 <Sequence name="WachtOpE">
                   <IsRobotAtLocationE/>
-                  <CompletePatrolCycle/>
                   <Delay delay_msec="20000">
                     <AlwaysSuccess/>
                   </Delay>
+                  <CompletePatrolCycle/>
                 </Sequence>
                 <SendDriveLocationE/>
               </Fallback>
@@ -177,6 +178,7 @@
     <Action ID="StartDrivingToPeople"/>
     <Action ID="CheckingNearbyVisitors"/>
     <Action ID="RobotRotationFollowMe"/>
+    <Action ID="VisitorNoResponseRecovery"/>
     
     <!-- Patrouille -->
     <Condition ID="IsRobotAtLocationC"/>

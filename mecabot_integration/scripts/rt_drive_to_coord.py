@@ -31,6 +31,8 @@ behavior_tree_nodes = {
 
 	"follow-robot-screen": {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always"},
 	"robot-arrived-at-quiz-location": {"keepoutfilter_on": "True", "drive_action": "release", "message_frequency": "once"},
+	"RobotRotationFollowMe": {"keepoutfilter_on": "True", "drive_action": "peoplesearch", "message_frequency": "always"},
+	"robot-arrived-at-visitors": {"keepoutfilter_on": "True", "drive_action": "release", "message_frequency": "once"},
 	"explore-location-c": {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always"},
 	"explore-location-d": {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always"},
 	"explore-location-e": {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always"},
@@ -311,4 +313,3 @@ def main(args=None):
 
 if __name__ == '__main__':
 	main()
-
