@@ -2,7 +2,6 @@
 set -Eeuo pipefail
 
 ROS_DISTRO="humble"
-BASE_WORKSPACE="/home/wheeltec/wheeltec_ros2"
 RT_WORKSPACE="/home/wheeltec/wheeltec_ros2_rt"
 LOG_DIR="$RT_WORKSPACE/logs"
 RT_CONFIG="$RT_WORKSPACE/install/mecabot_integration/share/mecabot_integration/config/robot_locations.yaml"
@@ -10,7 +9,6 @@ RT_DATA_DIR="/home/wheeltec/.local/share/mecabot_rt"
 ENABLE_LOGS="${ENABLE_LOGS:-true}"
 
 ROS_SETUP="/opt/ros/$ROS_DISTRO/setup.bash"
-BASE_SETUP="$BASE_WORKSPACE/install/setup.bash"
 RT_SETUP="$RT_WORKSPACE/install/setup.bash"
 
 mkdir -p "$LOG_DIR"
@@ -20,7 +18,7 @@ fail() {
     exit 1
 }
 
-for required_file in "$ROS_SETUP" "$BASE_SETUP" "$RT_SETUP" "$RT_CONFIG"; do
+for required_file in "$ROS_SETUP" "$RT_SETUP" "$RT_CONFIG"; do
     [[ -r "$required_file" ]] || fail "Benodigd setup/configbestand ontbreekt: $required_file"
 done
 
@@ -35,7 +33,6 @@ command -v gnome-terminal >/dev/null 2>&1 || fail "gnome-terminal is niet beschi
     fail "RT-robotconfiguratie ontbreekt: $RT_DATA_DIR/robot_info.yaml"
 
 source "$ROS_SETUP"
-source "$BASE_SETUP"
 source "$RT_SETUP"
 
 required_packages=(
@@ -99,7 +96,6 @@ run_in_terminal() {
 
     gnome-terminal --title="$title" -- bash -lc "
         source '$ROS_SETUP' &&
-        source '$BASE_SETUP' &&
         source '$RT_SETUP' &&
         cd '$RT_WORKSPACE' &&
         $logging_setup &&

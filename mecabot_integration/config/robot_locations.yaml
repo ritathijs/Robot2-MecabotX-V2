@@ -27,4 +27,3 @@ auto_recharger:
 drive_mux:
   ros__parameters:
     data_directory: /home/wheeltec/.local/share/mecabot
-
