@@ -10,7 +10,7 @@ import threading
 import time
 
 import rclpy
-from geometry_msgs.msg import PoseWithCovarianceStamped
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -54,10 +54,32 @@ class SimRobot(Node):
         self.auto_activate_delay = self.declare_parameter(
             "auto_activate_delay_sec", 0.0
         ).value
+        # Scenario "day": bezoeker en lage batterij op vaste tijdstippen.
+        self.scenario = self.declare_parameter("scenario", "none").value
+        self.visitor_at = self.declare_parameter("visitor_at_sec", 60.0).value
+        self.visitor_duration = self.declare_parameter(
+            "visitor_duration_sec", 40.0
+        ).value
+        self.visitor_distance = self.declare_parameter(
+            "visitor_distance", 3.0
+        ).value
+        self.low_battery_at = self.declare_parameter(
+            "low_battery_at_sec", 150.0
+        ).value
+        self.low_battery_voltage = self.declare_parameter(
+            "low_battery_voltage", 20.0
+        ).value
+        self.reactivate_after_charge = self.declare_parameter(
+            "reactivate_after_charge_sec", 0.0
+        ).value
 
         self.x, self.y, self.yaw = (float(v) for v in start_pose)
         self.docked = bool(self.start_docked)
         self.active_goal = None
+        self.battery_override = None
+        self.visitor_distance_now = 0.0
+        self.visitor_stamp = None
+        self.bump_text = None
 
         self.amcl_pub = self.create_publisher(
             PoseWithCovarianceStamped, "/amcl_pose", 10
@@ -78,9 +100,31 @@ class SimRobot(Node):
         )
         self.reset_done_pub = self.create_publisher(String, "/reset_done", 10)
         self.active_pub = self.create_publisher(Bool, "/RobotActive", 10)
+        self.target_distance_pub = self.create_publisher(
+            Float32, "/target_distance", 10
+        )
+        self.visitors_pub = self.create_publisher(
+            Bool, "/visitors_nearby", 10
+        )
+        self.people_coord_pub = self.create_publisher(
+            PoseStamped, "/peoplesearchcoord", 10
+        )
 
         self.create_subscription(
             String, "/DockingCommand", self.on_docking_command, 10,
+            callback_group=self.cb_group,
+        )
+        # Handmatige bediening tijdens de simulatie.
+        self.create_subscription(
+            Float32, "/sim/battery", self.on_sim_battery, 10,
+            callback_group=self.cb_group,
+        )
+        self.create_subscription(
+            Float32, "/sim/visitor_distance", self.on_sim_visitor, 10,
+            callback_group=self.cb_group,
+        )
+        self.create_subscription(
+            String, "/sim/bump", self.on_sim_bump, 10,
             callback_group=self.cb_group,
         )
         self.create_subscription(
@@ -118,6 +162,7 @@ class SimRobot(Node):
                 callback_group=self.cb_group,
             )
 
+        self.start_scenario()
         self.get_logger().info(
             f"Simulatie gestart op ({self.x:.2f}, {self.y:.2f}), "
             f"gedockt={self.docked}, snelheid={self.speed} m/s."
@@ -149,9 +194,12 @@ class SimRobot(Node):
             docked = self.docked
 
         battery = Float32()
-        battery.data = float(
-            self.voltage_docked if docked else self.voltage_undocked
-        )
+        if docked:
+            battery.data = float(self.voltage_docked)
+        elif self.battery_override is not None:
+            battery.data = float(self.battery_override)
+        else:
+            battery.data = float(self.voltage_undocked)
         self.battery_pub.publish(battery)
 
         current = Float32()
@@ -163,8 +211,90 @@ class SimRobot(Node):
         self.infrared_pub.publish(infrared)
 
         bump = String()
-        bump.data = "De bumper is niet ingedrukt"
+        bump.data = self.bump_text or "De bumper is niet ingedrukt"
         self.bump_pub.publish(bump)
+
+        self.publish_visitor()
+
+    def publish_visitor(self):
+        with self.lock:
+            distance = self.visitor_distance_now
+            stamp = self.visitor_stamp
+            x, y, yaw = self.x, self.y, self.yaw
+
+        target = Float32()
+        target.data = float(distance)
+        self.target_distance_pub.publish(target)
+
+        nearby = Bool()
+        nearby.data = distance > 0.0
+        self.visitors_pub.publish(nearby)
+
+        if distance > 0.0 and stamp is not None:
+            pose = PoseStamped()
+            pose.header.frame_id = "map"
+            pose.header.stamp = stamp
+            pose.pose.position.x = x + distance * math.cos(yaw)
+            pose.pose.position.y = y + distance * math.sin(yaw)
+            pose.pose.orientation.z, pose.pose.orientation.w = (
+                yaw_to_quaternion(yaw + math.pi)
+            )
+            self.people_coord_pub.publish(pose)
+
+    # --- Handmatige bediening en scenario ---------------------------------
+
+    def on_sim_battery(self, msg):
+        self.battery_override = float(msg.data) if msg.data > 0.0 else None
+        self.get_logger().info(
+            f"Batterijspanning (niet gedockt): {self.battery_override}"
+        )
+
+    def on_sim_visitor(self, msg):
+        with self.lock:
+            appeared = self.visitor_distance_now <= 0.0 < msg.data
+            self.visitor_distance_now = max(0.0, float(msg.data))
+            if appeared:
+                self.visitor_stamp = self.get_clock().now().to_msg()
+        self.get_logger().info(
+            f"Bezoeker op {msg.data:.1f} m"
+            if msg.data > 0.0 else "Bezoeker vertrokken"
+        )
+
+    def on_sim_bump(self, msg):
+        text = msg.data.strip()
+        self.bump_text = text or None
+        self.get_logger().info(f"Bumper: {text or 'losgelaten'}")
+
+    def start_scenario(self):
+        if self.scenario != "day":
+            return
+        self.get_logger().info(
+            "Scenario 'day': bezoeker na "
+            f"{self.visitor_at:.0f} s, lage batterij na "
+            f"{self.low_battery_at:.0f} s."
+        )
+        self._after(
+            self.visitor_at,
+            lambda: self.on_sim_visitor(
+                Float32(data=float(self.visitor_distance))
+            ),
+        )
+        self._after(
+            self.visitor_at + self.visitor_duration,
+            lambda: self.on_sim_visitor(Float32(data=0.0)),
+        )
+        self._after(
+            self.low_battery_at,
+            lambda: self.on_sim_battery(
+                Float32(data=float(self.low_battery_voltage))
+            ),
+        )
+
+    def activate_again(self):
+        msg = Bool()
+        msg.data = True
+        self.active_pub.publish(msg)
+        self.get_logger().info("Robot opnieuw actief gezet na laden.")
 
     def activate_robot(self):
         self.activate_timer.cancel()
@@ -207,8 +337,11 @@ class SimRobot(Node):
         def finish():
             with self.lock:
                 self.docked = True
+            self.battery_override = None
             self._publish_event("SIM-DRIVE-TO-DOCK-SUCCESS")
             self._publish_event("SIM-ROBOT-CHARGING")
+            if self.reactivate_after_charge > 0.0:
+                self._after(self.reactivate_after_charge, self.activate_again)
 
         self._after(self.dock_delay, finish)
 

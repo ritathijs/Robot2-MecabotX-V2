@@ -22,6 +22,10 @@ def generate_launch_description():
     start_docked = LaunchConfiguration('start_docked')
     speed = LaunchConfiguration('speed')
     auto_activate = LaunchConfiguration('auto_activate_delay_sec')
+    scenario = LaunchConfiguration('scenario')
+    visitor_at = LaunchConfiguration('visitor_at_sec')
+    low_battery_at = LaunchConfiguration('low_battery_at_sec')
+    reactivate = LaunchConfiguration('reactivate_after_charge_sec')
 
     # De simulatie vervangt Nav2, AMCL, laadpaal, bumper en sensoren.
     # Quiz-bridge, camera, mux en AprilTag-node worden niet gestart.
@@ -29,6 +33,11 @@ def generate_launch_description():
         DeclareLaunchArgument('start_docked', default_value='true'),
         DeclareLaunchArgument('speed', default_value='1.0'),
         DeclareLaunchArgument('auto_activate_delay_sec', default_value='0.0'),
+        # scenario:=day speelt bezoeker, lage batterij en terug laden af.
+        DeclareLaunchArgument('scenario', default_value='none'),
+        DeclareLaunchArgument('visitor_at_sec', default_value='60.0'),
+        DeclareLaunchArgument('low_battery_at_sec', default_value='150.0'),
+        DeclareLaunchArgument('reactivate_after_charge_sec', default_value='0.0'),
         ExecuteProcess(
             cmd=[
                 'python3', script('sim_robot.py'),
@@ -36,6 +45,10 @@ def generate_launch_description():
                 '-p', ['start_docked:=', start_docked],
                 '-p', ['speed:=', speed],
                 '-p', ['auto_activate_delay_sec:=', auto_activate],
+                '-p', ['scenario:=', scenario],
+                '-p', ['visitor_at_sec:=', visitor_at],
+                '-p', ['low_battery_at_sec:=', low_battery_at],
+                '-p', ['reactivate_after_charge_sec:=', reactivate],
             ],
             output='screen',
         ),
