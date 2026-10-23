@@ -77,46 +77,49 @@
           <!-- Quiz- en werkzonewissels resetten naar C; bezoekersinteractie behoudt de ronde. -->
           <Sequence name="WervingsPatrouille">
             
-            <!-- ROUTE EN 20 SEC WACHTEN OP PUNT C -->
-            <ForceSuccess>
-              <Fallback name="AfhandelingPuntC">
-                <Sequence name="WachtOpC">
+            <!-- RIJD NAAR PUNT C EN WACHT 20 SEC -->
+            <Fallback name="AfhandelingPuntC">
+              <Sequence name="WachtOpC">
+                <Fallback name="NaarPuntC">
                   <IsRobotAtLocationC/>
-                  <Delay delay_msec="20000">
-                    <AlwaysSuccess/>
-                  </Delay>
-                </Sequence>
-                <SendDriveLocationC/>
-              </Fallback>
-            </ForceSuccess>
+                  <SendDriveLocationC/>
+                </Fallback>
+                <Delay delay_msec="20000">
+                  <AlwaysSuccess/>
+                </Delay>
+              </Sequence>
+              <AlwaysSuccess/>
+            </Fallback>
 
-            <!-- ROUTE EN 20 SEC WACHTEN OP PUNT D -->
-            <ForceSuccess>
-              <Fallback name="AfhandelingPuntD">
-                <Sequence name="WachtOpD">
+            <!-- RIJD NAAR PUNT D, CONTROLEER APRILTAG EN WACHT 20 SEC -->
+            <Fallback name="AfhandelingPuntD">
+              <Sequence name="WachtOpD">
+                <Fallback name="NaarPuntD">
                   <IsRobotAtLocationD/>
-                  <CheckAprilTagAtLocationD/>
-                  <Delay delay_msec="20000">
-                    <AlwaysSuccess/>
-                  </Delay>
-                </Sequence>
-                <SendDriveLocationD/>
-              </Fallback>
-            </ForceSuccess>
+                  <SendDriveLocationD/>
+                </Fallback>
+                <CheckAprilTagAtLocationD/>
+                <Delay delay_msec="20000">
+                  <AlwaysSuccess/>
+                </Delay>
+              </Sequence>
+              <AlwaysSuccess/>
+            </Fallback>
 
-            <!-- ROUTE EN 20 SEC WACHTEN OP PUNT E -->
-            <ForceSuccess>
-              <Fallback name="AfhandelingPuntE">
-                <Sequence name="WachtOpE">
+            <!-- RIJD NAAR PUNT E, WACHT 20 SEC EN RONDE AFSLUITEN -->
+            <Fallback name="AfhandelingPuntE">
+              <Sequence name="WachtOpE">
+                <Fallback name="NaarPuntE">
                   <IsRobotAtLocationE/>
-                  <Delay delay_msec="20000">
-                    <AlwaysSuccess/>
-                  </Delay>
-                  <CompletePatrolCycle/>
-                </Sequence>
-                <SendDriveLocationE/>
-              </Fallback>
-            </ForceSuccess>
+                  <SendDriveLocationE/>
+                </Fallback>
+                <Delay delay_msec="20000">
+                  <AlwaysSuccess/>
+                </Delay>
+                <CompletePatrolCycle/>
+              </Sequence>
+              <AlwaysSuccess/>
+            </Fallback>
 
           </Sequence>
 
