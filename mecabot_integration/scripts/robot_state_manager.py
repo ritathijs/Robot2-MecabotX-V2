@@ -631,7 +631,13 @@ class RobotStateManager(Node):
 
     def on_robot_active(self, msg: Bool) -> None:
         with self.lock:
+            changed = self.state.robot_active != msg.data
             self.state.robot_active = msg.data
+
+        if changed:
+            self.get_logger().info(
+                f"[Robot] /RobotActive ontvangen: {msg.data}"
+            )
 
         self._publish_status_snapshot()
 
