@@ -39,6 +39,7 @@ install(PROGRAMS
   scripts/robot_state_manager.py
   scripts/rt_drive_to_coord.py
   scripts/rt_auto_recharger.py
+  scripts/sim_robot.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
