@@ -8,6 +8,7 @@
 #include <std_msgs/msg/string.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <chrono>
+#include <thread>
 #include <atomic>
 #include <memory>
 #include <utility>
@@ -1664,6 +1665,23 @@ int main(int argc, char **argv)
         ament_index_cpp::get_package_share_directory("mecabot_integration") +
         "/config/behavior_tree.xml";
     auto tree = factory.createTreeFromFile(behavior_tree_path);
+
+    // /robot_command is volatile: wacht op de ontvangers zodat het eerste
+    // commando van de BT niet verloren gaat tijdens het opstarten.
+    {
+        const auto wait_start = std::chrono::steady_clock::now();
+        while (rclcpp::ok() &&
+               bt_node->count_subscribers("/robot_command") < 2 &&
+               std::chrono::steady_clock::now() - wait_start < std::chrono::seconds(15))
+        {
+            rclcpp::spin_some(bt_node);
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        RCLCPP_INFO(
+            bt_node->get_logger(),
+            "BT start; /robot_command heeft %zu ontvanger(s).",
+            bt_node->count_subscribers("/robot_command"));
+    }
 
     rclcpp::Rate rate(2); // 10 Hz oftewel elke 100 ms een tick
 
