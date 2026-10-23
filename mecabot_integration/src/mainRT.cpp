@@ -83,6 +83,12 @@ public:
           active_pub_(node->create_publisher<std_msgs::msg::Bool>(
               "/RobotActive", 10))
     {
+        active_sub_ = node->create_subscription<std_msgs::msg::Bool>(
+            "/IsRobotActive", 10,
+            [this](std_msgs::msg::Bool::SharedPtr msg)
+            {
+                is_active_ = msg->data;
+            });
     }
 
     static BT::PortsList providedPorts()
@@ -92,14 +98,21 @@ public:
 
     BT::NodeStatus tick() override
     {
-        std_msgs::msg::Bool msg;
-        msg.data = false;
-        active_pub_->publish(msg);
+        // Alleen publiceren als de robot echt actief is, anders overschrijft een
+        // verouderde tick een net ontvangen activering.
+        if (is_active_)
+        {
+            std_msgs::msg::Bool msg;
+            msg.data = false;
+            active_pub_->publish(msg);
+        }
         return BT::NodeStatus::SUCCESS;
     }
 
 private:
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr active_pub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr active_sub_;
+    bool is_active_{false};
 };
 
 struct AprilTagPatrolState
