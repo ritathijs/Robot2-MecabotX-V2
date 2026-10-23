@@ -3,7 +3,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, TimerAction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -66,11 +66,18 @@ def generate_launch_description():
             parameters=[locations_config],
             output='screen',
         ),
-        Node(
-            package=package_name,
-            executable='rt_bt_node',
-            name='behavior_tree_node',
-            output='screen',
+        # De BT publiceert node-wissels eenmalig op een volatile topic; start
+        # hem pas als de overige nodes klaar zijn om niets te missen.
+        TimerAction(
+            period=6.0,
+            actions=[
+                Node(
+                    package=package_name,
+                    executable='rt_bt_node',
+                    name='behavior_tree_node',
+                    output='screen',
+                ),
+            ],
         ),
         ExecuteProcess(
             cmd=['python3', script('rt_drive_to_coord.py')],
