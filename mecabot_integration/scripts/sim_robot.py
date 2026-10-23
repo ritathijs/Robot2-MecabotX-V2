@@ -84,6 +84,10 @@ class SimRobot(Node):
             callback_group=self.cb_group,
         )
         self.create_subscription(
+            String, "/force_charge", self.on_force_charge, 10,
+            callback_group=self.cb_group,
+        )
+        self.create_subscription(
             String, "/charge_XSTOP", self.on_undock_command, 10,
             callback_group=self.cb_group,
         )
@@ -190,7 +194,15 @@ class SimRobot(Node):
     def on_docking_command(self, msg):
         if msg.data.strip().upper() != "START":
             return
-        self.get_logger().info("Docking gestart (gesimuleerd).")
+        self._start_docking("Docking")
+
+    def on_force_charge(self, msg):
+        if msg.data.strip().upper() != "0START":
+            return
+        self._start_docking("IR-docking")
+
+    def _start_docking(self, label):
+        self.get_logger().info(f"{label} gestart (gesimuleerd).")
 
         def finish():
             with self.lock:
