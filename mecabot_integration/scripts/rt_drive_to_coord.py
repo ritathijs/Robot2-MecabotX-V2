@@ -17,6 +17,7 @@ class GoalRecord:
 	result: any = None		   # Het uiteindelijke Resultaat
 	accepted: bool = False	   # Is het doel geaccepteerd?
 	status: int = 0			  # De statuscode (1=Pending, 4=Canceled, etc.)
+	stale: bool = False		  # Doel hoort bij een eerdere BT-node
 
 behavior_tree_nodes = {
 	# keepoutfilter_on: "True" / "False" / "none"
@@ -109,7 +110,11 @@ class DriveToCoord(Node):
 
 	def BehaviorTreeNode_callback(self, msg):
 		with self.lock:
-			self.last_BehaviorTreeNode = msg.data.strip()
+			node_name = msg.data.strip()
+			if node_name != self.last_BehaviorTreeNode:
+				for old_record in self.current_goals:
+					old_record.stale = True
+			self.last_BehaviorTreeNode = node_name
 			self.needs_action = True
 		self.get_logger().info("Nieuw topic ontvangen van BehaviorTree.")
 
@@ -281,7 +286,7 @@ class DriveToCoord(Node):
 
 			# Resultaten van vervangen of geannuleerde doelen mogen de
 			# status van het huidige doel niet beïnvloeden.
-			if not self.current_goals or self.current_goals[-1] is not record:
+			if record.stale or not self.current_goals or self.current_goals[-1] is not record:
 				self.get_logger().info(
 					f"Resultaat van oud doel genegeerd (status {record.status:02d})."
 				)
