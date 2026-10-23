@@ -249,6 +249,12 @@ public:
           patrol_reset_pub_(node_->create_publisher<std_msgs::msg::Bool>(
               "/reset_patrol_locations", 10))
     {
+        location_c_sub_ = node_->create_subscription<std_msgs::msg::Bool>(
+            "/IsRobotAtLocationC", 10,
+            [this](std_msgs::msg::Bool::SharedPtr msg)
+            {
+                at_location_c_ = msg->data;
+            });
     }
 
     static BT::PortsList providedPorts()
@@ -277,7 +283,9 @@ public:
             std_msgs::msg::Bool reset;
             reset.data = true;
             patrol_reset_pub_->publish(reset);
-            return BT::NodeStatus::SUCCESS;
+            waiting_for_reset_ = true;
+            reset_start_ = std::chrono::steady_clock::now();
+            return BT::NodeStatus::RUNNING;
         }
 
         RCLCPP_ERROR(
@@ -294,11 +302,27 @@ public:
 
     BT::NodeStatus onRunning() override
     {
+        if (waiting_for_reset_) {
+            // Pas afsluiten als punt C als "niet bereikt" is bevestigd, zodat
+            // de volgende ronde niet direct de wachttijd op C start.
+            const bool timed_out =
+                std::chrono::steady_clock::now() - reset_start_ >= std::chrono::seconds(3);
+            if (!at_location_c_ || timed_out) {
+                if (timed_out && at_location_c_) {
+                    RCLCPP_WARN(
+                        node_->get_logger(),
+                        "Reset van punt C niet bevestigd binnen 3 seconden.");
+                }
+                waiting_for_reset_ = false;
+                return BT::NodeStatus::SUCCESS;
+            }
+        }
         return BT::NodeStatus::RUNNING;
     }
 
     void onHalted() override
     {
+        waiting_for_reset_ = false;
         RCLCPP_WARN(
             node_->get_logger(),
             "Afhandeling van de AprilTag-vermistestatus afgebroken.");
@@ -309,6 +333,10 @@ private:
     std::shared_ptr<AprilTagPatrolState> patrol_state_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr command_pub_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr patrol_reset_pub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr location_c_sub_;
+    bool at_location_c_{false};
+    bool waiting_for_reset_{false};
+    std::chrono::steady_clock::time_point reset_start_;
 };
 
 class IsAprilTagLost : public BT::ConditionNode

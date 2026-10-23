@@ -479,10 +479,8 @@ class RobotStateManager(Node):
         with self.lock:
             self.state.at_location_d = False
             self.state.at_location_e = False
-            # Het reset-bericht kan na de wissel naar punt C binnenkomen;
-            # dan mag de nieuwe bestemming niet worden gewist.
+            self.state.at_location_c = False
             if self.state.active_destination in (None, "location_e"):
-                self.state.at_location_c = False
                 self.state.active_destination = None
 
         self._publish_status_snapshot()
