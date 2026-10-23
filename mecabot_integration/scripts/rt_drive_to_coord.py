@@ -278,7 +278,15 @@ class DriveToCoord(Node):
 			# Vul de laatste informatie in het record in
 			record.result = result_handle.result
 			record.status = result_handle.status
-			
+
+			# Resultaten van vervangen of geannuleerde doelen mogen de
+			# status van het huidige doel niet beïnvloeden.
+			if not self.current_goals or self.current_goals[-1] is not record:
+				self.get_logger().info(
+					f"Resultaat van oud doel genegeerd (status {record.status:02d})."
+				)
+				return
+
 			self.publish_status(record.status, "NAV")
 			self.get_logger().info(f"Goal afgerond, Nav2-status: {record.status:02d}")
 
