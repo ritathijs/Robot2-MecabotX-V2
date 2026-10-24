@@ -1298,6 +1298,16 @@ class RobotStateManager(Node):
 
     def handle_screen_request(self, data: Any) -> None:
         if data is None:
+            # De Pi vraagt zonder schermnaam om het huidige scherm (bv. na het
+            # herladen of sluiten van login/admin): stuur het laatste scherm opnieuw.
+            with self.lock:
+                if self.state.admin_open or self.state.admin_login_open:
+                    return
+                current_screen = self.state.last_screen
+            if current_screen:
+                screen_msg = String()
+                screen_msg.data = current_screen
+                self.screen_pub.publish(screen_msg)
             return
 
         if isinstance(data, dict):
