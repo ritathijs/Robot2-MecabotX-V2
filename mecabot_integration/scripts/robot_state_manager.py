@@ -784,6 +784,8 @@ class RobotStateManager(Node):
         event = msg.data
         self.get_logger().info(f"[Docking] Event ontvangen: {event}")
 
+        show_charging_screen = event.endswith("ROBOT-CHARGING")
+
         with self.lock:
             if event.endswith("DRIVE-TO-DOCK-SUCCESS"):
                 self.state.at_station = True
@@ -809,6 +811,17 @@ class RobotStateManager(Node):
                 self.state.at_station = False
                 self.state.docked = False
                 self.state.charging = False
+
+        if show_charging_screen:
+            with self.lock:
+                self.state.last_screen = "robot-charging"
+                admin_open = (
+                    self.state.admin_open or self.state.admin_login_open
+                )
+            if not admin_open:
+                screen_msg = String()
+                screen_msg.data = "robot-charging"
+                self.screen_pub.publish(screen_msg)
 
         self._publish_status_snapshot()
 
