@@ -278,6 +278,12 @@ class RobotStateManager(Node):
             10,
         )
         self.create_subscription(
+            String,
+            "/force_charge",
+            self.on_force_charge,
+            10,
+        )
+        self.create_subscription(
             Bool,
             "/RobotActive",
             self.on_robot_active,
@@ -779,6 +785,18 @@ class RobotStateManager(Node):
         self.state.at_location_e = False
         self.state.active_destination = None
         return location
+
+    def on_force_charge(self, msg: String) -> None:
+        # IR-docking start zonder node-wissel; toon het dokscherm.
+        if msg.data.strip().upper() != "0START":
+            return
+        with self.lock:
+            self.state.last_screen = "robot-docking"
+            admin_open = self.state.admin_open or self.state.admin_login_open
+        if not admin_open:
+            screen_msg = String()
+            screen_msg.data = "robot-docking"
+            self.screen_pub.publish(screen_msg)
 
     def on_recharge_event(self, msg: String) -> None:
         event = msg.data
