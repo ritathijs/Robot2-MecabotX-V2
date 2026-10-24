@@ -339,9 +339,12 @@ class SimRobot(Node):
         # het annuleren van een doel telt niet mee.
         now = time.monotonic()
         with self.estop_lock:
-            while self.estop_times and now - self.estop_times[0] > 1.0:
+            while self.estop_times and now - self.estop_times[0] > 3.0:
                 self.estop_times.popleft()
-            sustained = len(self.estop_times) >= 5
+            sustained = (
+                len(self.estop_times) >= 5
+                and now - self.estop_times[-1] < 1.5
+            )
             if sustained != self.was_paused:
                 self.was_paused = sustained
                 self.get_logger().info(
@@ -425,6 +428,11 @@ class SimRobot(Node):
                 self.get_logger().info("Nav-doel geannuleerd.")
                 return NavigateToPose.Result()
 
+            with self.lock:
+                if self.active_goal is not goal_handle:
+                    goal_handle.abort()
+                    return NavigateToPose.Result()
+
             if self._movement_paused():
                 time.sleep(period)
                 continue
@@ -458,7 +466,7 @@ class SimRobot(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = SimRobot()
-    executor = MultiThreadedExecutor(num_threads=6)
+    executor = MultiThreadedExecutor(num_threads=16)
     executor.add_node(node)
     try:
         executor.spin()
