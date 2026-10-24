@@ -56,6 +56,7 @@ class RobotState:
     startup_pose_y: float | None = None
     startup_reset_done_received: bool = False
     startup_location_failed: bool = False
+    startup_dock_fallback_active: bool = False
     lost_screen_sent: bool = False
 
     at_quiz: bool = False
@@ -104,6 +105,12 @@ class RobotStateManager(Node):
 
     def __init__(self):
         super().__init__("robot_state_manager")
+
+        # Zonder AprilTag bij het laadstation: probeer bij een mislukte
+        # opstartlokalisatie eerst ter plaatse te docken.
+        self.startup_dock_fallback = bool(
+            self.declare_parameter("startup_dock_fallback", True).value
+        )
 
         self.state = RobotState(robot_active=False)
         self.lock = Lock()
@@ -552,6 +559,23 @@ class RobotStateManager(Node):
             )
         )
 
+    def _fail_startup_location_locked(self) -> None:
+        """Geen AprilTag-positie gevonden en niet gedockt."""
+        self.state.robot_active = False
+        if self.startup_dock_fallback:
+            # De BT slaat navigatie over (at_station) en zoekt ter plaatse
+            # het IR-signaal; navigeren met een onbekende pose is onveilig.
+            self.state.startup_dock_fallback_active = True
+            self.state.startup_location_resolved = True
+            self.state.at_station = True
+            self.state.localization_valid = False
+            self.get_logger().warn(
+                "Geen AprilTag-positie gevonden; ter plaatse docken wordt "
+                "geprobeerd."
+            )
+        else:
+            self.state.startup_location_failed = True
+
     def _startup_location_check(self) -> None:
         now = time.monotonic()
         publish_snapshot = False
@@ -610,16 +634,14 @@ class RobotStateManager(Node):
                             now - self.startup_started_at
                             >= self.STARTUP_SENSOR_TIMEOUT_SEC
                         ):
-                            self.state.startup_location_failed = True
-                            self.state.robot_active = False
+                            self._fail_startup_location_locked()
                             publish_snapshot = True
                     elif (
                         self.state.localization_recovery_started_at is not None
                         and now - self.state.localization_recovery_started_at
                         >= self.LOCALIZATION_RECOVERY_TIMEOUT_SEC
                     ):
-                        self.state.startup_location_failed = True
-                        self.state.robot_active = False
+                        self._fail_startup_location_locked()
                         publish_snapshot = True
                 elif (
                     now - self.startup_started_at
@@ -652,10 +674,24 @@ class RobotStateManager(Node):
 
     def on_robot_active(self, msg: Bool) -> None:
         with self.lock:
-            changed = self.state.robot_active != msg.data
-            self.state.robot_active = msg.data
-            if msg.data and changed:
-                self.state.docking_attempts = 0
+            if msg.data and self.state.startup_dock_fallback_active:
+                # Zonder bekende positie mag de robot niet op missie.
+                self.state.robot_active = False
+                ignored = True
+            else:
+                ignored = False
+                changed = self.state.robot_active != msg.data
+                self.state.robot_active = msg.data
+                if msg.data and changed:
+                    self.state.docking_attempts = 0
+
+        if ignored:
+            self.get_logger().warn(
+                "[Robot] Activering genegeerd: positie onbekend, eerst "
+                "docken ter plaatse."
+            )
+            self._publish_status_snapshot()
+            return
 
         if changed:
             self.get_logger().info(
@@ -831,8 +867,27 @@ class RobotStateManager(Node):
 
         with self.lock:
             self.state.robot_active = False
-            self.state.last_screen = "robot-error-charge"
+            if self.state.startup_dock_fallback_active:
+                # Ook ter plaatse docken mislukt: terug naar "verdwaald".
+                self.state.startup_dock_fallback_active = False
+                self.state.startup_location_resolved = False
+                self.state.startup_location_failed = True
+                self.state.lost_screen_sent = False
+                self.state.at_station = False
+                self.state.localization_valid = False
+                fallback_failed = True
+            else:
+                fallback_failed = False
+                self.state.last_screen = "robot-error-charge"
             admin_open = self.state.admin_open or self.state.admin_login_open
+
+        if fallback_failed:
+            self.get_logger().error(
+                "Docken ter plaatse mislukt zonder bekende positie; "
+                "robot blijft geblokkeerd (verdwaald)."
+            )
+            self._publish_status_snapshot()
+            return
 
         self.get_logger().error(
             "Drie dockingpogingen mislukt; robot blijft inactief bij het "
@@ -857,6 +912,7 @@ class RobotStateManager(Node):
                 self.state.localization_valid = True
 
             elif event.endswith("ROBOT-CHARGING"):
+                self.state.startup_dock_fallback_active = False
                 self.state.charging = True
                 self.state.at_station = True
                 self.state.docked = True
@@ -874,7 +930,10 @@ class RobotStateManager(Node):
                 self.state.at_station = False
 
             elif event.endswith("DOCKING-FAILED") or event.endswith("DOCK-FAILED"):
-                self.state.at_station = False
+                # Zonder bekende positie mag een retry niet navigeren.
+                self.state.at_station = (
+                    self.state.startup_dock_fallback_active
+                )
                 self.state.docked = False
                 self.state.charging = False
 
