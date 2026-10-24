@@ -63,6 +63,7 @@ class QuizSocketBridge(Node):
 
         # Run-flag voor nette shutdown
         self._running = True
+        self._last_active_sent = None
 
         # Socket thread handle
         self._sio_thread: threading.Thread | None = None
@@ -222,6 +223,7 @@ class QuizSocketBridge(Node):
                         self._safe_state_callback("ask_is_active", self)
                     self._safe_state_callback("connect", data)
                 elif event_name == "disconnect":
+                    self._last_active_sent = None
                     self.get_logger().info("Socket verbroken (event).")
                     self._safe_state_callback("disconnect", data)
                 elif event_name == "connect_error":
@@ -300,6 +302,10 @@ class QuizSocketBridge(Node):
             )
 
     def _on_robot_active_status(self, msg: Bool) -> None:
+        # /IsRobotActive komt ~10 Hz binnen; de Pi (projector) alleen bij wijziging.
+        if msg.data == self._last_active_sent:
+            return
+        self._last_active_sent = msg.data
         self.send_active_status_to_pi(msg.data)
 
     # -----------------------------
