@@ -112,6 +112,8 @@ class SimRobot(Node):
 
         # De statusmachine publiceert tijdens login/admin continu een nul-Twist.
         self.last_estop_time = 0.0
+        self.prev_estop_time = 0.0
+        self.estop_lock = threading.Lock()
         self.was_paused = False
         self.create_subscription(
             Twist, "/estop_cmd_vel", self.on_estop_cmd, 10,
@@ -329,17 +331,27 @@ class SimRobot(Node):
         )
 
     def on_estop_cmd(self, _msg):
-        self.last_estop_time = time.monotonic()
+        now = time.monotonic()
+        with self.estop_lock:
+            self.prev_estop_time = self.last_estop_time
+            self.last_estop_time = now
 
     def _movement_paused(self):
-        paused = time.monotonic() - self.last_estop_time < 1.0
-        if paused != self.was_paused:
-            self.was_paused = paused
-            self.get_logger().info(
-                "Beweging gepauzeerd (estop/login/admin)." if paused
-                else "Beweging hervat."
+        # Alleen een aanhoudende stroom stopcommando's (login/admin, ~20 Hz)
+        # pauzeert; een eenmalige nul-Twist bij het annuleren van doelen niet.
+        now = time.monotonic()
+        with self.estop_lock:
+            sustained = (
+                self.last_estop_time - self.prev_estop_time < 0.3
+                and now - self.last_estop_time < 1.0
             )
-        return paused
+            if sustained != self.was_paused:
+                self.was_paused = sustained
+                self.get_logger().info(
+                    "Beweging gepauzeerd (estop/login/admin)." if sustained
+                    else "Beweging hervat."
+                )
+            return sustained
 
     def on_docking_command(self, msg):
         if msg.data.strip().upper() != "START":
