@@ -62,6 +62,7 @@ class DriveToCoord(Node):
 		self.needs_action = False
 		
 		self.keepoutfilter_state = None
+		self.robot_docked = False
 
 		# --- CALLBACK GROUPS ---
 		# drie aparte groepen: één voor inkomende data, één voor de verwerkings-loop, en één voor de callbacks van de nav
@@ -94,6 +95,11 @@ class DriveToCoord(Node):
 			callback_group=self.sub_cb_group
 		)
 
+		self.docked_sub = self.create_subscription(
+			Bool, '/IsRobotDocked', self.docked_callback, 1,
+			callback_group=self.sub_cb_group
+		)
+
 		# --- ROS TIMER (Vervangt de handmatige thread + sleep) ---
 		# Draait exact 4 keer per seconde (0.25s interval)
 		self.timer = self.create_timer(
@@ -117,6 +123,10 @@ class DriveToCoord(Node):
 			self.last_BehaviorTreeNode = node_name
 			self.needs_action = True
 		self.get_logger().info("Nieuw topic ontvangen van BehaviorTree.")
+
+	def docked_callback(self, msg):
+		with self.lock:
+			self.robot_docked = msg.data
 
 	def btDriveCoord_callback(self, msg):
 		with self.lock:
@@ -160,6 +170,13 @@ class DriveToCoord(Node):
 			self.cancel_all_goals()
 		elif currentnode["drive_action"] == "release":
 			self.cancel_all_goals()
+		elif (
+			currentnode["drive_action"] == "behaviortree"
+			and self.last_BehaviorTreeNode == "robot-go-charge"
+			and self.robot_docked
+		):
+			# Gedockt: het laadstation-doel niet blijven herhalen.
+			pass
 		elif currentnode["drive_action"] == "behaviortree":
 			self.send_goal("BehaviorTree", self.last_btDriveCoord)
 		elif currentnode["drive_action"] == "peoplesearch":
