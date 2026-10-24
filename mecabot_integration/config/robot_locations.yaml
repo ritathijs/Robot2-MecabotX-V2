@@ -21,9 +21,9 @@ april_tabloo:
 
 auto_recharger:
   ros__parameters:
-    # Runtime data/config files live outside the installed ROS package.
-    data_directory: /home/wheeltec/.local/share/mecabot_rt
+    # Same layout as the operational robot, but inside the RT workspace.
+    data_directory: /home/wheeltec/wheeltec_ros2_rt/src/auto_recharge_ros2
 
 drive_mux:
   ros__parameters:
-    data_directory: /home/wheeltec/.local/share/mecabot_rt
+    data_directory: /home/wheeltec/wheeltec_ros2_rt/src/auto_recharge_ros2

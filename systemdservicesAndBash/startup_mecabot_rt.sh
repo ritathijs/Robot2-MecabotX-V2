@@ -5,7 +5,7 @@ ROS_DISTRO="humble"
 RT_WORKSPACE="/home/wheeltec/wheeltec_ros2_rt"
 LOG_DIR="$RT_WORKSPACE/logs"
 RT_CONFIG="$RT_WORKSPACE/install/mecabot_integration/share/mecabot_integration/config/robot_locations.yaml"
-RT_DATA_DIR="/home/wheeltec/.local/share/mecabot_rt"
+RT_DATA_DIR="$RT_WORKSPACE/src/auto_recharge_ros2"
 ENABLE_LOGS="${ENABLE_LOGS:-true}"
 
 ROS_SETUP="/opt/ros/$ROS_DISTRO/setup.bash"

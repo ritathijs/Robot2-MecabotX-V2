@@ -51,7 +51,7 @@ import math
 import os
 from pathlib import Path
 
-DEFAULT_DATA_DIRECTORY = "/home/wheeltec/.local/share/mecabot_rt"
+DEFAULT_DATA_DIRECTORY = "/home/wheeltec/wheeltec_ros2_rt/src/auto_recharge_ros2"
 
 
 #print_and_fixRetract相关，用于打印带颜色的信息

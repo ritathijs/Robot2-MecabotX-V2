@@ -6,7 +6,7 @@ from geometry_msgs.msg import Twist
 from rclpy.duration import Duration
 from std_msgs.msg import String
 
-DEFAULT_DATA_DIRECTORY = "/home/wheeltec/.local/share/mecabot_rt"
+DEFAULT_DATA_DIRECTORY = "/home/wheeltec/wheeltec_ros2_rt/src/auto_recharge_ros2"
 
 # Terminal kleuren
 GREEN = "\033[92m"
