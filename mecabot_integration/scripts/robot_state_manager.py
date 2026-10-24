@@ -824,6 +824,11 @@ class RobotStateManager(Node):
             self.state.active_destination = destination
 
             if destination is not None:
+                # Vertrekt de robot naar een andere bestemming, dan staat hij
+                # niet meer bij het laadstation (tenzij hij nog gedockt is).
+                if destination != "charging_station" and not self.state.docked:
+                    self.state.at_station = False
+
                 if destination == "quiz":
                     self.state.at_location_c = False
                     self.state.at_location_d = False
