@@ -139,10 +139,12 @@
           </Inverter>
         </Fallback>
         <Fallback name="NavigateToChargingArea">
+          <IsRobotDocked/>
           <IsRobotNearChargingStation/>
           <SendDriveToChargingArea/>
         </Fallback>
         <Fallback name="EnsureDocked">
+          <IsRobotDocked/>
           <IsRobotCharging/>
           <StartInfraroodDocking/>
         </Fallback>
