@@ -1235,3 +1235,7 @@ def main():
         rclpy.shutdown()
 
     print('Over and out.')
+
+
+if __name__ == '__main__':
+    main()
