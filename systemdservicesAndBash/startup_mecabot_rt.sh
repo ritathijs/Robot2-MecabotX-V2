@@ -18,6 +18,19 @@ fail() {
     exit 1
 }
 
+confirm_safe_start() {
+    [[ -t 0 ]] || fail "Start de startup interactief vanuit een terminal."
+
+    echo
+    echo "VEILIGHEIDSCONTROLE VOOR DE ECHTE ROBOT"
+    echo "Controleer fysiek dat de noodstop is ingedrukt en dat niemand"
+    echo "zich in de bewegingszone bevindt. INACTIEF betekent niet dat de"
+    echo "robot stilstaat: de BT kan hem naar het laadstation laten rijden."
+    echo "Deze startup activeert de robot niet en laat de noodstop ongemoeid."
+    read -r -p "Typ START nadat dit gecontroleerd is: " confirmation
+    [[ "$confirmation" == "START" ]] || fail "Veilige start niet bevestigd."
+}
+
 for required_file in "$ROS_SETUP" "$RT_SETUP" "$RT_CONFIG"; do
     [[ -r "$required_file" ]] || fail "Benodigd setup/configbestand ontbreekt: $required_file"
 done
@@ -77,6 +90,8 @@ ros2 node list
 if ros2 node list | grep -q .; then
     fail "Er draaien al ROS-nodes. Stop eerst de huidige stack handmatig; deze startup beëindigt geen processen."
 fi
+
+confirm_safe_start
 
 echo "ROS 2 daemon opnieuw starten..."
 ros2 daemon stop
@@ -163,6 +178,12 @@ run_in_terminal "RT Keepout Filter" "keepout.log" \
     "ros2 launch wheeltec_nav2 keepout_filter.launch.py"
 sleep 2
 
+wait_for_topic "/BatteryAverageVoltage" 45
+battery_sample="$(timeout 10s ros2 topic echo --once /BatteryAverageVoltage 2>/dev/null)" ||
+    fail "Geen batterijmeting ontvangen. Controleer de batterijpublisher."
+grep -Eq '^[[:space:]]*data:[[:space:]]*[-+]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][-+]?[0-9]+)?[[:space:]]*$' <<<"$battery_sample" ||
+    fail "Batterijtopic publiceert geen geldige numerieke meting."
+
 # Replaces auto_recharge_ros2. robot_position_reset is intentionally not
 # started: the RT state manager requests AprilTag resets directly.
 run_in_terminal "RT Auto Recharger" "auto_recharger.log" \
@@ -173,10 +194,16 @@ sleep 5
 # AprilTag/state-reader processes with the single RT integration launch.
 run_in_terminal "Mecabot RT Integration" "mecabot_integration.log" \
     "ros2 launch mecabot_integration mecabot_integration.launch.py"
-sleep 10
+wait_for_topic "/IsRobotStateReady" 45
+
+active_state="$(timeout 15s ros2 topic echo --once /IsRobotActive 2>/dev/null)" ||
+    fail "Geen robotstatus ontvangen. Controleer de RT-integratieterminal."
+grep -Eq '^[[:space:]]*data:[[:space:]]*false[[:space:]]*$' <<<"$active_state" ||
+    fail "Robot meldt niet expliciet inactief te zijn. Laat de noodstop ingedrukt en controleer de RT-integratieterminal."
 
 echo
 echo "Mecabot RT-start gestart."
+echo "Veiligheidscontrole geslaagd: robotstatus is inactief."
 echo "Actieve ROS 2 nodes:"
 ros2 node list
 echo
