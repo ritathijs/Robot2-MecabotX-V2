@@ -5,6 +5,7 @@ Vervangt tijdelijk Nav2, AMCL, de laadpaal en de sensoren, zodat de echte
 RT-nodes (BT, robot_controller, RobotStateManager, rt_drive_to_coord)
 ongewijzigd kunnen draaien zonder dat de robot rijdt.
 """
+import collections
 import math
 import threading
 import time
@@ -111,8 +112,7 @@ class SimRobot(Node):
         )
 
         # De statusmachine publiceert tijdens login/admin continu een nul-Twist.
-        self.last_estop_time = 0.0
-        self.prev_estop_time = 0.0
+        self.estop_times = collections.deque()
         self.estop_lock = threading.Lock()
         self.was_paused = False
         self.create_subscription(
@@ -331,20 +331,17 @@ class SimRobot(Node):
         )
 
     def on_estop_cmd(self, _msg):
-        now = time.monotonic()
         with self.estop_lock:
-            self.prev_estop_time = self.last_estop_time
-            self.last_estop_time = now
+            self.estop_times.append(time.monotonic())
 
     def _movement_paused(self):
-        # Alleen een aanhoudende stroom stopcommando's (login/admin, ~20 Hz)
-        # pauzeert; een eenmalige nul-Twist bij het annuleren van doelen niet.
+        # Login/admin geeft een aanhoudende stroom (~20 Hz); één nul-Twist bij
+        # het annuleren van een doel telt niet mee.
         now = time.monotonic()
         with self.estop_lock:
-            sustained = (
-                self.last_estop_time - self.prev_estop_time < 0.3
-                and now - self.last_estop_time < 1.0
-            )
+            while self.estop_times and now - self.estop_times[0] > 1.0:
+                self.estop_times.popleft()
+            sustained = len(self.estop_times) >= 5
             if sustained != self.was_paused:
                 self.was_paused = sustained
                 self.get_logger().info(

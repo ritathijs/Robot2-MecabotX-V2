@@ -1191,6 +1191,7 @@ class RobotStateManager(Node):
             )
 
     def _handle_admin_login_open(self) -> None:
+        self.get_logger().info('[Admin] Loginscherm geopend; robot gepauzeerd.')
         with self.lock:
             self.state.admin_login_open = True
 
@@ -1200,6 +1201,7 @@ class RobotStateManager(Node):
         self._publish_status_snapshot()
 
     def _handle_robot_login_open(self) -> None:
+        self.get_logger().info('[Admin] Loginscherm geopend; robot gepauzeerd.')
         with self.lock:
             if self.state.admin_open:
                 return
@@ -1210,6 +1212,7 @@ class RobotStateManager(Node):
         self._publish_zero_twist()
 
     def _handle_robot_login_closed(self) -> None:
+        self.get_logger().info('[Admin] Loginscherm gesloten.')
         with self.lock:
             was_login_open = self.state.admin_login_open
             admin_open = self.state.admin_open
