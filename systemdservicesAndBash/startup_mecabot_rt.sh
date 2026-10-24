@@ -45,8 +45,11 @@ command -v gnome-terminal >/dev/null 2>&1 || fail "gnome-terminal is niet beschi
 [[ -r "$RT_DATA_DIR/robot_info.yaml" ]] ||
     fail "RT-robotconfiguratie ontbreekt: $RT_DATA_DIR/robot_info.yaml"
 
+# ROS setup scripts reference unset variables, which breaks under `set -u`.
+set +u
 source "$ROS_SETUP"
 source "$RT_SETUP"
+set -u
 
 required_packages=(
     april_tabloo
