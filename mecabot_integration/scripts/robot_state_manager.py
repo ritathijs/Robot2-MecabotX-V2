@@ -594,13 +594,28 @@ class RobotStateManager(Node):
                 else:
                     return
             elif self.state.startup_location_failed:
-                if (
+                # Sensoren die te laat binnenkwamen: gedockt blijft bepalend.
+                if self._startup_sensors_ready_locked():
+                    self._update_dock_status_locked()
+                    if self.state.docked:
+                        self.state.startup_location_failed = False
+                        self.state.lost_screen_sent = False
+                        self.state.startup_location_resolved = True
+                        self.state.at_station = True
+                        self.state.localization_valid = True
+                        self.state.robot_active = False
+                        self.get_logger().info(
+                            "Gedockt gedetecteerd na eerdere startfout; "
+                            "startlocatie = laadstation."
+                        )
+                        publish_snapshot = True
+                if self.state.startup_location_failed and (
                     not self.state.lost_screen_sent
                     and self.cmd_pub.get_subscription_count() > 0
                 ):
                     self.state.lost_screen_sent = True
                     show_lost_screen = True
-                else:
+                elif not publish_snapshot:
                     return
             else:
                 sensors_ready = self._startup_sensors_ready_locked()
