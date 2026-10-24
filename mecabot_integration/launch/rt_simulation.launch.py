@@ -4,6 +4,7 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess, TimerAction
+from launch.conditions import IfCondition, UnlessCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -19,6 +20,7 @@ def generate_launch_description():
     def script(name):
         return os.path.join(lib_dir, name)
 
+    use_bridge = LaunchConfiguration('use_bridge')
     start_docked = LaunchConfiguration('start_docked')
     speed = LaunchConfiguration('speed')
     auto_activate = LaunchConfiguration('auto_activate_delay_sec')
@@ -30,6 +32,7 @@ def generate_launch_description():
     # De simulatie vervangt Nav2, AMCL, laadpaal, bumper en sensoren.
     # Quiz-bridge, camera, mux en AprilTag-node worden niet gestart.
     return LaunchDescription([
+        DeclareLaunchArgument('use_bridge', default_value='false'),
         DeclareLaunchArgument('start_docked', default_value='true'),
         DeclareLaunchArgument('speed', default_value='1.0'),
         DeclareLaunchArgument('auto_activate_delay_sec', default_value='0.0'),
@@ -52,9 +55,20 @@ def generate_launch_description():
             ],
             output='screen',
         ),
+        # Zonder bridge draait alleen de statusmachine; met use_bridge:=true
+        # start de bridge de statusmachine en verbindt met de Pi (QUIZ_SERVER_URL).
         ExecuteProcess(
+            condition=UnlessCondition(use_bridge),
             cmd=[
                 'python3', script('robot_state_manager.py'),
+                '--ros-args', '--params-file', locations_config,
+            ],
+            output='screen',
+        ),
+        ExecuteProcess(
+            condition=IfCondition(use_bridge),
+            cmd=[
+                'python3', script('quiz_socket_bridge.py'),
                 '--ros-args', '--params-file', locations_config,
             ],
             output='screen',
