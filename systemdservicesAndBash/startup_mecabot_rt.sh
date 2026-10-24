@@ -18,7 +18,28 @@ fail() {
     exit 1
 }
 
+NON_INTERACTIVE="${RT_NON_INTERACTIVE:-false}"
+for arg in "$@"; do
+    case "$arg" in
+        --non-interactive) NON_INTERACTIVE=true ;;
+        *) fail "Onbekende optie: $arg" ;;
+    esac
+done
+
+# Nodig als het script via SSH wordt gestart (gnome-terminal heeft een display nodig).
+if [[ "$NON_INTERACTIVE" == "true" ]]; then
+    export DISPLAY="${DISPLAY:-:0}"
+    export XAUTHORITY="${XAUTHORITY:-/home/wheeltec/.Xauthority}"
+    export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}"
+fi
+
 confirm_safe_start() {
+    if [[ "$NON_INTERACTIVE" == "true" ]]; then
+        echo "Niet-interactieve start: veiligheidsbevestiging overgeslagen."
+        echo "De robot wordt niet geactiveerd en de noodstop blijft ongemoeid."
+        return 0
+    fi
+
     [[ -t 0 ]] || fail "Start de startup interactief vanuit een terminal."
 
     echo
