@@ -53,6 +53,7 @@ set -u
 
 required_packages=(
     april_tabloo
+    autocharge_batcheck
     bumper
     drive_mux
     mecabot_integration
@@ -181,8 +182,14 @@ run_in_terminal "RT Keepout Filter" "keepout.log" \
     "ros2 launch wheeltec_nav2 keepout_filter.launch.py"
 sleep 2
 
+wait_for_topic "/PowerVoltage" 30
+
+# Publishes /BatteryAverageVoltage; it needs a full sample window first.
+run_in_terminal "RT Battery Check" "batcheck.log" \
+    "ros2 run autocharge_batcheck autocharge_batcheck"
 wait_for_topic "/BatteryAverageVoltage" 45
-battery_sample="$(timeout 10s ros2 topic echo --once /BatteryAverageVoltage 2>/dev/null)" ||
+echo "Wachten op eerste gemiddelde batterijspanning (maximaal 120s)..."
+battery_sample="$(timeout 120s ros2 topic echo --once /BatteryAverageVoltage 2>/dev/null)" ||
     fail "Geen batterijmeting ontvangen. Controleer de batterijpublisher."
 grep -Eq '^[[:space:]]*data:[[:space:]]*[-+]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][-+]?[0-9]+)?[[:space:]]*$' <<<"$battery_sample" ||
     fail "Batterijtopic publiceert geen geldige numerieke meting."
@@ -213,6 +220,5 @@ echo
 echo "Belangrijke topics:"
 ros2 topic list | grep -E 'cmd_vel|scan|camera|BehaviorTreeNode|bump_status' || true
 echo
-echo "Niet gestart: legacy quiz_bt_node, mecabot_bt, drive_to_coord,"
-echo "robot_position_reset en autocharge_batcheck. Hun RT-vervangers zitten"
-echo "in de RT-integratie, of worden bewust niet gebruikt."
+echo "Niet gestart: legacy quiz_bt_node, mecabot_bt, drive_to_coord en"
+echo "robot_position_reset. Hun RT-vervangers zitten in de RT-integratie."
