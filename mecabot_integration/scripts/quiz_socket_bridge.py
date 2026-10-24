@@ -59,7 +59,7 @@ class QuizSocketBridge(Node):
         self._timer = self.create_timer(0.1, self._on_timer)
 
         # Socket.IO client (callbacks draaien in socket thread)
-        self.sio = socketio.Client(reconnection=True, reconnection_attempts=5)
+        self.sio = socketio.Client(reconnection=True, reconnection_attempts=0)
 
         # Run-flag voor nette shutdown
         self._running = True
