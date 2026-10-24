@@ -288,21 +288,6 @@ class QuizSocketBridge(Node):
         except Exception as e:
             self.get_logger().error(f"Fout bij verzenden Socket.IO event naar Pi: {e}")
             
-    # -----------------------------
-    # STATUS TERUGSTUREN NAAR PI (Gecleurde Robot Fix)
-    # -----------------------------
-    def send_active_status_to_pi(self, is_active: bool):
-        try:
-            if self.sio.connected:
-                # We sturen de boolean op ALLE manieren die de Pi-applicatie kan verwachten
-                # Hierdoor kleurt de robot gegarandeerd in op de webapp!
-                self.sio.emit('robot-isActive', is_active)
-                # Geef het connected-signaal mee om de interface-lock te breken
-                #self.sio.emit('robot-connected')
-                self.get_logger().info(f"🟢 Actieve status universeel verzonden naar Pi: {is_active}")
-        except Exception as e:
-            self.get_logger().error(f"Fout bij verzenden actieve status naar Pi: {e}")
-
     def _on_bump_status(self, msg: String) -> None:
         if not self.sio.connected:
             return
@@ -433,21 +418,10 @@ class QuizSocketBridge(Node):
     def send_active_status_to_pi(self, is_active: bool):
         try:
             if self.sio.connected:
-                # Stuur de status ZOWEL als pure boolean, als binnen een object
-                # voor absolute waterdichte synchronisatie met de Pi/webapp
-                pure_bool = bool(is_active)
-                
-                # Vuur het schone event af naar de Pi
-                self.sio.emit('robot-isActive', pure_bool)
-                
-                # EXTRA VEILIGHEID: Sommige versies van de quizapp luisteren ook naar 
-                # 'RobotActiveToggle' of 'AskIsRobotActive'. We vuren ze mee als pure booleans!
-                self.sio.emit('RobotActiveToggle', pure_bool)
-                self.sio.emit('AskIsRobotActive', pure_bool)
-                
-                self.get_logger().info(f"🟢 [SOCKET FIX] Pure boolean verzonden naar Pi: {pure_bool}")
+                self.sio.emit('robot-isActive', bool(is_active))
         except Exception as e:
             self.get_logger().error(f"Fout bij verzenden actieve status naar Pi: {e}")
+
 
 # -----------------------------
 # main
