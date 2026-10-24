@@ -117,8 +117,16 @@ class RobotStateManager(Node):
 
         self.last_drive_time: float | None = None
         self.estop_end_time: float | None = None
-        self.estop_timer = None
-        self.admin_pause_timer = None
+        # Timers worden nooit vernietigd (race met de MultiThreadedExecutor);
+        # ze worden gepauzeerd met cancel() en hervat met reset().
+        self.estop_timer = self.create_timer(0.05, self._estop_tick)
+        self.estop_timer.cancel()
+        self.estop_timer_running = False
+        self.admin_pause_timer = self.create_timer(
+            0.05, self._publish_admin_pause
+        )
+        self.admin_pause_timer.cancel()
+        self.admin_pause_timer_running = False
         self.startup_started_at = time.monotonic()
         self.apriltag_location_anchors = {
             "work_area": self._declare_apriltag_pose(
@@ -455,11 +463,9 @@ class RobotStateManager(Node):
 
     def _start_admin_pause(self) -> None:
         self._publish_admin_pause()
-        if self.admin_pause_timer is None:
-            self.admin_pause_timer = self.create_timer(
-                0.05,
-                self._publish_admin_pause,
-            )
+        if not self.admin_pause_timer_running:
+            self.admin_pause_timer_running = True
+            self.admin_pause_timer.reset()
 
     def _stop_admin_pause(self, force: bool = False) -> None:
         with self.lock:
@@ -473,9 +479,9 @@ class RobotStateManager(Node):
             self._publish_admin_pause()
             return
 
-        if self.admin_pause_timer is not None:
-            self.destroy_timer(self.admin_pause_timer)
-            self.admin_pause_timer = None
+        if self.admin_pause_timer_running:
+            self.admin_pause_timer_running = False
+            self.admin_pause_timer.cancel()
 
     # ------------------------------------------------------------------
     # Sensor- en statuscallbacks
@@ -1152,11 +1158,9 @@ class RobotStateManager(Node):
             time.monotonic() + duration_sec
         )
 
-        if self.estop_timer is None:
-            self.estop_timer = self.create_timer(
-                0.05,
-                self._estop_tick,
-            )
+        if not self.estop_timer_running:
+            self.estop_timer_running = True
+            self.estop_timer.reset()
 
     def _estop_tick(self) -> None:
         status_changed = False
@@ -1176,9 +1180,9 @@ class RobotStateManager(Node):
                 self.state.estop_active or self.state.quiz_options_pause
             )
         if not stop_required:
-            if self.estop_timer is not None:
-                self.destroy_timer(self.estop_timer)
-                self.estop_timer = None
+            if self.estop_timer_running:
+                self.estop_timer_running = False
+                self.estop_timer.cancel()
             if status_changed:
                 self._publish_status_snapshot()
             return
@@ -1293,15 +1297,13 @@ class RobotStateManager(Node):
                 self.state.quiz_options_pause = data
                 estop_active = self.state.estop_active
 
-            if data and self.estop_timer is None:
-                self.estop_timer = self.create_timer(
-                    0.05,
-                    self._estop_tick,
-                )
+            if data and not self.estop_timer_running:
+                self.estop_timer_running = True
+                self.estop_timer.reset()
             elif not data and not estop_active:
-                if self.estop_timer is not None:
-                    self.destroy_timer(self.estop_timer)
-                    self.estop_timer = None
+                if self.estop_timer_running:
+                    self.estop_timer_running = False
+                    self.estop_timer.cancel()
                 self.estop_end_time = None
 
             self._publish_status_snapshot()
@@ -1628,9 +1630,8 @@ class RobotStateManager(Node):
         return response
 
     def destroy_node(self):
-        if self.estop_timer is not None:
-            self.destroy_timer(self.estop_timer)
-            self.estop_timer = None
+        self.estop_timer_running = False
+        self.estop_timer.cancel()
 
         self._stop_admin_pause(force=True)
 
