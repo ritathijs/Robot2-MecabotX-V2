@@ -332,7 +332,7 @@ class SimRobot(Node):
         self.last_estop_time = time.monotonic()
 
     def _movement_paused(self):
-        paused = time.monotonic() - self.last_estop_time < 0.3
+        paused = time.monotonic() - self.last_estop_time < 1.0
         if paused != self.was_paused:
             self.was_paused = paused
             self.get_logger().info(
