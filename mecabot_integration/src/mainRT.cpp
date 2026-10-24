@@ -878,17 +878,38 @@ public:
     BT::NodeStatus onStart() override {
         charging_ = false;
         docking_failed_ = false;
+        start_sent_ = false;
         start_time_ = std::chrono::steady_clock::now();
 
-        std_msgs::msg::String msg;
-        msg.data = "0START";
-        pub_->publish(msg);
-
-        RCLCPP_INFO(node_->get_logger(), "IR-docking gestart via /force_charge.");
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "Wachten op de laadcontroller voordat IR-docking wordt gestart.");
         return BT::NodeStatus::RUNNING;
     }
 
     BT::NodeStatus onRunning() override {
+        if (!start_sent_) {
+            if (pub_->get_subscription_count() > 0) {
+                std_msgs::msg::String msg;
+                msg.data = "0START";
+                pub_->publish(msg);
+                start_sent_ = true;
+                start_time_ = std::chrono::steady_clock::now();
+                RCLCPP_INFO(
+                    node_->get_logger(),
+                    "IR-docking gestart via /force_charge.");
+            } else if (
+                std::chrono::steady_clock::now() - start_time_ >=
+                subscriber_timeout_) {
+                RCLCPP_ERROR(
+                    node_->get_logger(),
+                    "Timeout: geen laadcontroller op /force_charge.");
+                return BT::NodeStatus::FAILURE;
+            } else {
+                return BT::NodeStatus::RUNNING;
+            }
+        }
+
         if (charging_) {
             RCLCPP_INFO(node_->get_logger(), "Laden bevestigd; IR-docking geslaagd.");
             return BT::NodeStatus::SUCCESS;
@@ -918,7 +939,9 @@ private:
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr event_sub_;
     bool charging_{false};
     bool docking_failed_{false};
+    bool start_sent_{false};
     std::chrono::steady_clock::time_point start_time_;
+    const std::chrono::seconds subscriber_timeout_{15};
     const std::chrono::seconds timeout_{200};
 };
 
