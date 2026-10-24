@@ -10,7 +10,7 @@ import threading
 import time
 
 import rclpy
-from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -110,6 +110,12 @@ class SimRobot(Node):
             PoseStamped, "/peoplesearchcoord", 10
         )
 
+        # De statusmachine publiceert tijdens login/admin continu een nul-Twist.
+        self.last_estop_time = 0.0
+        self.create_subscription(
+            Twist, "/estop_cmd_vel", self.on_estop_cmd, 10,
+            callback_group=self.cb_group,
+        )
         self.create_subscription(
             String, "/DockingCommand", self.on_docking_command, 10,
             callback_group=self.cb_group,
@@ -321,6 +327,12 @@ class SimRobot(Node):
             delay, fire, callback_group=self.cb_group
         )
 
+    def on_estop_cmd(self, _msg):
+        self.last_estop_time = time.monotonic()
+
+    def _movement_paused(self):
+        return time.monotonic() - self.last_estop_time < 0.3
+
     def on_docking_command(self, msg):
         if msg.data.strip().upper() != "START":
             return
@@ -395,6 +407,10 @@ class SimRobot(Node):
                 goal_handle.canceled()
                 self.get_logger().info("Nav-doel geannuleerd.")
                 return NavigateToPose.Result()
+
+            if self._movement_paused():
+                time.sleep(period)
+                continue
 
             with self.lock:
                 if self.active_goal is not goal_handle:
