@@ -37,6 +37,7 @@ class RobotState:
     infrared_status_received: bool = False
     at_station: bool = False
     charging: bool = False
+    docking_attempts: int = 0
 
     visitors_nearby: bool = False
     in_working_zone: bool = False
@@ -71,6 +72,7 @@ class RobotStateManager(Node):
     BATTERY_OK_THRESHOLD = 22.0
     DOCKED_AVERAGE_VOLTAGE_THRESHOLD = 24.5
     CHARGING_CURRENT_THRESHOLD = 0.1
+    MAX_DOCKING_ATTEMPTS = 3
     DRIVE_TIMEOUT_SEC = 0.4
     ESTOP_DURATION_SEC = 30.0
     STARTUP_SENSOR_TIMEOUT_SEC = 30.0
@@ -172,6 +174,9 @@ class RobotStateManager(Node):
         )
         self.docked_pub = self.create_publisher(
             Bool, "/IsRobotDocked", 10
+        )
+        self.docking_retry_available_pub = self.create_publisher(
+            Bool, "/IsDockingRetryAvailable", 10
         )
         readiness_qos = QoSProfile(
             depth=1,
@@ -285,6 +290,12 @@ class RobotStateManager(Node):
         )
         self.create_subscription(
             Bool,
+            "/DockingAttemptsExhausted",
+            self.on_docking_attempts_exhausted,
+            10,
+        )
+        self.create_subscription(
+            Bool,
             "/RobotActive",
             self.on_robot_active,
             10,
@@ -369,6 +380,9 @@ class RobotStateManager(Node):
             at_station = self.state.at_station
             charging = self.state.charging
             docked = self.state.docked
+            docking_retry_available = (
+                self.state.docking_attempts < self.MAX_DOCKING_ATTEMPTS
+            )
             robot_active = self.state.robot_active
             battery_ok = self.state.battery_ok
             tracking_enabled = (
@@ -408,6 +422,9 @@ class RobotStateManager(Node):
 
         self.charging_pub.publish(self._bool_message(charging))
         self.docked_pub.publish(self._bool_message(docked))
+        self.docking_retry_available_pub.publish(
+            self._bool_message(docking_retry_available)
+        )
         self.robot_state_ready_pub.publish(
             self._bool_message(robot_state_ready)
         )
@@ -637,6 +654,8 @@ class RobotStateManager(Node):
         with self.lock:
             changed = self.state.robot_active != msg.data
             self.state.robot_active = msg.data
+            if msg.data and changed:
+                self.state.docking_attempts = 0
 
         if changed:
             self.get_logger().info(
@@ -791,11 +810,39 @@ class RobotStateManager(Node):
         if msg.data.strip().upper() != "0START":
             return
         with self.lock:
+            if self.state.docking_attempts < self.MAX_DOCKING_ATTEMPTS:
+                self.state.docking_attempts += 1
+            attempt = self.state.docking_attempts
             self.state.last_screen = "robot-docking"
             admin_open = self.state.admin_open or self.state.admin_login_open
+        self.get_logger().info(
+            f"[Docking] IR-dockingpoging {attempt}/"
+            f"{self.MAX_DOCKING_ATTEMPTS} gestart."
+        )
+        self._publish_status_snapshot()
         if not admin_open:
             screen_msg = String()
             screen_msg.data = "robot-docking"
+            self.screen_pub.publish(screen_msg)
+
+    def on_docking_attempts_exhausted(self, msg: Bool) -> None:
+        if not msg.data:
+            return
+
+        with self.lock:
+            self.state.robot_active = False
+            self.state.last_screen = "robot-error-charge"
+            admin_open = self.state.admin_open or self.state.admin_login_open
+
+        self.get_logger().error(
+            "Drie dockingpogingen mislukt; robot blijft inactief bij het "
+            "laadstation-voorpunt."
+        )
+        self._publish_status_snapshot()
+
+        if not admin_open:
+            screen_msg = String()
+            screen_msg.data = "robot-error-charge"
             self.screen_pub.publish(screen_msg)
 
     def on_recharge_event(self, msg: String) -> None:
@@ -814,6 +861,7 @@ class RobotStateManager(Node):
                 self.state.at_station = True
                 self.state.docked = True
                 self.state.robot_active = False
+                self.state.docking_attempts = 0
                 self.state.localization_valid = True
                 self.state.startup_location_resolved = True
 

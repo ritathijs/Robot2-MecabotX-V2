@@ -922,6 +922,113 @@ private:
     const std::chrono::seconds timeout_{200};
 };
 
+class DockingRetryAvailable : public BT::ConditionNode
+{
+public:
+    DockingRetryAvailable(
+        const std::string& name,
+        const BT::NodeConfiguration& config,
+        rclcpp::Node::SharedPtr node)
+        : BT::ConditionNode(name, config)
+    {
+        status_sub_ = node->create_subscription<std_msgs::msg::Bool>(
+            "/IsDockingRetryAvailable", 10,
+            [this](std_msgs::msg::Bool::SharedPtr msg)
+            {
+                available_ = msg->data;
+            });
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {};
+    }
+
+    BT::NodeStatus tick() override
+    {
+        return available_ ? BT::NodeStatus::SUCCESS
+                          : BT::NodeStatus::FAILURE;
+    }
+
+private:
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr status_sub_;
+    bool available_{true};
+};
+
+class DockingRetriesExhausted : public BT::StatefulActionNode
+{
+public:
+    DockingRetriesExhausted(
+        const std::string& name,
+        const BT::NodeConfiguration& config,
+        rclcpp::Node::SharedPtr node)
+        : BT::StatefulActionNode(name, config), node_(std::move(node))
+    {
+        exhausted_pub_ = node_->create_publisher<std_msgs::msg::Bool>(
+            "/DockingAttemptsExhausted", 10);
+        active_pub_ = node_->create_publisher<std_msgs::msg::Bool>(
+            "/RobotActive", 10);
+        active_sub_ = node_->create_subscription<std_msgs::msg::Bool>(
+            "/IsRobotActive", 10,
+            [this](std_msgs::msg::Bool::SharedPtr msg)
+            {
+                if (!msg->data)
+                {
+                    saw_inactive_ = true;
+                }
+                else if (saw_inactive_)
+                {
+                    reactivated_ = true;
+                }
+            });
+    }
+
+    static BT::PortsList providedPorts()
+    {
+        return {};
+    }
+
+    BT::NodeStatus onStart() override
+    {
+        saw_inactive_ = false;
+        reactivated_ = false;
+
+        std_msgs::msg::Bool exhausted;
+        exhausted.data = true;
+        exhausted_pub_->publish(exhausted);
+
+        std_msgs::msg::Bool inactive;
+        inactive.data = false;
+        active_pub_->publish(inactive);
+
+        RCLCPP_ERROR(
+            node_->get_logger(),
+            "Drie dockingpogingen mislukt; wacht op expliciete activering.");
+        return BT::NodeStatus::RUNNING;
+    }
+
+    BT::NodeStatus onRunning() override
+    {
+        return reactivated_ ? BT::NodeStatus::FAILURE
+                            : BT::NodeStatus::RUNNING;
+    }
+
+    void onHalted() override
+    {
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "Wachten na mislukte docking beëindigd door nieuwe activering.");
+    }
+
+private:
+    rclcpp::Node::SharedPtr node_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr exhausted_pub_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr active_pub_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr active_sub_;
+    bool saw_inactive_{false};
+    bool reactivated_{false};
+};
+
 class VisitorTargetMonitor
 {
 public:
@@ -1576,6 +1683,8 @@ int main(int argc, char **argv)
     REGISTER_BT_NODE(ExecuteActiveQuiz)
     REGISTER_BT_NODE(SendDriveToChargingArea)
     REGISTER_BT_NODE(StartInfraroodDocking)
+    REGISTER_BT_NODE(DockingRetryAvailable)
+    REGISTER_BT_NODE(DockingRetriesExhausted)
     REGISTER_BT_NODE(SetRobotInactive)
     REGISTER_BT_NODE(HoldAprilTagLost)
     factory.registerBuilder<StartDrivingToPeople>(

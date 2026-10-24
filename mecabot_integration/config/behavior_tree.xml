@@ -138,6 +138,10 @@
             <BatteryOk/>
           </Inverter>
         </Fallback>
+        <Fallback name="DockingAttemptsRemaining">
+          <DockingRetryAvailable/>
+          <DockingRetriesExhausted/>
+        </Fallback>
         <Fallback name="NavigateToChargingArea">
           <IsRobotDocked/>
           <IsRobotNearChargingStation/>
@@ -196,6 +200,8 @@
     <Action ID="CompletePatrolCycle"/>
     
     <!-- Laden -->
+    <Condition ID="DockingRetryAvailable"/>
+    <Action ID="DockingRetriesExhausted"/>
     <Condition ID="IsRobotNearChargingStation"/>
     <Action ID="SendDriveToChargingArea"/>
     <Condition ID="IsRobotCharging"/>
