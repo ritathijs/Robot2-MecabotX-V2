@@ -868,7 +868,7 @@ class RobotStateManager(Node):
                 screen_msg = String()
                 screen_msg.data = "robot-explore"
                 self.screen_pub.publish(screen_msg)
-        elif not admin_open and node_name not in (
+        elif node_name not in (
             "RobotRotationFollowMe",
             "robot-arrived-at-visitors",
         ):
@@ -880,9 +880,12 @@ class RobotStateManager(Node):
             with self.lock:
                 self.state.last_screen = screen_name
 
-            screen_msg = String()
-            screen_msg.data = screen_name
-            self.screen_pub.publish(screen_msg)
+            # Tijdens login/admin wel onthouden, niet tonen: bij sluiten wordt
+            # last_screen hersteld.
+            if not admin_open:
+                screen_msg = String()
+                screen_msg.data = screen_name
+                self.screen_pub.publish(screen_msg)
 
         self._publish_status_snapshot()
         self.get_logger().info(
