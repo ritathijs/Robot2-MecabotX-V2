@@ -112,6 +112,7 @@ class SimRobot(Node):
 
         # De statusmachine publiceert tijdens login/admin continu een nul-Twist.
         self.last_estop_time = 0.0
+        self.was_paused = False
         self.create_subscription(
             Twist, "/estop_cmd_vel", self.on_estop_cmd, 10,
             callback_group=self.cb_group,
@@ -331,7 +332,14 @@ class SimRobot(Node):
         self.last_estop_time = time.monotonic()
 
     def _movement_paused(self):
-        return time.monotonic() - self.last_estop_time < 0.3
+        paused = time.monotonic() - self.last_estop_time < 0.3
+        if paused != self.was_paused:
+            self.was_paused = paused
+            self.get_logger().info(
+                "Beweging gepauzeerd (estop/login/admin)." if paused
+                else "Beweging hervat."
+            )
+        return paused
 
     def on_docking_command(self, msg):
         if msg.data.strip().upper() != "START":
