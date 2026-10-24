@@ -103,7 +103,7 @@ class RobotStateManager(Node):
     def __init__(self):
         super().__init__("robot_state_manager")
 
-        self.state = RobotState()
+        self.state = RobotState(robot_active=False)
         self.lock = Lock()
 
         self.last_drive_time: float | None = None
