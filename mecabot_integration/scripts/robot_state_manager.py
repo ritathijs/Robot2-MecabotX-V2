@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from threading import Lock
+import json
 import math
 import time
 from typing import Any
@@ -79,6 +80,10 @@ class RobotStateManager(Node):
     STARTUP_SENSOR_TIMEOUT_SEC = 120.0
     LOCALIZATION_RECOVERY_TIMEOUT_SEC = 8.0
     APRILTAG_LOCATION_RADIUS = 3.0
+    # Het opgeslagen laadpaalpunt ligt 1,2 m voor het station; gedockt staat
+    # de robot 0,6 m verder terug (zelfde correctie als de oude position reset).
+    DOCK_POSE_OFFSET_M = 0.6
+    DOCK_POSE_PUBLISH_COUNT = 5
 
     # Koppel de namen die door de controller/BT gebruikt worden aan een
     # bestemming. De naam "follow-robot-screen" wordt door de huidige
@@ -149,6 +154,9 @@ class RobotStateManager(Node):
         )
         self.cmd_pub = self.create_publisher(
             String, "/robot_command", 10
+        )
+        self.initial_pose_pub = self.create_publisher(
+            PoseWithCovarianceStamped, "/initialpose", 10
         )
         self.localization_reset_pub = self.create_publisher(
             String, "/reset_active", 10
@@ -350,6 +358,10 @@ class RobotStateManager(Node):
             self._startup_location_check,
         )
 
+        self.dock_pose = self._load_dock_pose()
+        self._dock_pose_remaining = 0
+        self.dock_pose_timer = self.create_timer(1.0, self._dock_pose_tick)
+
         self._publish_status_snapshot()
         self.get_logger().info("RobotStateManager gestart.")
 
@@ -362,6 +374,64 @@ class RobotStateManager(Node):
         msg = Bool()
         msg.data = bool(value)
         return msg
+
+    def _load_dock_pose(self) -> tuple[float, float, float, float] | None:
+        """Pose (x, y, qz, qw) van de robot in het laadstation, of None."""
+        path = str(
+            self.declare_parameter("charger_position_file", "").value
+        )
+        if not path:
+            self.get_logger().warn(
+                "charger_position_file ontbreekt; AMCL-pose wordt niet op "
+                "het laadstation gezet."
+            )
+            return None
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+            x, y = float(data["p_x"]), float(data["p_y"])
+            qz, qw = float(data["orien_z"]), float(data["orien_w"])
+        except (OSError, ValueError, KeyError) as exc:
+            self.get_logger().error(
+                f"Laadpaalpositie niet leesbaar uit {path}: {exc}"
+            )
+            return None
+        yaw = 2.0 * math.atan2(qz, qw)
+        return (
+            x - self.DOCK_POSE_OFFSET_M * math.cos(yaw),
+            y - self.DOCK_POSE_OFFSET_M * math.sin(yaw),
+            qz,
+            qw,
+        )
+
+    def _request_dock_pose_locked(self) -> None:
+        if self.dock_pose is not None:
+            self._dock_pose_remaining = self.DOCK_POSE_PUBLISH_COUNT
+
+    def _dock_pose_tick(self) -> None:
+        with self.lock:
+            if self._dock_pose_remaining <= 0 or self.dock_pose is None:
+                return
+            # Wacht tot AMCL luistert; anders gaat de pose verloren.
+            if self.initial_pose_pub.get_subscription_count() == 0:
+                return
+            self._dock_pose_remaining -= 1
+            x, y, qz, qw = self.dock_pose
+
+        msg = PoseWithCovarianceStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = "map"
+        msg.pose.pose.position.x = x
+        msg.pose.pose.position.y = y
+        msg.pose.pose.orientation.z = qz
+        msg.pose.pose.orientation.w = qw
+        msg.pose.covariance[0] = 0.01
+        msg.pose.covariance[7] = 0.01
+        msg.pose.covariance[35] = 0.01
+        self.initial_pose_pub.publish(msg)
+        self.get_logger().info(
+            f"[Localization] AMCL-pose op laadstation gezet ({x:.2f}, {y:.2f})."
+        )
 
     def _declare_apriltag_pose(
         self,
@@ -633,6 +703,7 @@ class RobotStateManager(Node):
                         self.state.at_station = True
                         self.state.localization_valid = True
                         self.state.robot_active = False
+                        self._request_dock_pose_locked()
                         show_charging_screen = self.state.charging
                         clear_lost_screen = True
                         self.get_logger().info(
@@ -662,6 +733,7 @@ class RobotStateManager(Node):
                         self.state.at_location_d = False
                         self.state.at_location_e = False
                         self.state.localization_valid = True
+                        self._request_dock_pose_locked()
                         self.state.startup_location_resolved = True
                         self.state.robot_active = False
                         show_charging_screen = self.state.charging
@@ -969,6 +1041,14 @@ class RobotStateManager(Node):
             screen_msg.data = "robot-error-charge"
             self.screen_pub.publish(screen_msg)
 
+    def _clear_remote_locations_locked(self) -> None:
+        # Aan het laadstation kan de robot niet tegelijk elders zijn.
+        self.state.at_work_area = False
+        self.state.at_quiz = False
+        self.state.at_location_c = False
+        self.state.at_location_d = False
+        self.state.at_location_e = False
+
     def on_recharge_event(self, msg: String) -> None:
         event = msg.data
         self.get_logger().info(f"[Docking] Event ontvangen: {event}")
@@ -977,11 +1057,14 @@ class RobotStateManager(Node):
 
         with self.lock:
             if event.endswith("DRIVE-TO-DOCK-SUCCESS"):
+                self._clear_remote_locations_locked()
                 self.state.at_station = True
                 self.state.localization_valid = True
 
             elif event.endswith("ROBOT-CHARGING"):
                 self.state.startup_dock_fallback_active = False
+                self._clear_remote_locations_locked()
+                self._request_dock_pose_locked()
                 self.state.charging = True
                 self.state.at_station = True
                 self.state.docked = True
