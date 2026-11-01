@@ -115,6 +115,12 @@ class RobotStateManager(Node):
         self.state = RobotState(robot_active=False)
         self.lock = Lock()
 
+        # Sensorcallbacks vragen zeer vaak een snapshot; alleen publiceren bij
+        # een wijziging, plus een herhaling zodat late subscribers de status krijgen.
+        self.SNAPSHOT_REPEAT_SEC = 1.0
+        self._last_snapshot: tuple | None = None
+        self._last_snapshot_time = 0.0
+
         self.last_drive_time: float | None = None
         self.estop_end_time: float | None = None
         # Timers worden nooit vernietigd (race met de MultiThreadedExecutor);
@@ -421,6 +427,21 @@ class RobotStateManager(Node):
                 startup_sensors_ready
                 and self.state.startup_location_resolved
             )
+
+            snapshot = (
+                localization_valid, at_quiz, at_work_area, at_location_c,
+                at_location_d, at_location_e, at_station, charging, docked,
+                docking_retry_available, robot_state_ready, robot_active,
+                battery_ok, tracking_enabled,
+            )
+            now = time.monotonic()
+            if (
+                snapshot == self._last_snapshot
+                and now - self._last_snapshot_time < self.SNAPSHOT_REPEAT_SEC
+            ):
+                return
+            self._last_snapshot = snapshot
+            self._last_snapshot_time = now
 
         self.localization_pub.publish(
             self._bool_message(localization_valid)
