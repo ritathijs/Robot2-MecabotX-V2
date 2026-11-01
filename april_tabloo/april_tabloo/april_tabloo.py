@@ -1,4 +1,6 @@
 
+from pathlib import Path
+
 import rclpy
 from rclpy.node import Node
 from rclpy.parameter import Parameter
@@ -46,7 +48,7 @@ class AprilTagAbsolutePose(Node):
         # Status file
         ##############################################
 
-        self.status_file = "/home/wheeltec/wheeltec_ros2/src/april_tabloo/status.txt"
+        self.status_file = str(Path(__file__).resolve().parents[1] / "status.txt")
 
         # eerste opdracht nog niet uitgevoerd
         self.first_reset_done = False

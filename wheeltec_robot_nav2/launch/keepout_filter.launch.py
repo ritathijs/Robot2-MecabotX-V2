@@ -4,8 +4,10 @@ from launch import LaunchDescription
 from launch_ros.actions import Node
 
 def generate_launch_description():
-    params_file = '/home/wheeltec/wheeltec_ros2/src/wheeltec_robot_nav2/param/wheeltec_params/param_flagship_mec_dl.yaml'
-    mask_yaml_file = '/home/wheeltec/wheeltec_ros2/src/wheeltec_robot_nav2/map/WHEELTEC_KEEPOUT_SERVICE.yaml'
+    # Bronmap van deze workspace (symlink-install), niet de operationele workspace
+    package_src = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+    params_file = os.path.join(package_src, 'param', 'wheeltec_params', 'param_flagship_mec_dl.yaml')
+    mask_yaml_file = os.path.join(package_src, 'map', 'WHEELTEC_KEEPOUT_SERVICE.yaml')
 
     return LaunchDescription([
         # Costmap Filter Info Server

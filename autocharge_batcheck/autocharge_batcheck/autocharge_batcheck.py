@@ -6,14 +6,18 @@ from rclpy.node import Node
 import json
 import time
 from collections import deque
+from pathlib import Path
 
 
 from std_msgs.msg import Float32
 
 
-BATSTATUS_FILE = "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/batstatus.txt"
+# Paden relatief aan deze workspace (src/), zodat ook wheeltec_ros2_rt werkt
+WORKSPACE_SRC = Path(__file__).resolve().parents[2]
 
-VOLTAGE_CONFIG = "/home/wheeltec/wheeltec_ros2/src/mecabot_bt/trees/spanningsniveaus.json"
+BATSTATUS_FILE = WORKSPACE_SRC / "auto_recharge_ros2" / "batstatus.txt"
+
+VOLTAGE_CONFIG = WORKSPACE_SRC / "mecabot_bt" / "trees" / "spanningsniveaus.json"
 
 
 LOW_COUNT_REQUIRED = 5
