@@ -38,6 +38,10 @@ AVERAGE_PUBLISH_INTERVAL = 180   # 3 minuten
 # /PowerVoltage komt veel sneller binnen dan nodig; verwerk max. 1 sample per interval
 SAMPLE_INTERVAL = 1.0   # seconden
 
+# Logging beperken: spanning pas loggen bij een wijziging van minstens deze stap (V)
+LOG_VOLTAGE_STEP = 0.1
+WAIT_LOG_INTERVAL = 30.0   # seconden
+
 
 
 class AutochargeBatcheck(Node):
@@ -62,6 +66,8 @@ class AutochargeBatcheck(Node):
         self.voltage_window = deque(maxlen=WINDOW_SIZE)
         self.initial_average_published = False
         self._last_sample_time = float("-inf")
+        self._last_logged_avg = None
+        self._last_wait_log_time = float("-inf")
 
 
         self.load_voltage_config()
@@ -205,9 +211,14 @@ class AutochargeBatcheck(Node):
 
 
 
-        self.get_logger().info(
-            f"Voltage {voltage:.2f}V  gemiddelde {avg_voltage:.2f}V"
-        )
+        if (
+            self._last_logged_avg is None
+            or abs(avg_voltage - self._last_logged_avg) >= LOG_VOLTAGE_STEP
+        ):
+            self._last_logged_avg = avg_voltage
+            self.get_logger().info(
+                f"Voltage {voltage:.2f}V  gemiddelde {avg_voltage:.2f}V"
+            )
 
 
 
@@ -218,13 +229,12 @@ class AutochargeBatcheck(Node):
         if avg_voltage < self.low_voltage:
 
 
-            self.low_counter += 1
+            if self.low_counter < LOW_COUNT_REQUIRED:
+                self.low_counter += 1
+                self.get_logger().info(
+                    f"LOW gemiddelde teller {self.low_counter}/{LOW_COUNT_REQUIRED}"
+                )
             self.ok_counter = 0
-
-
-            self.get_logger().info(
-                f"LOW gemiddelde teller {self.low_counter}/{LOW_COUNT_REQUIRED}"
-            )
 
 
             if self.low_counter >= LOW_COUNT_REQUIRED:
@@ -250,13 +260,12 @@ class AutochargeBatcheck(Node):
         elif avg_voltage > self.ok_voltage:
 
 
-            self.ok_counter += 1
+            if self.ok_counter < OK_COUNT_REQUIRED:
+                self.ok_counter += 1
+                self.get_logger().info(
+                    f"OK gemiddelde teller {self.ok_counter}/{OK_COUNT_REQUIRED}"
+                )
             self.low_counter = 0
-
-
-            self.get_logger().info(
-                f"OK gemiddelde teller {self.ok_counter}/{OK_COUNT_REQUIRED}"
-            )
 
 
             if self.ok_counter >= OK_COUNT_REQUIRED:
@@ -274,9 +283,11 @@ class AutochargeBatcheck(Node):
                         remaining = LOW_TO_OK_DELAY - elapsed
 
 
-                        self.get_logger().info(
-                            f"Nog {remaining:.0f}s wachten voor BATTERY-OK"
-                        )
+                        if now - self._last_wait_log_time >= WAIT_LOG_INTERVAL:
+                            self._last_wait_log_time = now
+                            self.get_logger().info(
+                                f"Nog {remaining:.0f}s wachten voor BATTERY-OK"
+                            )
 
                         return
 
