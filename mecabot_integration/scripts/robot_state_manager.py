@@ -168,7 +168,7 @@ class RobotStateManager(Node):
             Bool, "/tracking_enable", 10
         )
         self.admin_pause_pub = self.create_publisher(
-            Twist, "/estop_cmd_vel", 10
+            Twist, "/admin_pause_cmd_vel", 10
         )
         self._start_admin_pause()
         self.want_to_start_quiz_pub = self.create_publisher(

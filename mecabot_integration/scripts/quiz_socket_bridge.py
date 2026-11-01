@@ -333,13 +333,13 @@ class QuizSocketBridge(Node):
         except Exception:
             speed = 0.0
             
-        speed = max(0.0, min(1.0, speed))
+        speed = max(0.0, min(3.0, speed))
         self.last_drive_cmd_time = time.time()
         self.is_moving = True
         msg = Twist()
         
         if (
-            self.admin_panel_open
+            not self.admin_panel_open
             or self.is_admin_login_open
             or self.robot_reboot_lock
         ):

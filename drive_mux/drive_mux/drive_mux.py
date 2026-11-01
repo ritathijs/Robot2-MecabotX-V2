@@ -37,6 +37,7 @@ class driveMux(Node):
 
         self.lastmessage_chargehp = past_time
         self.lastmessage_gui = past_time
+        self.lastmessage_admin_pause = past_time
         self.lastmessage_estop = past_time
         self.lastmessage_turn = past_time
         self.lastmessage_charge = past_time
@@ -58,6 +59,12 @@ class driveMux(Node):
             Twist,
             '/gui_cmd_vel',
             self.gui_callback,
+            10)
+
+        self.admin_pause_sub = self.create_subscription(
+            Twist,
+            '/admin_pause_cmd_vel',
+            self.admin_pause_callback,
             10)
 
         self.estop_sub = self.create_subscription(
@@ -123,6 +130,11 @@ class driveMux(Node):
         self.lastmessage_gui = self.get_clock().now()
         if 5 >= self.currentPriority():
             self.publish_command(msg, "GUI")
+
+    def admin_pause_callback(self, msg):
+        self.lastmessage_admin_pause = self.get_clock().now()
+        if 4.5 >= self.currentPriority():
+            self.publish_command(msg, "ADMIN_PAUSE")
 
     def estop_callback(self, msg):
         self.lastmessage_estop = self.get_clock().now()
@@ -199,19 +211,23 @@ class driveMux(Node):
         elif now - self.lastmessage_gui <= Duration(seconds=2):
             return 5
 
-        # 5. TURN
+        # 5. ADMIN PAUSE: stops autonomous motion but allows GUI driving
+        elif now - self.lastmessage_admin_pause <= Duration(seconds=0.5):
+            return 4.5
+
+        # 6. TURN
         elif now - self.lastmessage_turn <= Duration(seconds=2):
             return 4
 
-        # 6. CHARGE
+        # 7. CHARGE
         elif now - self.lastmessage_charge <= Duration(seconds=0.5):
             return 3
 
-        # 7. SEARCH
+        # 8. SEARCH
         elif now - self.lastmessage_search <= Duration(seconds=0.5):
             return 1
 
-        # 8. NAV (Gewone cmd_vel)
+        # 9. NAV (Gewone cmd_vel)
         elif now - self.lastmessage_nav <= Duration(seconds=0.5):
             return 0.5
 
@@ -272,6 +288,7 @@ class driveMux(Node):
             ("ESTOP", self.lastmessage_estop, 0.5),
             ("CHARGEHP", self.lastmessage_chargehp, 0.5),
             ("GUI", self.lastmessage_gui, 2),
+            ("ADMIN", self.lastmessage_admin_pause, 0.5),
             ("TURN", self.lastmessage_turn, 2),
             ("CHARGE", self.lastmessage_charge, 0.5),
             # BUMP wordt apart afgehandeld
