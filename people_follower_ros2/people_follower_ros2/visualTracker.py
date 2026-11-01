@@ -174,6 +174,10 @@ class PeopleFollowerNode(Node):
 
     # Connection callback with Behavior Tree
     def enable_callback(self, msg):
+        # De state manager herhaalt deze waarde vaak; alleen een wijziging loggen.
+        if msg.data == self.tracking_enabled:
+            return
+
         self.tracking_enabled = msg.data
 
         if self.tracking_enabled:
