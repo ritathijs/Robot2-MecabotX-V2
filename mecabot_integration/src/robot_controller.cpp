@@ -74,7 +74,8 @@ private:
     std::vector<double> declare_pose_parameter(
         const std::string& name)
     {
-        auto pose = this->declare_parameter<std::vector<double>>(name, {});
+        auto pose = this->declare_parameter<std::vector<double>>(
+            name, std::vector<double>{});
         if (pose.size() != 3 ||
             !std::all_of(pose.begin(), pose.end(), [](double value) {
                 return std::isfinite(value);
