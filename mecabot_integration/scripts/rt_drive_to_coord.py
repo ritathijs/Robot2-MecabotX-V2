@@ -39,6 +39,9 @@ behavior_tree_nodes = {
 	"explore-location-e": {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always"},
 	"robot-error-drive": {"keepoutfilter_on": "none", "drive_action": "estop", "message_frequency": "always"},
 
+	# Neutrale toestand (o.a. na herstel van de startlocatie): blijf veilig stilstaan.
+	"None": {"keepoutfilter_on": "none", "drive_action": "estop", "message_frequency": "always"},
+
 	# --- Default ---
 	"Default":					{"keepoutfilter_on": "none",  "drive_action": "estop", "message_frequency": "always"},
 }

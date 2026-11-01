@@ -98,6 +98,15 @@ private:
             return;
         }
 
+        // Startlocatie is alsnog bekend: de foutnode van /BehaviorTreeNode wissen
+        if (cmd == "CLEAR_LOST_SCREEN") {
+            last_node_ = "None";
+            std_msgs::msg::String node_msg;
+            node_msg.data = last_node_;
+            bt_node_pub_->publish(node_msg);
+            return;
+        }
+
         // DRY-optimalisatie: Zet de statussen en stop lopende handmatige commando's
         manual_drive_active_ = (cmd == "MANUAL_DRIVE");
         publish_manual_flag();

@@ -588,6 +588,7 @@ class RobotStateManager(Node):
         request_reset = False
         show_lost_screen = False
         show_charging_screen = False
+        clear_lost_screen = False
 
         with self.lock:
             if self.state.startup_location_resolved:
@@ -612,6 +613,7 @@ class RobotStateManager(Node):
                         self.state.localization_valid = True
                         self.state.robot_active = False
                         show_charging_screen = self.state.charging
+                        clear_lost_screen = True
                         self.get_logger().info(
                             "Gedockt gedetecteerd na eerdere startfout; "
                             "startlocatie = laadstation."
@@ -689,6 +691,18 @@ class RobotStateManager(Node):
             )
         if publish_snapshot:
             self._publish_status_snapshot()
+        if clear_lost_screen:
+            self.send_robot_command("CLEAR_LOST_SCREEN")
+            if not show_charging_screen:
+                with self.lock:
+                    self.state.last_screen = "robot-startup"
+                    admin_open = (
+                        self.state.admin_open or self.state.admin_login_open
+                    )
+                if not admin_open:
+                    screen_msg = String()
+                    screen_msg.data = "robot-startup"
+                    self.screen_pub.publish(screen_msg)
         if show_charging_screen:
             with self.lock:
                 self.state.last_screen = "robot-charging"
