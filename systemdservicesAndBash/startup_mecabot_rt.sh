@@ -18,10 +18,13 @@ fail() {
     exit 1
 }
 
-NON_INTERACTIVE="${RT_NON_INTERACTIVE:-false}"
+# Standaard niet-interactief zodat het script automatisch kan starten.
+# Gebruik --interactive (of RT_NON_INTERACTIVE=false) voor de handmatige veiligheidsvraag.
+NON_INTERACTIVE="${RT_NON_INTERACTIVE:-true}"
 for arg in "$@"; do
     case "$arg" in
         --non-interactive) NON_INTERACTIVE=true ;;
+        --interactive) NON_INTERACTIVE=false ;;
         *) fail "Onbekende optie: $arg" ;;
     esac
 done
