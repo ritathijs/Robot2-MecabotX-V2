@@ -31,6 +31,10 @@ WINDOW_SIZE = 20
 AVERAGE_PUBLISH_INTERVAL = 180   # 3 minuten
 
 
+# /PowerVoltage komt veel sneller binnen dan nodig; verwerk max. 1 sample per interval
+SAMPLE_INTERVAL = 1.0   # seconden
+
+
 
 class AutochargeBatcheck(Node):
 
@@ -53,6 +57,7 @@ class AutochargeBatcheck(Node):
 
         self.voltage_window = deque(maxlen=WINDOW_SIZE)
         self.initial_average_published = False
+        self._last_sample_time = float("-inf")
 
 
         self.load_voltage_config()
@@ -168,6 +173,11 @@ class AutochargeBatcheck(Node):
 
 
     def voltage_callback(self, msg):
+
+        now = time.monotonic()
+        if now - self._last_sample_time < SAMPLE_INTERVAL:
+            return
+        self._last_sample_time = now
 
         voltage = msg.data
 
