@@ -66,6 +66,7 @@ class DriveToCoord(Node):
 		
 		self.keepoutfilter_state = None
 		self.robot_docked = False
+		self.robot_active = True
 
 		# --- CALLBACK GROUPS ---
 		# drie aparte groepen: één voor inkomende data, één voor de verwerkings-loop, en één voor de callbacks van de nav
@@ -103,6 +104,11 @@ class DriveToCoord(Node):
 			callback_group=self.sub_cb_group
 		)
 
+		self.active_sub = self.create_subscription(
+			Bool, '/IsRobotActive', self.active_callback, 1,
+			callback_group=self.sub_cb_group
+		)
+
 		# --- ROS TIMER (Vervangt de handmatige thread + sleep) ---
 		# Draait exact 4 keer per seconde (0.25s interval)
 		self.timer = self.create_timer(
@@ -130,6 +136,10 @@ class DriveToCoord(Node):
 	def docked_callback(self, msg):
 		with self.lock:
 			self.robot_docked = msg.data
+
+	def active_callback(self, msg):
+		with self.lock:
+			self.robot_active = msg.data
 
 	def btDriveCoord_callback(self, msg):
 		with self.lock:
@@ -179,6 +189,13 @@ class DriveToCoord(Node):
 			and self.robot_docked
 		):
 			# Gedockt: het laadstation-doel niet blijven herhalen.
+			pass
+		elif (
+			currentnode["drive_action"] == "behaviortree"
+			and not self.robot_active
+			and self.last_BehaviorTreeNode != "robot-go-charge"
+		):
+			# Inactief: geen nieuwe goals sturen (alleen naar het laadstation mag).
 			pass
 		elif currentnode["drive_action"] == "behaviortree":
 			self.send_goal("BehaviorTree", self.last_btDriveCoord)
