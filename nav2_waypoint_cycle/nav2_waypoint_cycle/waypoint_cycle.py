@@ -20,6 +20,9 @@ class waypoint_cycle(Node):
 
 
     def pose_callback(self, msg):
+        # Lege statuslijst (bv. bij Nav2-herstart) zou msg.status_list[-1] laten crashen.
+        if not msg.status_list:
+            return
         # self.get_logger().info(f'status:{msg.status_list[-1].status},count:{self.count}')
         if msg.status_list[-1].status != GoalStatus.STATUS_EXECUTING:
             if msg.status_list[-1].status >= GoalStatus.STATUS_SUCCEEDED and self.count > 0:

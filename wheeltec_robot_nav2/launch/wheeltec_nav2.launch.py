@@ -64,6 +64,8 @@ def generate_launch_description():
             name='waypoint_cycle',
             package='nav2_waypoint_cycle',
             executable='nav2_waypoint_cycle',
+            respawn=True,
+            respawn_delay=2.0,
         ),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(

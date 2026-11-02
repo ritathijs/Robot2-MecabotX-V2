@@ -53,6 +53,8 @@ def generate_launch_description():
             executable='static_transform_publisher', 
             name='base_to_link',
             arguments=['0', '0', '0','0', '0','0','base_footprint','base_link'],
+            respawn=True,
+            respawn_delay=2.0,
     )
     base_to_gyro = launch_ros.actions.Node(
             package='tf2_ros', 
@@ -73,6 +75,8 @@ def generate_launch_description():
             package='joint_state_publisher', 
             executable='joint_state_publisher', 
             name='joint_state_publisher',
+            respawn=True,
+            respawn_delay=2.0,
     )
     
     #select a robot model,the default model is mini_mec 
