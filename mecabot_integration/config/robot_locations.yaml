@@ -1,6 +1,7 @@
 robot_controller:
   ros__parameters:
-    docking_station_pose: [0.0, 0.0, 0.0]
+    # Aanrijpunt 1,2 m voor het laadstation (zelfde punt als Charger_Position.json); [x, y, yaw]
+    docking_station_pose: [11.995127224734865, -16.80049479389625, -1.0520934072346257]
     quiz_location_a_pose: [-1.3658989667892456, -1.4719496965408325, 0.7611905941274879]
     quiz_location_b_pose: [-4.064824104309082, 1.6677558422088623, 0.06429647754059412]
     work_area_pose: [-1.3658989667892456, -1.4719496965408325, 0.7611905941274879]
