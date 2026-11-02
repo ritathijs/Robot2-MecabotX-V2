@@ -68,6 +68,11 @@ class DriveToCoord(Node):
 		self.robot_docked = False
 		self.robot_active = True
 
+		# IR-docking bezig: dan mogen er geen Nav2-goals naar het laadstation meer lopen
+		self.docking_active = False
+		self.docking_start_time = None
+		self.DOCKING_ACTIVE_MAX_S = 210.0
+
 		# --- CALLBACK GROUPS ---
 		# drie aparte groepen: één voor inkomende data, één voor de verwerkings-loop, en één voor de callbacks van de nav
 		self.sub_cb_group = MutuallyExclusiveCallbackGroup()
@@ -109,6 +114,16 @@ class DriveToCoord(Node):
 			callback_group=self.sub_cb_group
 		)
 
+		self.force_charge_sub = self.create_subscription(
+			String, '/force_charge', self.force_charge_callback, 10,
+			callback_group=self.sub_cb_group
+		)
+
+		self.charge_event_sub = self.create_subscription(
+			String, '/auto_recharge_event', self.charge_event_callback, 10,
+			callback_group=self.sub_cb_group
+		)
+
 		# --- ROS TIMER (Vervangt de handmatige thread + sleep) ---
 		# Draait exact 4 keer per seconde (0.25s interval)
 		self.timer = self.create_timer(
@@ -130,12 +145,41 @@ class DriveToCoord(Node):
 				for old_record in self.current_goals:
 					old_record.stale = True
 			self.last_BehaviorTreeNode = node_name
+			self.docking_active = False
 			self.needs_action = True
 		self.get_logger().info("Nieuw topic ontvangen van BehaviorTree.")
 
 	def docked_callback(self, msg):
 		with self.lock:
 			self.robot_docked = msg.data
+
+	def force_charge_callback(self, msg):
+		command = msg.data.strip().upper()
+		with self.lock:
+			if command.endswith("START"):
+				self.docking_active = True
+				self.docking_start_time = self.get_clock().now()
+				self.needs_action = True
+			elif command.endswith("STOP"):
+				self.docking_active = False
+
+	def charge_event_callback(self, msg):
+		event = msg.data.strip().upper()
+		if event.endswith((
+			"DOCKING-FAILED", "ROBOT-UNDOCKED",
+			"ROBOT-CHARGING", "ROBOT-CHARGING-STOPPED",
+		)):
+			with self.lock:
+				self.docking_active = False
+
+	def docking_in_progress(self):
+		if not self.docking_active:
+			return False
+		elapsed = (self.get_clock().now() - self.docking_start_time).nanoseconds / 1e9
+		if elapsed > self.DOCKING_ACTIVE_MAX_S:
+			self.docking_active = False
+			return False
+		return True
 
 	def active_callback(self, msg):
 		with self.lock:
@@ -186,10 +230,11 @@ class DriveToCoord(Node):
 		elif (
 			currentnode["drive_action"] == "behaviortree"
 			and self.last_BehaviorTreeNode == "robot-go-charge"
-			and self.robot_docked
+			and (self.robot_docked or self.docking_in_progress())
 		):
-			# Gedockt: het laadstation-doel niet blijven herhalen.
-			pass
+			# Gedockt of IR-docking bezig: het laadstation-doel niet blijven
+			# herhalen en lopende goals stoppen zodat Nav2 niet tegenwerkt.
+			self.cancel_all_goals()
 		elif (
 			currentnode["drive_action"] == "behaviortree"
 			and not self.robot_active

@@ -215,6 +215,10 @@ class AutoRecharger(Node):
         #Vlag voor automatische terugkeermodus van de robot: 0: terugkeer uitgeschakeld, 1: navigatie-terugkeer, 2: terugkeer via besturing van de uitrusting
         self.chargeflag=0
 
+        # Watchdog voor het firmware-docken: tijdstip waarop chargeflag=1 werd gezet
+        self.dock_start_time = None
+        self.DOCK_TIMEOUT_S = 60.0
+
         #Variabele voor het vastleggen van tijdstempels door robots
         self.last_time= self.get_clock().now()
         self.lost_red_flag=self.get_clock().now()
@@ -976,6 +980,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         # indien meteen vanaf de locatie sterke IR wordt gezien
         if self.red_count >= 3:
             self.chargeflag = 1
+            self.dock_start_time = self.get_clock().now()
             # self.publish_docking_status("DOCKING_ENABLED")
             self.Pub_Recharger_Flag()
             print_and_fixRetract(
@@ -1116,7 +1121,18 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
             vel_topic=Twist()
             self.Cmd_vel_pub.publish(vel_topic) # 停止运动
             self.chargeflag=1 # 开启自动回充
+            self.dock_start_time = self.get_clock().now()
             self.Pub_Recharger_Flag()
+
+        # Watchdog: het firmware-docken moet binnen DOCK_TIMEOUT_S tot laden leiden
+        if self.dock_start_time is not None:
+            if self.robot['Charging']==1 or self.chargeflag==0:
+                self.dock_start_time = None
+            elif (self.get_clock().now()-self.dock_start_time).nanoseconds/1e9 > self.DOCK_TIMEOUT_S:
+                self.dock_start_time = None
+                print_and_fixRetract(RED+'Docking duurt te lang zonder te laden; docking wordt afgebroken.'+RESET)
+                self.Stop_Charge(drive_forward=True)
+                self.publish_event("DOCKING-FAILED")
 
         # geen IR bij rotatie?
         if self.start_turn == 1:

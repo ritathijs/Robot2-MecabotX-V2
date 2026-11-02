@@ -131,9 +131,12 @@ run_in_terminal() {
     local title="$1"
     local logfile="$2"
     local command="$3"
+    local nolog="${4:-}"
     local logging_setup=":"
 
-    if [[ "$ENABLE_LOGS" == "true" ]]; then
+    # Een 4de argument "nolog" schakelt het wegschrijven van de log uit voor
+    # componenten die het scherm continu herschrijven (zoals mux en bumper).
+    if [[ "$ENABLE_LOGS" == "true" && "$nolog" != "nolog" ]]; then
         logging_setup="exec > >(tee -a '$LOG_DIR/$logfile') 2>&1"
     fi
 
@@ -181,11 +184,11 @@ sleep 5
 
 # The RT mux reads the same RT-only data directory as the RT auto-recharger.
 run_in_terminal "RT Drive MUX" "mux.log" \
-    "while true; do ros2 run drive_mux drive_mux --ros-args --params-file '$RT_CONFIG'; result=\$?; [[ \$result -eq 130 ]] && break; echo 'MUX stopped; restarting in 2s'; sleep 2; done"
+    "while true; do ros2 run drive_mux drive_mux --ros-args --params-file '$RT_CONFIG'; result=\$?; [[ \$result -eq 130 ]] && break; echo 'MUX stopped; restarting in 2s'; sleep 2; done" nolog
 sleep 3
 
 run_in_terminal "RT Bumper" "bumper.log" \
-    "ros2 run bumper bumper"
+    "ros2 run bumper bumper" nolog
 sleep 3
 
 run_in_terminal "RT Camera" "camera.log" \
