@@ -29,10 +29,11 @@ ekf_filter_node:
         odom0_relative: false
 
         imu0: /imu/data_raw
+        # RT: IMU-yaw en yaw-snelheid uit; de gyro driftte ~0,1 graad/s en liet de robot op de kaart wegdraaien
         imu0_config: [false, false, false,
-                      false, false, true,
                       false, false, false,
-                      false, false, true,
+                      false, false, false,
+                      false, false, false,
                       false,  false, false]
         imu0_nodelay: false
         imu0_differential: false
