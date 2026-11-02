@@ -11,6 +11,8 @@ robot_controller:
 
 robot_state_manager:
   ros__parameters:
+    # Pose van het middelpunt van de robot als hij in het laadstation staat; [x, y, yaw in rad]
+    docked_robot_pose: [11.544417381286621, -16.06251335144043, -0.8424]
     apriltag_work_area_pose: [3.2080953121185303, -5.83170747756958, 0.7860673445242651]
     apriltag_charging_station_pose: [11.58133316040039, -15.486642837524414, -0.8102691728514168]
     # Laadpaalpositie (zelfde bestand als auto_recharger) om AMCL te initialiseren

@@ -377,6 +377,13 @@ class RobotStateManager(Node):
 
     def _load_dock_pose(self) -> tuple[float, float, float, float] | None:
         """Pose (x, y, qz, qw) van de robot in het laadstation, of None."""
+        docked = self.declare_parameter(
+            "docked_robot_pose", Parameter.Type.DOUBLE_ARRAY
+        ).value
+        if docked is not None and len(docked) == 3:
+            x, y, yaw = (float(v) for v in docked)
+            return x, y, math.sin(yaw / 2.0), math.cos(yaw / 2.0)
+
         path = str(
             self.declare_parameter("charger_position_file", "").value
         )
