@@ -17,6 +17,8 @@ from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
+from sensor_msgs.msg import CameraInfo
 from std_msgs.msg import Bool, Float32, String, UInt8
 
 
@@ -39,6 +41,11 @@ class SimRobot(Node):
 
         self.speed = self.declare_parameter("speed", 1.0).value
         self.start_docked = self.declare_parameter("start_docked", True).value
+        # Simuleert een opstart buiten het laadstation: STM-sensoren
+        # (laadstroom/IR) publiceren niet, enkel batterij en camera.
+        self.publish_dock_sensors = self.declare_parameter(
+            "publish_dock_sensors", True
+        ).value
         start_pose = self.declare_parameter(
             "start_pose", [0.0, 0.0, 0.0]
         ).value
@@ -95,6 +102,9 @@ class SimRobot(Node):
             Float32, "/robot_charging_current", 10
         )
         self.infrared_pub = self.create_publisher(UInt8, "/robot_red_flag", 10)
+        self.camera_info_pub = self.create_publisher(
+            CameraInfo, "/camera/color/camera_info", qos_profile_sensor_data
+        )
         self.bump_pub = self.create_publisher(String, "/bump_status", 10)
         self.event_pub = self.create_publisher(
             String, "/auto_recharge_event", 10
@@ -211,13 +221,16 @@ class SimRobot(Node):
             battery.data = float(self.voltage_undocked)
         self.battery_pub.publish(battery)
 
-        current = Float32()
-        current.data = 1.0 if docked else 0.0
-        self.current_pub.publish(current)
+        self.camera_info_pub.publish(CameraInfo())
 
-        infrared = UInt8()
-        infrared.data = 1 if docked else 0
-        self.infrared_pub.publish(infrared)
+        if self.publish_dock_sensors:
+            current = Float32()
+            current.data = 1.0 if docked else 0.0
+            self.current_pub.publish(current)
+
+            infrared = UInt8()
+            infrared.data = 1 if docked else 0
+            self.infrared_pub.publish(infrared)
 
         bump = String()
         bump.data = self.bump_text or "De bumper is niet ingedrukt"
