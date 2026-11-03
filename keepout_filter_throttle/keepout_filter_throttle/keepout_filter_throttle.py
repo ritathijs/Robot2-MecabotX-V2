@@ -7,8 +7,8 @@ class KeepoutToggler(Node):
     def __init__(self):
         super().__init__('keepout_filter_throttle')
 
-        self.mask_full = '/home/wheeltec/wheeltec_ros2/src/wheeltec_robot_nav2/map/WHEELTEC_KEEPOUT_WORKING.yaml'
-        self.mask_empty = '/home/wheeltec/wheeltec_ros2/src/wheeltec_robot_nav2/map/WHEELTEC_KEEPOUT_SERVICE.yaml'
+        self.mask_full = '/home/wheeltec/wheeltec_ros2_rt/src/wheeltec_robot_nav2/map/WHEELTEC_KEEPOUT_WORKING.yaml'
+        self.mask_empty = '/home/wheeltec/wheeltec_ros2_rt/src/wheeltec_robot_nav2/map/WHEELTEC_KEEPOUT_SERVICE.yaml'
 
         self.subscription = self.create_subscription(Bool, '/toggle_keepout', self.toggle_callback, 10)
         
