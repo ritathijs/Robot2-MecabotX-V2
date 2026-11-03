@@ -11,7 +11,8 @@ import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
 from rclpy.node import Node
 from rclpy.parameter import Parameter
-from rclpy.qos import DurabilityPolicy, QoSProfile
+from rclpy.qos import DurabilityPolicy, QoSProfile, qos_profile_sensor_data
+from sensor_msgs.msg import CameraInfo
 from std_msgs.msg import Bool, Float32, String, UInt8
 from wheeltec_robot_msg.srv import GetRobotState
 
@@ -36,6 +37,7 @@ class RobotState:
     charging_current_received: bool = False
     infrared_detected: bool = False
     infrared_status_received: bool = False
+    camera_info_received: bool = False
     at_station: bool = False
     charging: bool = False
     docking_attempts: int = 0
@@ -79,6 +81,11 @@ class RobotStateManager(Node):
     ESTOP_DURATION_SEC = 30.0
     STARTUP_SENSOR_TIMEOUT_SEC = 120.0
     LOCALIZATION_RECOVERY_TIMEOUT_SEC = 8.0
+    # Laadstroom en IR komen buiten het laadstation niet (tijdig) binnen;
+    # na deze wachttijd gaat de opstart verder met enkel batterij + camera.
+    STARTUP_SENSOR_GRACE_SEC = 10.0
+    # Na een mislukte opstartlokalisatie opnieuw proberen.
+    STARTUP_RETRY_SEC = 30.0
     APRILTAG_LOCATION_RADIUS = 3.0
     # Het opgeslagen laadpaalpunt ligt 1,2 m voor het station; gedockt staat
     # de robot 0,6 m verder terug (zelfde correctie als de oude position reset).
@@ -139,6 +146,8 @@ class RobotStateManager(Node):
         self.admin_pause_timer.cancel()
         self.admin_pause_timer_running = False
         self.startup_started_at = time.monotonic()
+        self._startup_ready_since: float | None = None
+        self._startup_failed_since: float | None = None
         self.apriltag_location_anchors = {
             "work_area": self._declare_apriltag_pose(
                 "apriltag_work_area_pose"
@@ -278,6 +287,12 @@ class RobotStateManager(Node):
             10,
         )
         self.create_subscription(
+            CameraInfo,
+            "/camera/color/camera_info",
+            self.on_camera_info,
+            qos_profile_sensor_data,
+        )
+        self.create_subscription(
             UInt8,
             "/robot_red_flag",
             self.on_infrared_status,
@@ -354,6 +369,11 @@ class RobotStateManager(Node):
         self.drive_timeout_timer = self.create_timer(
             0.1,
             self._manual_drive_timeout_check,
+        )
+        # Houdt de statustopics vers, ook zonder sensorcallbacks.
+        self.status_refresh_timer = self.create_timer(
+            1.0,
+            self._publish_status_snapshot,
         )
         self.startup_recovery_timer = self.create_timer(
             0.1,
@@ -502,9 +522,10 @@ class RobotStateManager(Node):
             at_location_c = self.state.at_location_c
             at_location_d = self.state.at_location_d
             at_location_e = self.state.at_location_e
-            startup_sensors_ready = self._startup_sensors_ready_locked()
+            # Buiten het laadstation komen laadstroom/IR niet binnen; een
+            # bekende startlocatie en batterijmeting volstaan.
             robot_state_ready = (
-                startup_sensors_ready
+                self.state.battery_status_received
                 and self.state.startup_location_resolved
             )
 
@@ -633,6 +654,12 @@ class RobotStateManager(Node):
             self._update_dock_status_locked()
         self._publish_status_snapshot()
 
+    def on_camera_info(self, msg: CameraInfo) -> None:
+        if self.state.camera_info_received:
+            return
+        with self.lock:
+            self.state.camera_info_received = True
+
     def on_infrared_status(self, msg: UInt8) -> None:
         with self.lock:
             self.state.infrared_detected = msg.data > 0
@@ -665,6 +692,24 @@ class RobotStateManager(Node):
                 > self.CHARGING_CURRENT_THRESHOLD
             )
         )
+
+    def _startup_ready_locked(self, now: float) -> bool:
+        """Klaar voor de opstartlokalisatie.
+
+        Dockstatus (laadstroom/IR) is bepalend zodra die er is; de
+        AprilTag-lokalisatie heeft alleen batterij en camera nodig.
+        """
+        if self._startup_sensors_ready_locked():
+            return True
+        if not (
+            self.state.battery_status_received
+            and self.state.camera_info_received
+        ):
+            self._startup_ready_since = None
+            return False
+        if self._startup_ready_since is None:
+            self._startup_ready_since = now
+        return now - self._startup_ready_since >= self.STARTUP_SENSOR_GRACE_SEC
 
     def _fail_startup_location_locked(self) -> None:
         """Geen AprilTag-positie gevonden en niet gedockt."""
@@ -700,6 +745,10 @@ class RobotStateManager(Node):
                 ):
                     self.state.lost_screen_sent = True
                     show_lost_screen = True
+                elif self.state.lost_screen_sent:
+                    # Herstel na een nieuwe poging: verdwaald-scherm weg.
+                    self.state.lost_screen_sent = False
+                    clear_lost_screen = True
                 else:
                     return
             elif self.state.startup_location_failed:
@@ -708,6 +757,7 @@ class RobotStateManager(Node):
                     self._update_dock_status_locked()
                     if self.state.docked:
                         self.state.startup_location_failed = False
+                        self._startup_failed_since = None
                         self.state.lost_screen_sent = False
                         self.state.startup_location_resolved = True
                         self.state.at_station = True
@@ -721,6 +771,25 @@ class RobotStateManager(Node):
                             "startlocatie = laadstation."
                         )
                         publish_snapshot = True
+                if self.state.startup_location_failed:
+                    if self._startup_failed_since is None:
+                        self._startup_failed_since = now
+                    elif (
+                        now - self._startup_failed_since
+                        >= self.STARTUP_RETRY_SEC
+                        and self.state.camera_info_received
+                        and self._startup_ready_locked(now)
+                    ):
+                        self._startup_failed_since = None
+                        self.state.startup_location_failed = False
+                        self.state.localization_recovery_requested = False
+                        self.state.localization_recovery_started_at = None
+                        self.state.startup_reset_done_received = False
+                        self.state.startup_pose_x = None
+                        self.state.startup_pose_y = None
+                        self.get_logger().info(
+                            "Opstartlokalisatie opnieuw proberen."
+                        )
                 if self.state.startup_location_failed and (
                     not self.state.lost_screen_sent
                     and self.cmd_pub.get_subscription_count() > 0
@@ -730,7 +799,7 @@ class RobotStateManager(Node):
                 elif not publish_snapshot:
                     return
             else:
-                sensors_ready = self._startup_sensors_ready_locked()
+                sensors_ready = self._startup_ready_locked(now)
 
                 if sensors_ready:
                     self._update_dock_status_locked()
@@ -750,7 +819,8 @@ class RobotStateManager(Node):
                         publish_snapshot = True
                     elif not self.state.localization_recovery_requested:
                         if (
-                            self.localization_reset_pub.get_subscription_count()
+                            self.state.camera_info_received
+                            and self.localization_reset_pub.get_subscription_count()
                             > 0
                         ):
                             msg = String()
@@ -779,6 +849,13 @@ class RobotStateManager(Node):
                     self.state.startup_location_failed = True
                     self.state.robot_active = False
                     publish_snapshot = True
+                    self.get_logger().warn(
+                        "Startsensoren niet tijdig ontvangen: "
+                        f"batterij={self.state.battery_status_received}, "
+                        f"laadstroom={self.state.charging_current_received}, "
+                        f"infrarood={self.state.infrared_status_received}, "
+                        f"camera={self.state.camera_info_received}"
+                    )
 
                 if (
                     self.state.startup_location_failed
