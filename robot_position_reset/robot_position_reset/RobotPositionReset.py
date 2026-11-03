@@ -12,7 +12,7 @@ class PublishBackPose(Node):
     def __init__(self):
         super().__init__('publish_back_pose')
 
-        self.manual_mode_file = "/home/wheeltec/wheeltec_ros2/src/robot_position_reset/robot_position_reset/manual_mode.txt"
+        self.manual_mode_file = "/home/wheeltec/wheeltec_ros2_rt/src/robot_position_reset/robot_position_reset/manual_mode.txt"
 
         # Maximale tijd (s) die we blokkerend willen wachten op subscribers
         # voordat we het opgeven i.p.v. voor altijd te blijven hangen.
@@ -70,7 +70,7 @@ class PublishBackPose(Node):
         self.reset_delay_timer = None
 
         # JSON bestand pad waar de locatie van het laadstation (+ 1.2m) instaat
-        json_file = "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/Charger_Position.json"
+        json_file = "/home/wheeltec/wheeltec_ros2_rt/src/auto_recharge_ros2/Charger_Position.json"
         try:
             with open(json_file, "r") as f:
                 data = json.load(f)
