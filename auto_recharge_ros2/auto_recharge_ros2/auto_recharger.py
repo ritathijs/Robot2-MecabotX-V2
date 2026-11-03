@@ -51,13 +51,13 @@ import math
 import os
 
 #存放充电桩位置的文件位置
-json_file='/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/Charger_Position.json'
-yaml_file='/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/robot_info.yaml'
-batstatus_file = "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/batstatus.txt"
-laadstatus_file = "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/laadstatus.txt"
+json_file='/home/wheeltec/wheeltec_ros2_rt/src/auto_recharge_ros2/Charger_Position.json'
+yaml_file='/home/wheeltec/wheeltec_ros2_rt/src/auto_recharge_ros2/robot_info.yaml'
+batstatus_file = "/home/wheeltec/wheeltec_ros2_rt/src/auto_recharge_ros2/batstatus.txt"
+laadstatus_file = "/home/wheeltec/wheeltec_ros2_rt/src/auto_recharge_ros2/laadstatus.txt"
 
 # NIEUW: file waarin we bijhouden of de robot in een laadcyclus zit (LAADCYCLUS) of los staat (LOS)
-laadcyclus_file = "/home/wheeltec/wheeltec_ros2/src/auto_recharge_ros2/laadcyclus_status.txt"
+laadcyclus_file = "/home/wheeltec/wheeltec_ros2_rt/src/auto_recharge_ros2/laadcyclus_status.txt"
 
 
 #print_and_fixRetract相关，用于打印带颜色的信息
