@@ -83,7 +83,7 @@ class RobotStateManager(Node):
     # Het opgeslagen laadpaalpunt ligt 1,2 m voor het station; gedockt staat
     # de robot 0,6 m verder terug (zelfde correctie als de oude position reset).
     DOCK_POSE_OFFSET_M = 0.6
-    DOCK_POSE_PUBLISH_COUNT = 5
+    DOCK_POSE_PUBLISH_COUNT = 2
 
     # Koppel de namen die door de controller/BT gebruikt worden aan een
     # bestemming. De naam "follow-robot-screen" wordt door de huidige
@@ -428,7 +428,8 @@ class RobotStateManager(Node):
             x, y, qz, qw = self.dock_pose
 
         msg = PoseWithCovarianceStamped()
-        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.stamp.sec = 0
+        msg.header.stamp.nanosec = 0
         msg.header.frame_id = "map"
         msg.pose.pose.position.x = x
         msg.pose.pose.position.y = y
