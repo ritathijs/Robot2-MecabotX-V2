@@ -68,8 +68,8 @@ bt_navigator:
     robot_base_frame: base_footprint
     odom_topic: /odom_combined
     bt_loop_duration: 100        #BT 执行每次迭代的持续时间（以毫秒为单位 RT van 100HZ (orig 10 = om de 10msec) naar 100 (10 keer per seconde).
-    default_server_timeout: 20  #BT 操作节点等待操作服务器确认时的默认超时值（以毫秒为单位）
-    default_nav_to_pose_bt_xml: /home/wheeltec/wheeltec_ros2/src/wheeltec_nav2/behavior_trees/navigate_to_pose_no_recovery.xml
+    default_server_timeout: 500  #BT 操作节点等待操作服务器确认时的默认超时值（以毫秒为单位）RT:orig 20 
+    default_nav_to_pose_bt_xml: /home/wheeltec/wheeltec_ros2_rt/src/wheeltec_nav2/behavior_trees/navigate_to_pose_no_recovery.xml
     
     # 'default_nav_through_poses_bt_xml' and 'default_nav_to_pose_bt_xml' are use defaults:
     # nav2_bt_navigator/navigate_to_pose_w_replanning_and_recovery.xml
@@ -223,8 +223,8 @@ local_costmap:
       #testfootprint: "[ [-0.488, -0.503], [-0.488, 0.503], [0.488, 0.503], [0.488, -0.503] ]"
       footprint: "[ [-0.288, -0.303], [-0.288, 0.303],[0.288,0.303],[0.288, -0.303] ]"
       footprint_padding: 0.2
-      plugins: ["voxel_layer",  "inflation_layer", "keepout_filter", "camera_layer"] #插件包括:{“体素层”，“膨胀层”}
-
+      plugins: ["voxel_layer",  "inflation_layer", "camera_layer"] #插件包括:{“体素层”，“膨胀层”}
+      filters: ["keepout_filter"]
       inflation_layer:                             #膨胀层参数
         plugin: "nav2_costmap_2d::InflationLayer"  #膨胀层插件。
         cost_scaling_factor: 3.5                   #org: 3成本缩放因子，决定障碍物成本随距离的递减速度。
@@ -298,7 +298,8 @@ global_costmap:
       resolution: 0.05                  #全局地图1像素的分辨率，以米为单位
       track_unknown_space: true
 
-      plugins: ["static_layer", "obstacle_layer", "camera_layer",  "keepout_filter", "inflation_layer"]
+      plugins: ["static_layer", "obstacle_layer", "camera_layer", "inflation_layer"]
+      filters: ["keepout_filter"]
        
       obstacle_layer:                              #障碍层参数
         plugin: "nav2_costmap_2d::ObstacleLayer"   #障碍层插件
