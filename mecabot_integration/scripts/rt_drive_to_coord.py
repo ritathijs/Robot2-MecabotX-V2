@@ -17,7 +17,6 @@ class GoalRecord:
 	result: any = None		   # Het uiteindelijke Resultaat
 	accepted: bool = False	   # Is het doel geaccepteerd?
 	status: int = 0			  # De statuscode (1=Pending, 4=Canceled, etc.)
-	stale: bool = False		  # Doel hoort bij een eerdere BT-node
 
 behavior_tree_nodes = {
 	# keepoutfilter_on: "True" / "False" / "none"
@@ -59,8 +58,9 @@ class DriveToCoord(Node):
 		self.last_peoplesearchcoord = None
 		
 		self.current_goals = []
-		self.last_goal_stamp = None
-		self.last_goal_send_time = self.get_clock().now()
+		self.last_goal_end_time = None
+		self.last_finished_pose = None
+		self.RESEND_COOLDOWN_S = 5.0
 		
 		self.needs_action = False
 		
@@ -141,9 +141,6 @@ class DriveToCoord(Node):
 	def BehaviorTreeNode_callback(self, msg):
 		with self.lock:
 			node_name = msg.data.strip()
-			if node_name != self.last_BehaviorTreeNode:
-				for old_record in self.current_goals:
-					old_record.stale = True
 			self.last_BehaviorTreeNode = node_name
 			self.docking_active = False
 			self.needs_action = True
@@ -285,90 +282,122 @@ class DriveToCoord(Node):
 		self.current_goals.clear()
 		self.get_logger().info("Alle lokale goal-records zijn gewist.")
 
+	@staticmethod
+	def same_pose(a, b, pos_tol=0.05, dot_tol=1e-3):
+		"""Inhoudelijke vergelijking van twee PoseStamped (stamp wordt genegeerd)."""
+		pa, pb = a.pose.position, b.pose.position
+		qa, qb = a.pose.orientation, b.pose.orientation
+		if a.header.frame_id != b.header.frame_id:
+			return False
+		if abs(pa.x - pb.x) > pos_tol or abs(pa.y - pb.y) > pos_tol or abs(pa.z - pb.z) > pos_tol:
+			return False
+		# q en -q beschrijven dezelfde oriëntatie
+		dot = qa.x * qb.x + qa.y * qb.y + qa.z * qb.z + qa.w * qb.w
+		return abs(dot) >= 1.0 - dot_tol
+
+	def active_record(self):
+		"""Het goal dat nu verstuurd/actief is (nog geen resultaat of afwijzing)."""
+		return self.current_goals[-1] if self.current_goals else None
+
+	def finish_record(self, record):
+		if record in self.current_goals:
+			self.current_goals.remove(record)
+		self.last_goal_end_time = self.get_clock().now()
+		self.last_finished_pose = record.goal.pose
+
 	def send_goal(self, source, coordinate=None):
 		if coordinate is None:
 			msg = f"Geen coördinaat ontvangen van {source} — goal niet gestuurd!"
 			self.get_logger().warn(msg)
 			self.publish_status(12, msg)
 			return
-		
+
 		now = self.get_clock().now()
+		active = self.active_record()
 
-		# Nieuwe timestamp?
-		if self.last_goal_stamp != coordinate.header.stamp:
-			self.last_goal_stamp = coordinate.header.stamp
-			self.last_goal_send_time = now
-
-		# Zelfde timestamp -> alleen elke 5 seconden opnieuw sturen
-		else:
-			elapsed = (now - self.last_goal_send_time).nanoseconds / 1e9
-
-			if elapsed < 5.0:
+		if active is not None:
+			# Zelfde bestemming nog actief: behouden, niet opnieuw sturen.
+			if self.same_pose(active.goal.pose, coordinate):
 				return
-
-			self.last_goal_send_time = now
+			# Echt nieuwe bestemming: vervangt het bestaande goal (Nav2 preempt).
+			self.get_logger().info(f"Nieuwe bestemming van {source}: bestaand goal wordt vervangen.")
+			self.current_goals.clear()
+		elif (
+			self.last_goal_end_time is not None
+			and self.last_finished_pose is not None
+			and self.same_pose(self.last_finished_pose, coordinate)
+		):
+			# Zelfde bestemming als het net afgeronde goal: korte pauze tegen een zend-storm.
+			# Een andere bestemming wordt meteen verstuurd.
+			elapsed = (now - self.last_goal_end_time).nanoseconds / 1e9
+			if elapsed < self.RESEND_COOLDOWN_S:
+				return
 
 		goal_msg = NavigateToPose.Goal()
 		goal_msg.pose = coordinate
 
-		new_record = GoalRecord(
-			source=source,
-			goal=goal_msg, 
-			handle=None,
-			result=None,
-			accepted=False,
-			status=0  # Nav2 statussen zijn integers (0 = onbekend/verzonden)
-		)
-		
+		new_record = GoalRecord(source=source, goal=goal_msg)
 		self.current_goals.append(new_record)
-	
+
 		self.publish_status(13, "goal verzonden")
 
-		self.send_goal_future = self._action_client.send_goal_async(new_record.goal)
-		
-		# Geef het new_record mee aan de callback via een lambda
-		self.send_goal_future.add_done_callback(
-			lambda future: self.goal_response_callback(future, new_record)
+		future = self._action_client.send_goal_async(new_record.goal)
+		future.add_done_callback(
+			lambda f: self.goal_response_callback(f, new_record)
 		)
-		
 
 	# --- CALLBACKS (Nav_cb_group) ---
 	def goal_response_callback(self, future, record):
 		with self.lock:
-			handle = future.result()
-			
-			# Sla de handle en de accepted-status op in ons record
+			try:
+				handle = future.result()
+			except Exception as e:
+				self.get_logger().error(f"Goal versturen mislukt: {e}")
+				self.finish_record(record)
+				return
+
 			record.handle = handle
 			record.accepted = handle.accepted
-			
+
 			if not record.accepted:
 				self.publish_status(10, "goal afgewezen")
-				self.get_logger().warn("Goal NIET geaccepteerd door Nav2!")
-				record.status = 5 # 5 staat vaak voor Aborted/Rejected
+				self.get_logger().warn("Goal NIET geaccepteerd door Nav2! active goal vrijgegeven.")
+				record.status = 5
+				self.finish_record(record)
+				return
+
+			# Intussen vervangen of geannuleerd: meteen alsnog annuleren.
+			if record not in self.current_goals:
+				self.get_logger().info("Geaccepteerd goal is al vervangen/geannuleerd: annuleren.")
+				try:
+					handle.cancel_goal_async()
+				except Exception as e:
+					self.get_logger().warn(f"Fout bij annuleren goal: {e}")
 				return
 
 			self.get_logger().info("Goal geaccepteerd ✅")
 			self.publish_status(15, "goal geaccepteerd")
-			record.status = 2 # 2 staat voor Executing
+			record.status = 2
 
-			self._get_result_future = handle.get_result_async()
-			
-			# Geef het record opnieuw mee aan de result callback
-			self._get_result_future.add_done_callback(
-				lambda future: self.result_callback(future, record)
+			result_future = handle.get_result_async()
+			result_future.add_done_callback(
+				lambda f: self.result_callback(f, record)
 			)
 
 	def result_callback(self, future, record):
 		with self.lock:
-			result_handle = future.result()
-			
-			# Vul de laatste informatie in het record in
+			try:
+				result_handle = future.result()
+			except Exception as e:
+				self.get_logger().error(f"Resultaat ophalen mislukt: {e}")
+				self.finish_record(record)
+				return
+
 			record.result = result_handle.result
 			record.status = result_handle.status
 
-			# Resultaten van vervangen of geannuleerde doelen mogen de
-			# status van het huidige doel niet beïnvloeden.
-			if record.stale or not self.current_goals or self.current_goals[-1] is not record:
+			# Vervangen of geannuleerd goal (niet meer in de lijst): negeren.
+			if record not in self.current_goals:
 				self.get_logger().info(
 					f"Resultaat van oud doel genegeerd (status {record.status:02d})."
 				)
@@ -376,6 +405,8 @@ class DriveToCoord(Node):
 
 			self.publish_status(record.status, "NAV")
 			self.get_logger().info(f"Goal afgerond, Nav2-status: {record.status:02d}")
+			# Afgehandeld record verwijderen: lijst blijft kort, nieuw goal mag.
+			self.finish_record(record)
 
 	# --- status publisher ---
 	def publish_status(self, status, text: str):
