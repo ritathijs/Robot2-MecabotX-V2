@@ -2,6 +2,7 @@
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
 
 import json
 import time
@@ -84,7 +85,7 @@ class AutochargeBatcheck(Node):
         self.average_voltage_pub = self.create_publisher(
             Float32,
             '/BatteryAverageVoltage',
-            10
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         )
 
 

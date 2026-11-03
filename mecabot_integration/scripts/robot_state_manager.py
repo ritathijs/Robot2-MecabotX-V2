@@ -237,7 +237,9 @@ class RobotStateManager(Node):
             Float32,
             "/BatteryAverageVoltage",
             self.on_battery,
-            10,
+            # Publisher is transient_local: krijg de laatste waarde ook als
+            # deze node later start dan autocharge_batcheck.
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL),
         )
         self.create_subscription(
             String,
