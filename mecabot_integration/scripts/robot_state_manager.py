@@ -173,6 +173,9 @@ class RobotStateManager(Node):
         self.drive_pub = self.create_publisher(
             Twist, "/cmd_vel", 10
         )
+        self.manual_drive_pub = self.create_publisher(
+            Twist, "/gui_cmd_vel", 10
+        )
         self.tracking_enable_pub = self.create_publisher(
             Bool, "/tracking_enable", 10
         )
@@ -1725,10 +1728,7 @@ class RobotStateManager(Node):
         with self.lock:
             allowed = (
                 self.state.admin_open
-                and not self.state.robot_reboot_lock
                 and not self.state.estop_active
-                and not self.state.docked
-                and self.state.robot_active
             )
 
         if not allowed:
@@ -1770,7 +1770,7 @@ class RobotStateManager(Node):
         twist.linear.y = linear_y
         twist.angular.z = angular_z
 
-        self.drive_pub.publish(twist)
+        self.manual_drive_pub.publish(twist)
         self.last_drive_time = time.monotonic()
 
     def _manual_drive_timeout_check(self) -> None:

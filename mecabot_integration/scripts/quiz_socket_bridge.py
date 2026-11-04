@@ -338,11 +338,9 @@ class QuizSocketBridge(Node):
         self.is_moving = True
         msg = Twist()
         
-        if (
-            not self.admin_panel_open
-            or self.is_admin_login_open
-            or self.robot_reboot_lock
-        ):
+        # Handmatig rijden hangt enkel af van het open adminpaneel, niet van
+        # robotstatus of reboot-lock (die blokkeren alleen autonoom werk).
+        if not self.admin_panel_open or self.is_admin_login_open:
             try:
                 self.gui_cmd_vel_pub.publish(msg)
             except Exception as e:
