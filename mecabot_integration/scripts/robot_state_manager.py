@@ -527,6 +527,19 @@ class RobotStateManager(Node):
                 and not self.state.visitor_tracking_paused
                 and not self.state.quiz_active
             )
+            if tracking_enabled != getattr(self, "_last_tracking_logged", None):
+                self._last_tracking_logged = tracking_enabled
+                self.get_logger().info(
+                    f"[Tracking] enable={tracking_enabled} (active={robot_active}, "
+                    f"battery_ok={battery_ok}, work_area={at_work_area}, "
+                    f"localization={localization_valid}, docked={docked}, "
+                    f"estop={self.state.estop_active}, "
+                    f"quiz_pause={self.state.quiz_options_pause}, "
+                    f"admin={self.state.admin_open or self.state.admin_login_open}, "
+                    f"reboot_lock={self.state.robot_reboot_lock}, "
+                    f"visitor_paused={self.state.visitor_tracking_paused}, "
+                    f"quiz_active={self.state.quiz_active})"
+                )
             at_location_c = self.state.at_location_c
             at_location_d = self.state.at_location_d
             at_location_e = self.state.at_location_e
