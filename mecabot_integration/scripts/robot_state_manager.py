@@ -87,6 +87,7 @@ class RobotStateManager(Node):
     # Na een mislukte opstartlokalisatie opnieuw proberen.
     STARTUP_RETRY_SEC = 30.0
     APRILTAG_LOCATION_RADIUS = 3.0
+    MANUAL_DRIVE_RESET_DELAY_SEC = 1.0
     # Het opgeslagen laadpaalpunt ligt 1,2 m voor het station; gedockt staat
     # de robot 0,6 m verder terug (zelfde correctie als de oude position reset).
     DOCK_POSE_OFFSET_M = 0.6
@@ -134,6 +135,7 @@ class RobotStateManager(Node):
         self._last_snapshot_time = 0.0
 
         self.last_drive_time: float | None = None
+        self.manual_drive_reset_due: float | None = None
         self.estop_end_time: float | None = None
         # Timers worden nooit vernietigd (race met de MultiThreadedExecutor);
         # ze worden gepauzeerd met cancel() en hervat met reset().
@@ -1774,16 +1776,56 @@ class RobotStateManager(Node):
         self.last_drive_time = time.monotonic()
 
     def _manual_drive_timeout_check(self) -> None:
+        now = time.monotonic()
+
+        if (
+            self.manual_drive_reset_due is not None
+            and self.last_drive_time is None
+            and now >= self.manual_drive_reset_due
+        ):
+            self.manual_drive_reset_due = None
+            self._request_apriltag_reset_after_manual_drive()
+
         if self.last_drive_time is None:
             return
 
-        if time.monotonic() - self.last_drive_time > self.DRIVE_TIMEOUT_SEC:
+        if now - self.last_drive_time > self.DRIVE_TIMEOUT_SEC:
             self.get_logger().info(
                 "Handmatige besturing gestopt wegens timeout."
             )
             self._publish_zero_twist()
             self.send_robot_command("STOP")
             self.last_drive_time = None
+            # Wacht tot de robot stilstaat voordat de tag gelezen wordt.
+            self.manual_drive_reset_due = (
+                now + self.MANUAL_DRIVE_RESET_DELAY_SEC
+            )
+
+    def _request_apriltag_reset_after_manual_drive(self) -> None:
+        with self.lock:
+            # Tijdens de opstartlokalisatie loopt de reset al via de
+            # opstartlogica; die mag niet verstoord worden.
+            if not self.state.startup_location_resolved:
+                return
+            if self.state.estop_active:
+                return
+            if self.state.docked:
+                return
+
+        if self.localization_reset_pub.get_subscription_count() == 0:
+            self.get_logger().warning(
+                "[Localization] Geen AprilTag-node om de pose na handmatig "
+                "rijden te corrigeren."
+            )
+            return
+
+        msg = String()
+        msg.data = "active"
+        self.localization_reset_pub.publish(msg)
+        self.get_logger().info(
+            "[Localization] Handmatig rijden klaar; AprilTag-posecorrectie "
+            "aangevraagd."
+        )
 
     # ------------------------------------------------------------------
     # Batterijcommunicatie met QuizSocketBridge
