@@ -91,7 +91,7 @@
               <AlwaysSuccess/>
             </Fallback>
 
-            <!-- RIJD NAAR PUNT D, CONTROLEER APRILTAG EN WACHT 20 SEC -->
+            <!-- RIJD NAAR PUNT D EN CONTROLEER APRILTAG (houdt zelf 20 SEC aan) -->
             <Fallback name="AfhandelingPuntD">
               <Sequence name="WachtOpD">
                 <Fallback name="NaarPuntD">
@@ -99,9 +99,6 @@
                   <SendDriveLocationD/>
                 </Fallback>
                 <CheckAprilTagAtLocationD/>
-                <Delay delay_msec="20000">
-                  <AlwaysSuccess/>
-                </Delay>
               </Sequence>
               <AlwaysSuccess/>
             </Fallback>

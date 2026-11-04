@@ -170,36 +170,37 @@ public:
         start_time_ = std::chrono::steady_clock::now();
 
         std_msgs::msg::String msg;
-        msg.data = "active";
+        msg.data = "active:" + std::to_string(response_timeout_.count());
         reset_pub_->publish(msg);
 
         RCLCPP_INFO(
             node_->get_logger(),
-            "AprilTag-controle bij punt D gestart; maximaal 5 seconden.");
+            "AprilTag-controle bij punt D gestart; %ld seconden wachten.",
+            static_cast<long>(response_timeout_.count()));
         return BT::NodeStatus::RUNNING;
     }
 
     BT::NodeStatus onRunning() override
     {
-        if (tag_found_) {
-            finish_check();
+        // Het wachtvenster op punt D wordt volledig benut; een vroege
+        // not_found wordt genegeerd.
+        if (std::chrono::steady_clock::now() - start_time_ < response_timeout_) {
+            return BT::NodeStatus::RUNNING;
+        }
+
+        const bool found = tag_found_;
+        finish_check();
+        if (found) {
             RCLCPP_INFO(
                 node_->get_logger(),
                 "AprilTag bij punt D gevonden; posecorrectie ontvangen.");
-            return BT::NodeStatus::SUCCESS;
-        }
-
-        if (tag_missing_ ||
-            std::chrono::steady_clock::now() - start_time_ >= response_timeout_) {
-            finish_check();
+        } else {
             RCLCPP_WARN(
                 node_->get_logger(),
                 "AprilTag niet gevonden bij punt D; deze ronde telt als "
                 "een gemiste controle.");
-            return BT::NodeStatus::SUCCESS;
         }
-
-        return BT::NodeStatus::RUNNING;
+        return BT::NodeStatus::SUCCESS;
     }
 
     void onHalted() override
@@ -231,7 +232,7 @@ private:
     bool tag_found_{false};
     bool tag_missing_{false};
     std::chrono::steady_clock::time_point start_time_;
-    const std::chrono::seconds response_timeout_{6};
+    const std::chrono::seconds response_timeout_{20};
 };
 
 class CompletePatrolCycle : public BT::StatefulActionNode
@@ -275,12 +276,13 @@ public:
             ++patrol_state_->consecutive_cycles_without_tag;
             RCLCPP_WARN(
                 node_->get_logger(),
-                "Patrouilleronde voltooid zonder AprilTag (%u/5).",
-                patrol_state_->consecutive_cycles_without_tag);
+                "Patrouilleronde voltooid zonder AprilTag (%u/%u).",
+                patrol_state_->consecutive_cycles_without_tag,
+                kMaxCyclesWithoutTag);
         }
         patrol_state_->tag_seen_since_cycle_completion = false;
 
-        if (patrol_state_->consecutive_cycles_without_tag < 5) {
+        if (patrol_state_->consecutive_cycles_without_tag < kMaxCyclesWithoutTag) {
             std_msgs::msg::Bool reset;
             reset.data = true;
             patrol_reset_pub_->publish(reset);
@@ -291,8 +293,9 @@ public:
 
         RCLCPP_ERROR(
             node_->get_logger(),
-            "Robot gestopt: gedurende vijf volledige C-D-E-rondes is geen "
-            "AprilTag gezien; verdwaald-status geactiveerd.");
+            "Robot gestopt: gedurende %u volledige C-D-E-rondes is geen "
+            "AprilTag gezien; verdwaald-status geactiveerd.",
+            kMaxCyclesWithoutTag);
 
         patrol_state_->lost = true;
         std_msgs::msg::String command;
@@ -335,6 +338,7 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr command_pub_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr patrol_reset_pub_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr location_c_sub_;
+    static constexpr unsigned int kMaxCyclesWithoutTag = 10;
     bool at_location_c_{false};
     bool waiting_for_reset_{false};
     std::chrono::steady_clock::time_point reset_start_;

@@ -42,6 +42,7 @@ class AprilTagAbsolutePose(Node):
         # Maximale tijd (s) voor een lokalisatiecontrole, ook als er geen
         # camerabeelden beschikbaar komen.
         self.reset_timeout = 5.0
+        self.active_timeout = self.reset_timeout
         self.reset_start_time = None
 
         ##############################################
@@ -248,7 +249,23 @@ class AprilTagAbsolutePose(Node):
 
     def reset_callback(self, msg):
         try:
-            if msg.data.strip().lower() == "active":
+            # Formaat: "active" of "active:<seconden>" (duur van de poging).
+            mode, _, argument = msg.data.strip().lower().partition(":")
+
+            if mode == "active":
+
+                self.active_timeout = self.reset_timeout
+                if argument:
+                    try:
+                        parsed = float(argument)
+                        if not math.isfinite(parsed) or parsed <= 0.0:
+                            raise ValueError(argument)
+                        self.active_timeout = parsed
+                    except ValueError:
+                        self.get_logger().warn(
+                            f"Ongeldige duur '{argument}' in reset_active; "
+                            f"standaard {self.reset_timeout:.0f}s gebruikt."
+                        )
 
                 self.reset_active = True
                 self.reset_start_time = time.time()
@@ -256,7 +273,7 @@ class AprilTagAbsolutePose(Node):
                 self.done_sent = False
 
                 self.get_logger().info(
-                    "Reset ACTIVE ontvangen."
+                    f"Reset ACTIVE ontvangen (max {self.active_timeout:.0f}s)."
                 )
 
             else:
@@ -388,10 +405,10 @@ class AprilTagAbsolutePose(Node):
             # al camera-frames binnenkomen. Voorkomt dat de node oneindig
             # blijft hangen als de camera bij startup nog geen beeld geeft.
             if self.reset_start_time is not None and \
-                    (time.time() - self.reset_start_time) >= self.reset_timeout:
+                    (time.time() - self.reset_start_time) >= self.active_timeout:
 
                 self.get_logger().warn(
-                    f"Reset-poging timeout na {self.reset_timeout:.0f}s "
+                    f"Reset-poging timeout na {self.active_timeout:.0f}s "
                     f"(geen tag/frame gevonden)."
                 )
 
