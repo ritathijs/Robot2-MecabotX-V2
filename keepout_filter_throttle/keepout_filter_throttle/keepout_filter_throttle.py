@@ -33,6 +33,8 @@ class KeepoutToggler(Node):
         self.declare_parameter('map_dir', DEFAULT_MAP_DIR)
         self.declare_parameter('guard_enabled', True)
         self.declare_parameter('guard_radius', 0.49)
+        self.declare_parameter('escape_enabled', True)
+        self.declare_parameter('escape_delay', 3.0)
         self.declare_parameter('diagnostics_enabled', True)
         self.declare_parameter('diagnostics_interval', 2.0)
         self.declare_parameter('diagnostics_log_period', 10.0)
@@ -55,6 +57,8 @@ class KeepoutToggler(Node):
         # Launch laadt het SERVICE-masker (zone uit) bij het opstarten.
         self.desired = False
         self.applied = False
+        self.escape = False
+        self.in_zone_since = None
         self.request_in_flight = False
         self.pose = None
         self.zones = None
@@ -116,11 +120,43 @@ class KeepoutToggler(Node):
         return self.zones.zone_within(
             x, y, self.get_parameter('guard_radius').value)
 
-    def _reconcile(self):
-        if self.request_in_flight or self.desired == self.applied:
+    def _update_escape(self):
+        """Zone tijdelijk uit als de robot blijvend in lethaal zone-terrein staat.
+
+        Eindigt automatisch zodra de robot buiten guard_radius van de zone is;
+        daarna past _reconcile de gewenste zone-staat weer toe.
+        """
+        if (self.zones is None or self.pose is None
+                or not self.get_parameter('escape_enabled').value):
+            return
+        x, y, _ = self.pose
+        if self.escape:
+            if not self._zone_blocks_activation():
+                self.escape = False
+                self.in_zone_since = None
+                self.get_logger().info(
+                    "Escape klaar: robot is vrij van de zone, zone-masker wordt hersteld.")
             return
 
-        if self.desired and self._zone_blocks_activation():
+        if not (self.applied and self.zones.zone_at(x, y)):
+            self.in_zone_since = None
+            return
+        now = time.monotonic()
+        if self.in_zone_since is None:
+            self.in_zone_since = now
+        elif now - self.in_zone_since >= self.get_parameter('escape_delay').value:
+            self.escape = True
+            self.get_logger().warn(
+                f"Escape: robot staat al {now - self.in_zone_since:.0f} s in lethale zone "
+                f"(x={x:.2f}, y={y:.2f}); zone tijdelijk UIT tot hij vrij is.")
+
+    def _reconcile(self):
+        self._update_escape()
+        wanted = self.desired and not self.escape
+        if self.request_in_flight or wanted == self.applied:
+            return
+
+        if wanted and self._zone_blocks_activation():
             self.get_logger().warn(
                 "Zone AAN uitgesteld: de robot staat in of vlak bij de verboden zone "
                 f"(pose x={self.pose[0]:.2f}, y={self.pose[1]:.2f}). "
@@ -134,16 +170,16 @@ class KeepoutToggler(Node):
                 throttle_duration_sec=5.0)
             return
 
-        candidates = self.mask_full_candidates if self.desired else [self.mask_empty]
-        index = self.full_index if self.desired else 0
+        candidates = self.mask_full_candidates if wanted else [self.mask_empty]
+        index = self.full_index if wanted else 0
         request = LoadMap.Request()
         request.map_url = candidates[index]
 
         self.request_in_flight = True
         self.get_logger().info(
-            f"Masker laden: {'Zone AAN' if self.desired else 'Zone UIT'} ({request.map_url})")
+            f"Masker laden: {'Zone AAN' if wanted else 'Zone UIT'} ({request.map_url})")
         future = self.client.call_async(request)
-        future.add_done_callback(partial(self._on_loaded, self.desired))
+        future.add_done_callback(partial(self._on_loaded, wanted))
 
     def _on_loaded(self, state, future):
         self.request_in_flight = False

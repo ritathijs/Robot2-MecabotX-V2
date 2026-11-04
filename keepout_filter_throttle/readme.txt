@@ -14,3 +14,7 @@ Zacht keepout-masker, guard en diagnose
   meldingen als de voetafdruk in lethale cellen staat). Uitzetten kan met de
   parameters diagnostics_enabled en guard_enabled.
  
+- Escape: staat de robot (middelpunt) escape_delay (3 s) lang in een lethale
+  zone-cel terwijl de zone AAN is, dan wordt de zone tijdelijk UIT gezet zodat
+  hij eruit kan rijden. Zodra hij buiten guard_radius is, komt het masker weer
+  terug. Uitzetten: parameter escape_enabled:=false.
