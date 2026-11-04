@@ -1,3 +1,4 @@
+import math
 import threading
 import rclpy
 from rclpy.node import Node
@@ -7,6 +8,7 @@ from geometry_msgs.msg import PoseStamped, Twist
 from std_msgs.msg import String, Bool
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
+from tf2_ros import Buffer, TransformListener
 from dataclasses import dataclass
 
 @dataclass
@@ -61,7 +63,12 @@ class DriveToCoord(Node):
 		self.current_goals = []
 		self.last_goal_end_time = None
 		self.last_finished_pose = None
+		self.last_finished_succeeded = False
 		self.RESEND_COOLDOWN_S = 5.0
+		# People-tracker doelen dichter bij de robot dan dit worden genegeerd (Nav2 meldt anders meteen 'bereikt').
+		self.PEOPLE_MIN_GOAL_DISTANCE_M = 2.0
+		self.tf_buffer = Buffer()
+		self.tf_listener = TransformListener(self.tf_buffer, self)
 		self.GOAL_RESPONSE_TIMEOUT_S = 10.0
 		
 		self.needs_action = False
@@ -144,6 +151,8 @@ class DriveToCoord(Node):
 		with self.lock:
 			node_name = msg.data.strip()
 			self.last_BehaviorTreeNode = node_name
+			# Nieuw commando van de BT: een eerder bereikte bestemming mag opnieuw aangeleerd worden.
+			self.last_finished_pose = None
 			self.docking_active = False
 			self.needs_action = True
 		self.get_logger().info("Nieuw topic ontvangen van BehaviorTree.")
@@ -187,6 +196,7 @@ class DriveToCoord(Node):
 	def btDriveCoord_callback(self, msg):
 		with self.lock:
 			self.last_btDriveCoord = msg
+			self.last_finished_pose = None
 			self.publish_status(11, "coördinaat opgeslagen")
 		self.get_logger().info('Nieuw coördinaat ontvangen.')
 
@@ -313,21 +323,44 @@ class DriveToCoord(Node):
 		dot = qa.x * qb.x + qa.y * qb.y + qa.z * qb.z + qa.w * qb.w
 		return abs(dot) >= 1.0 - dot_tol
 
+	def too_close_to_robot(self, coordinate):
+		"""True als het doel binnen PEOPLE_MIN_GOAL_DISTANCE_M van de robot ligt (zonder TF: niet blokkeren)."""
+		try:
+			t = self.tf_buffer.lookup_transform(
+				coordinate.header.frame_id or 'map', 'base_footprint', rclpy.time.Time()
+			).transform.translation
+		except Exception as e:
+			self.get_logger().warn(f"Robotpositie onbekend, afstandscontrole overgeslagen: {e}", throttle_duration_sec=5.0)
+			return False
+		p = coordinate.pose.position
+		dist = math.hypot(p.x - t.x, p.y - t.y)
+		if dist < self.PEOPLE_MIN_GOAL_DISTANCE_M:
+			self.get_logger().info(
+				f"PeopleSearch-doel genegeerd: slechts {dist:.2f} m van de robot.",
+				throttle_duration_sec=5.0,
+			)
+			return True
+		return False
+
 	def active_record(self):
 		"""Het goal dat nu verstuurd/actief is (nog geen resultaat of afwijzing)."""
 		return self.current_goals[-1] if self.current_goals else None
 
-	def finish_record(self, record):
+	def finish_record(self, record, succeeded=False):
 		if record in self.current_goals:
 			self.current_goals.remove(record)
 		self.last_goal_end_time = self.get_clock().now()
 		self.last_finished_pose = record.goal.pose
+		self.last_finished_succeeded = succeeded
 
 	def send_goal(self, source, coordinate=None):
 		if coordinate is None:
 			msg = f"Geen coördinaat ontvangen van {source} — goal niet gestuurd!"
 			self.get_logger().warn(msg)
 			self.publish_status(12, msg)
+			return
+
+		if source == "PeopleSearch" and self.too_close_to_robot(coordinate):
 			return
 
 		now = self.get_clock().now()
@@ -345,8 +378,11 @@ class DriveToCoord(Node):
 			and self.last_finished_pose is not None
 			and self.same_pose(self.last_finished_pose, coordinate)
 		):
-			# Zelfde bestemming als het net afgeronde goal: korte pauze tegen een zend-storm.
-			# Een andere bestemming wordt meteen verstuurd.
+			# Bestemming al bereikt: niet opnieuw sturen tot de BT een nieuw commando geeft.
+			# Anders blijft de robot vastzitten in eindeloze goals van ~0 m.
+			if self.last_finished_succeeded:
+				return
+			# Mislukt goal: korte pauze tegen een zend-storm, daarna nieuwe poging.
 			elapsed = (now - self.last_goal_end_time).nanoseconds / 1e9
 			if elapsed < self.RESEND_COOLDOWN_S:
 				return
@@ -424,7 +460,7 @@ class DriveToCoord(Node):
 			self.publish_status(record.status, "NAV")
 			self.get_logger().info(f"Goal afgerond, Nav2-status: {record.status:02d}")
 			# Afgehandeld record verwijderen: lijst blijft kort, nieuw goal mag.
-			self.finish_record(record)
+			self.finish_record(record, succeeded=(record.status == 4))
 
 	# --- status publisher ---
 	def publish_status(self, status, text: str):
