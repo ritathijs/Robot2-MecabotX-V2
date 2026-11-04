@@ -119,10 +119,11 @@ class RobotStateManager(Node):
     def __init__(self):
         super().__init__("robot_state_manager")
 
-        # Zonder AprilTag bij het laadstation: probeer bij een mislukte
-        # opstartlokalisatie eerst ter plaatse te docken.
+        # Standaard uit: zonder bekende positie blijft de robot stilstaan met
+        # het verdwaald-scherm. Alleen aanzetten als ter plaatse docken
+        # bewust gewenst is.
         self.startup_dock_fallback = bool(
-            self.declare_parameter("startup_dock_fallback", True).value
+            self.declare_parameter("startup_dock_fallback", False).value
         )
 
         self.state = RobotState(robot_active=False)
