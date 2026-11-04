@@ -17,6 +17,7 @@ class GoalRecord:
 	result: any = None		   # Het uiteindelijke Resultaat
 	accepted: bool = False	   # Is het doel geaccepteerd?
 	status: int = 0			  # De statuscode (1=Pending, 4=Canceled, etc.)
+	sent_time: any = None	   # Tijdstip van verzenden (voor time-out op ontbrekend antwoord)
 
 behavior_tree_nodes = {
 	# keepoutfilter_on: "True" / "False" / "none"
@@ -61,6 +62,7 @@ class DriveToCoord(Node):
 		self.last_goal_end_time = None
 		self.last_finished_pose = None
 		self.RESEND_COOLDOWN_S = 5.0
+		self.GOAL_RESPONSE_TIMEOUT_S = 10.0
 		
 		self.needs_action = False
 		
@@ -197,8 +199,24 @@ class DriveToCoord(Node):
 	def control_loop(self):
 		"""Wordt door de ROS timer 4 keer per seconde aangeroepen."""
 		with self.lock:
+			self.release_dead_goals()
 			if self.needs_action:
 				self.actiondistribute()
+
+	def release_dead_goals(self):
+		"""Geef het actieve goal vrij als Nav2 weg is (herstart) of niet antwoordt."""
+		if not self.current_goals:
+			return
+		if not self._action_client.server_is_ready():
+			self.get_logger().warn("Nav2 navigate_to_pose niet beschikbaar: actieve goals vrijgegeven.")
+			self.current_goals.clear()
+			return
+		now = self.get_clock().now()
+		for record in list(self.current_goals):
+			if record.handle is None and record.sent_time is not None:
+				if (now - record.sent_time).nanoseconds / 1e9 > self.GOAL_RESPONSE_TIMEOUT_S:
+					self.get_logger().warn("Geen antwoord van Nav2 op goal: active goal vrijgegeven.")
+					self.current_goals.remove(record)
 
 	# --- LOGICA & ACTIES ---
 
@@ -336,7 +354,7 @@ class DriveToCoord(Node):
 		goal_msg = NavigateToPose.Goal()
 		goal_msg.pose = coordinate
 
-		new_record = GoalRecord(source=source, goal=goal_msg)
+		new_record = GoalRecord(source=source, goal=goal_msg, sent_time=now)
 		self.current_goals.append(new_record)
 
 		self.publish_status(13, "goal verzonden")
