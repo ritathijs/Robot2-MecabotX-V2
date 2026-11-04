@@ -1643,6 +1643,10 @@ public:
             qos,
             [this](std_msgs::msg::Bool::SharedPtr msg)
             {
+                if (msg->data && !ready_)
+                {
+                    ready_since_ = node_->now();
+                }
                 ready_ = msg->data;
             });
     }
@@ -1654,13 +1658,25 @@ public:
 
     BT::NodeStatus tick() override
     {
-        return ready_ ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
+        // /IsRobotStateReady is transient_local, de overige conditietopics
+        // (laden, gedockt, actief) niet: zij komen pas bij de volgende
+        // snapshot binnen. Wacht daarom even, anders start de BT met
+        // standaardwaarden (false) en rijdt hij onterecht naar het laadstation.
+        if (!ready_)
+        {
+            return BT::NodeStatus::FAILURE;
+        }
+        return (node_->now() - ready_since_).seconds() >= kSettleSeconds
+            ? BT::NodeStatus::SUCCESS
+            : BT::NodeStatus::FAILURE;
     }
 
 private:
+    static constexpr double kSettleSeconds = 2.0;
     rclcpp::Node::SharedPtr node_;
     rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr status_sub_;
     bool ready_{false};
+    rclcpp::Time ready_since_{0, 0, RCL_ROS_TIME};
 };
 
 DEFINE_CONDITION_NODE(CheckRobotActive, "/IsRobotActive")
