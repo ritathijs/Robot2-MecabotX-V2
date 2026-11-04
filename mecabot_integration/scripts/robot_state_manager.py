@@ -22,6 +22,7 @@ class RobotState:
     robot_active: bool = False
     quiz_active: bool = False
     quiz_finished: bool = False
+    quiz_requested: bool = False
 
     admin_open: bool = False
     admin_login_open: bool = False
@@ -100,7 +101,6 @@ class RobotStateManager(Node):
         "DriveQuizLocation": "quiz",
         "FallbackDriveQuizLocation": "quiz",
         "follow-robot-screen": "quiz",
-        "robot-arrived-at-quiz-location": "quiz",
 
         "DriveWorkArea": "work_area",
         "FallbackDriveToWorkArea": "work_area",
@@ -503,6 +503,7 @@ class RobotStateManager(Node):
         with self.lock:
             localization_valid = self.state.localization_valid
             at_quiz = self.state.at_quiz
+            quiz_requested = self.state.quiz_requested
             at_work_area = self.state.at_work_area
             at_station = self.state.at_station
             charging = self.state.charging
@@ -524,6 +525,7 @@ class RobotStateManager(Node):
                 and not self.state.admin_login_open
                 and not self.state.robot_reboot_lock
                 and not self.state.visitor_tracking_paused
+                and not self.state.quiz_active
             )
             at_location_c = self.state.at_location_c
             at_location_d = self.state.at_location_d
@@ -536,7 +538,7 @@ class RobotStateManager(Node):
             )
 
             snapshot = (
-                localization_valid, at_quiz, at_work_area, at_location_c,
+                localization_valid, at_quiz, quiz_requested, at_work_area, at_location_c,
                 at_location_d, at_location_e, at_station, charging, docked,
                 docking_retry_available, robot_state_ready, robot_active,
                 battery_ok, tracking_enabled,
@@ -554,6 +556,9 @@ class RobotStateManager(Node):
             self._bool_message(localization_valid)
         )
         self.quiz_pub.publish(self._bool_message(at_quiz))
+        self.want_to_start_quiz_pub.publish(
+            self._bool_message(quiz_requested)
+        )
         self.work_pub.publish(self._bool_message(at_work_area))
         self.location_c_pub.publish(self._bool_message(at_location_c))
         self.location_d_pub.publish(self._bool_message(at_location_d))
@@ -1212,6 +1217,10 @@ class RobotStateManager(Node):
                 if destination != "charging_station" and not self.state.docked:
                     self.state.at_station = False
 
+                # Een eerdere quizaankomst mag een volgende quiz niet overslaan.
+                if destination != "quiz":
+                    self.state.at_quiz = False
+
                 if destination == "quiz":
                     self.state.at_location_c = False
                     self.state.at_location_d = False
@@ -1412,16 +1421,25 @@ class RobotStateManager(Node):
             with self.lock:
                 self.state.quiz_active = False
                 self.state.quiz_finished = True
+                self.state.quiz_requested = False
+                self.state.at_quiz = False
 
             self.quiz_finished_pub.publish(self._bool_message(True))
             self.want_to_start_quiz_pub.publish(self._bool_message(False))
+            self._publish_status_snapshot()
 
         elif event == "quiz_inactive":
             with self.lock:
                 self.state.quiz_active = False
+                self.state.quiz_requested = False
+            self.want_to_start_quiz_pub.publish(self._bool_message(False))
+            self._publish_status_snapshot()
 
         elif event == "drive_to_quiz_location":
+            with self.lock:
+                self.state.quiz_requested = True
             self.want_to_start_quiz_pub.publish(self._bool_message(True))
+            self._publish_status_snapshot()
 
         elif event == "screen_request":
             self.handle_screen_request(data)
@@ -1657,6 +1675,7 @@ class RobotStateManager(Node):
             self.state.quiz_finished = False
 
         self.quiz_finished_pub.publish(self._bool_message(False))
+        self._publish_status_snapshot()
 
     def _handle_admin_panel_open(self) -> None:
         with self.lock:

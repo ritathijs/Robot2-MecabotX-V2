@@ -47,7 +47,7 @@
         </Fallback>
 
         <!-- Missielogica -->
-        <Fallback name="MissionControl">
+        <ReactiveFallback name="MissionControl">
 
           <!-- 1. QUIZ (Allerhoogste prioriteit) -->
           <ReactiveSequence name="QuizPreparationAndExecution">
@@ -123,7 +123,7 @@
 
           </Sequence>
 
-        </Fallback>
+        </ReactiveFallback>
       </ReactiveSequence>
 
       <!-- ========================================= -->
