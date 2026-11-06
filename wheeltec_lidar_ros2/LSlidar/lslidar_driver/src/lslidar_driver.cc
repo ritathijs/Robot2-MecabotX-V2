@@ -550,6 +550,11 @@ namespace lslidar_driver
 		}
 	}
 
+	bool LslidarDriver::isValidPacketLength(int len) const
+	{
+		return len >= kMinPacketBytes && len <= kMaxPacketBytes;
+	}
+
 	int LslidarDriver::receive_data(unsigned char *packet_bytes)
 	{
 		int link_time = 0;
@@ -606,6 +611,14 @@ namespace lslidar_driver
 			if (packet_bytes[2] == 0x55 && packet_bytes[3] == 0x00)
 				len = 188;
 		}
+		// De lengte komt uit de datastroom: bij een foutief pakket nooit buiten de buffer lezen
+		if (!isValidPacketLength(len))
+		{
+			dropped_packets_++;
+			RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 5000,
+								 "Invalid packet length %d dropped (total dropped: %lu)", len, (unsigned long)dropped_packets_);
+			return 0;
+		}
 		while (count < len)
 		{
 			count_2 = serial_->read(packet_bytes + count, len - count);
@@ -650,6 +663,8 @@ namespace lslidar_driver
 
 	void LslidarDriver::data_processing(unsigned char *packet_bytes, int len) // 处理每一包的数据
 	{
+		if (!isValidPacketLength(len))
+			return;
 		double degree;
 		double end_degree;
 		double degree_interval = 15.0;
@@ -806,6 +821,8 @@ namespace lslidar_driver
 
 	void LslidarDriver::data_processing_2(unsigned char *packet_bytes, int len) // 处理每一包的数据
 	{
+		if (!isValidPacketLength(len))
+			return;
 		double degree;
 		double end_degree;
 		double degree_interval = 15.0;
@@ -1265,7 +1282,7 @@ namespace lslidar_driver
 		if (!is_start)
 			return true;
 		// Allocate a new shared pointer for zero-copy sharing with other nodelets.
-		unsigned char *packet_bytes = new unsigned char[500];
+		unsigned char packet_bytes[kMaxPacketBytes] = {0};
 		int len = 0;
 		bool difop = false;
 		if (interface_selection == "net")
@@ -1296,6 +1313,8 @@ namespace lslidar_driver
 						int len_L = packet->data[2];
 						len = len_H * 256 + len_L;
 					}
+					if (!isValidPacketLength(len))
+						continue;
 					for (int i = len - 1; i > 0; i--)
 						packet->data[i] = packet->data[i - 1];
 					packet->data[0] = 0xa5;
@@ -1324,7 +1343,7 @@ namespace lslidar_driver
 					}
 				}
 
-				if (len <= 0 || len >= 1000 || packet->data[0] != 0xa5 || packet->data[1] != 0x5a)
+				if (!isValidPacketLength(len) || packet->data[0] != 0xa5 || packet->data[1] != 0x5a)
 					continue;
 				for (int i = 0; i < len; i++)
 				{
@@ -1354,7 +1373,7 @@ namespace lslidar_driver
 								line[i] = line[i] - 39;
 						}
 
-						for (long unsigned int i = 0; i < (line.size() - 1) / 2; i++)
+						for (long unsigned int i = 0; i < (line.size() - 1) / 2 && i < (long unsigned int)kMaxPacketBytes; i++)
 						{
 							packet_bytes[i] = line[i * 2] * 16 + line[i * 2 + 1];
 						}
@@ -1408,8 +1427,6 @@ namespace lslidar_driver
 			else
 				LslidarDriver::data_processing(packet_bytes, len);
 		}
-		//delete packet_bytes;
-		delete[] packet_bytes;  //RT bug fix
 		return true;
 	}
 

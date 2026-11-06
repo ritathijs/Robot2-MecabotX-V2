@@ -43,6 +43,9 @@
 #include "sensor_msgs/msg/laser_scan.hpp"
 namespace lslidar_driver {
 
+static constexpr int kMaxPacketBytes = 500;
+static constexpr int kMinPacketBytes = 20;
+
 struct PointXYZIT {
     PCL_ADD_POINT4D;
     uint8_t intensity;
@@ -82,6 +85,7 @@ private:
     void pubScanThread();
     void recvThread_crc(int &count,int &link_time);
     int receive_data(unsigned char *packet_bytes);
+    bool isValidPacketLength(int len) const;
     int getScan(std::vector<ScanPoint> &points, rclcpp::Time &scan_time, float &scan_duration);
 
     boost::thread *pubscan_thread_ ;
@@ -100,6 +104,7 @@ private:
 	int baud_rate_;
     int points_size_;
     int idx = 0;
+    uint64_t dropped_packets_ = 0;
     int link_time = 0;
 
     bool use_gps_ts;   
