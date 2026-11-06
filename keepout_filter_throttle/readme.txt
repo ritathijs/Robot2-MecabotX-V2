@@ -3,7 +3,7 @@ Dit bestand werdt aangemaakt door Matthijs Mondelaers op 11/02/2025
 Zacht keepout-masker, guard en diagnose
 ---------------------------------------
 - Masker genereren: quick_map_change/GenerateSoftKeepout.py (schrijft
-  wheeltec_robot_nav2/map/WHEELTEC_KEEPOUT_WORKING_SOFT.png/.yaml, mode 'scale').
+  wheeltec_robot_nav2/map/WHEELTEC_KEEPOUT_WORKING_SOFT.pgm/.yaml, mode 'scale').
   Opnieuw draaien na elke wijziging aan WORKING/SERVICE; --inner en --outer
   regelen de breedte van de helling binnen en de ring buiten de zone.
 - De node laadt het SOFT-masker als het bestaat, en valt terug op het binaire

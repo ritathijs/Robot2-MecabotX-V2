@@ -85,14 +85,14 @@ def write_outputs(values, cfg, out_dir, name):
     # map_server 'scale' met free_thresh=0 en occupied_thresh=1 rekent
     # occ = (255 - pixel) / 255 om naar waarde = occ * 100.
     pixels = np.rint(255.0 * (1.0 - values / 100.0)).astype(np.uint8)
-    png_path = os.path.join(out_dir, f"{name}.png")
-    Image.fromarray(pixels).save(png_path)
+    pgm_path = os.path.join(out_dir, f"{name}.pgm")
+    Image.fromarray(pixels).save(pgm_path)
 
     yaml_path = os.path.join(out_dir, f"{name}.yaml")
     origin = ", ".join(str(v) for v in cfg["origin"])
     with open(yaml_path, "w") as f:
         f.write(
-            f"image: {name}.png\n"
+            f"image: {name}.pgm\n"
             "mode: scale\n"
             f"resolution: {cfg['resolution']}\n"
             f"origin: [{origin}]\n"
@@ -100,7 +100,7 @@ def write_outputs(values, cfg, out_dir, name):
             "occupied_thresh: 1.0\n"
             "free_thresh: 0.0\n"
         )
-    return png_path, yaml_path
+    return pgm_path, yaml_path
 
 
 def main():
@@ -134,14 +134,14 @@ def main():
         blocked_work, blocked_service, free_work, float(cfg["resolution"]),
         args.inner, args.outer, args.edge_value, args.outer_value)
 
-    png_path, yaml_path = write_outputs(values, cfg, map_dir, args.name)
+    pgm_path, yaml_path = write_outputs(values, cfg, map_dir, args.name)
 
     res = float(cfg["resolution"])
     print(f"Zone-cellen: {int(zone.sum())} ({zone.sum() * res * res:.1f} m2)")
     print(f"Lethal (100): {int((values >= 99.5).sum())}  "
           f"zacht (1-99): {int(((values > 0) & (values < 99.5)).sum())}  "
           f"vrij (0): {int((values == 0).sum())}")
-    print(f"Geschreven: {png_path}\n            {yaml_path}")
+    print(f"Geschreven: {pgm_path}\n            {yaml_path}")
 
 
 if __name__ == "__main__":
