@@ -34,7 +34,7 @@
     <arg name="ir_qos" default="default"/>
     <arg name="ir_camera_info_qos" default="default"/>
     <arg name="publish_tf" default="true"/>
-    <arg name="tf_publish_rate" default="10.0"/>
+    <arg name="tf_publish_rate" default="0.0"/>
     <arg name="ir_info_url" default=""/>
     <arg name="color_info_url" default=""/>
     <arg name="color_depth_synchronization" default="false"/>
