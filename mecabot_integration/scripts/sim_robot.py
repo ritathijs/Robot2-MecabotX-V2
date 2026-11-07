@@ -158,6 +158,10 @@ class SimRobot(Node):
             String, "/reset_active", self.on_reset_active, 10,
             callback_group=self.cb_group,
         )
+        self.create_subscription(
+            PoseWithCovarianceStamped, "/initialpose", self.on_initial_pose, 10,
+            callback_group=self.cb_group,
+        )
 
         self.action_server = ActionServer(
             self,
@@ -188,6 +192,15 @@ class SimRobot(Node):
         )
 
     # --- Sensoren en pose -------------------------------------------------
+
+    def on_initial_pose(self, msg):
+        if msg.header.frame_id != "map":
+            self.get_logger().warn("Simulatie negeert startpose buiten frame map.")
+            return
+        with self.lock:
+            self.x = float(msg.pose.pose.position.x)
+            self.y = float(msg.pose.pose.position.y)
+            self.yaw = quaternion_to_yaw(msg.pose.pose.orientation)
 
     def publish_pose(self):
         with self.lock:
