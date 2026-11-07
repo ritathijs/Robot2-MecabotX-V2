@@ -88,6 +88,7 @@ required_packages=(
 )
 
 rt_owned_packages=(
+    autocharge_batcheck
     bumper
     drive_mux
     mecabot_integration

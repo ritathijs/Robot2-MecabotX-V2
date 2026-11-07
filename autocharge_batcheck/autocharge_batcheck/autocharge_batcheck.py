@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import rclpy
+from ament_index_python.packages import get_package_share_directory
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 
@@ -17,9 +18,6 @@ from std_msgs.msg import Float32
 WORKSPACE_SRC = Path(__file__).resolve().parents[2]
 
 BATSTATUS_FILE = WORKSPACE_SRC / "auto_recharge_ros2" / "batstatus.txt"
-
-VOLTAGE_CONFIG = WORKSPACE_SRC / "mecabot_bt" / "trees" / "spanningsniveaus.json"
-
 
 LOW_COUNT_REQUIRED = 5
 OK_COUNT_REQUIRED = 5
@@ -105,7 +103,11 @@ class AutochargeBatcheck(Node):
 
         try:
 
-            with open(VOLTAGE_CONFIG, "r") as f:
+            config_path = (
+                Path(get_package_share_directory("autocharge_batcheck"))
+                / "config" / "spanningsniveaus.json"
+            )
+            with open(config_path, "r") as f:
                 data = json.load(f)
 
 
