@@ -1715,8 +1715,6 @@ int main(int argc, char **argv)
         });
 
     auto april_tag_patrol_state = std::make_shared<AprilTagPatrolState>();
-    auto visitor_target_monitor =
-        std::make_shared<VisitorTargetMonitor>(bt_node);
 
     // Registreer alle Acties
     REGISTER_BT_NODE(ExecuteUndockDrive)
@@ -1730,38 +1728,6 @@ int main(int argc, char **argv)
     REGISTER_BT_NODE(DockingRetriesExhausted)
     REGISTER_BT_NODE(SetRobotInactive)
     REGISTER_BT_NODE(HoldAprilTagLost)
-    factory.registerBuilder<StartDrivingToPeople>(
-        "StartDrivingToPeople",
-        [bt_node](
-            const std::string& name,
-            const BT::NodeConfiguration& config) {
-            return std::make_unique<StartDrivingToPeople>(
-                name, config, bt_node);
-        });
-    factory.registerBuilder<CheckingNearbyVisitors>(
-        "CheckingNearbyVisitors",
-        [bt_node, visitor_target_monitor](
-            const std::string& name,
-            const BT::NodeConfiguration& config) {
-            return std::make_unique<CheckingNearbyVisitors>(
-                name, config, bt_node, visitor_target_monitor);
-        });
-    factory.registerBuilder<RobotRotationFollowMe>(
-        "RobotRotationFollowMe",
-        [bt_node, visitor_target_monitor](
-            const std::string& name,
-            const BT::NodeConfiguration& config) {
-            return std::make_unique<RobotRotationFollowMe>(
-                name, config, bt_node, visitor_target_monitor);
-        });
-    factory.registerBuilder<VisitorNoResponseRecovery>(
-        "VisitorNoResponseRecovery",
-        [bt_node, visitor_target_monitor](
-            const std::string& name,
-            const BT::NodeConfiguration& config) {
-            return std::make_unique<VisitorNoResponseRecovery>(
-                name, config, bt_node, visitor_target_monitor);
-        });
     factory.registerBuilder<CheckAprilTagAtLocationD>(
         "CheckAprilTagAtLocationD",
         [bt_node, april_tag_patrol_state](
@@ -1804,15 +1770,6 @@ int main(int argc, char **argv)
     REGISTER_BT_NODE(SendDriveLocationC)
     REGISTER_BT_NODE(SendDriveLocationD)
     REGISTER_BT_NODE(SendDriveLocationE)
-    factory.registerBuilder<IsPersonDetected>(
-        "IsPersonDetected",
-        [visitor_target_monitor](
-            const std::string& name,
-            const BT::NodeConfiguration& config) {
-            return std::make_unique<IsPersonDetected>(
-                name, config, visitor_target_monitor);
-        });
-
     const auto behavior_tree_path =
         ament_index_cpp::get_package_share_directory("mecabot_integration") +
         "/config/behavior_tree.xml";

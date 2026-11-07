@@ -62,19 +62,8 @@
             <ExecuteActiveQuiz/>
           </ReactiveSequence>
 
-          <!-- 2. MENS DETECTIE (Prioriteit over reguliere patrouille) -->
-          <ReactiveSequence name="InteractieMetBezoekers">
-            <IsPersonDetected/>
-            <Sequence name="WervingsFlow">
-              <StartDrivingToPeople/>
-              <CheckingNearbyVisitors/>
-              <RobotRotationFollowMe/>
-              <VisitorNoResponseRecovery/>
-            </Sequence>
-          </ReactiveSequence>
-
-          <!-- 3. PATROUILLE LUS (C -> D -> E) -->
-          <!-- Quiz- en werkzonewissels resetten naar C; bezoekersinteractie behoudt de ronde. -->
+          <!-- 2. PATROUILLE LUS (C -> D -> E) -->
+          <!-- Quiz- en werkzonewissels resetten naar C. -->
           <Sequence name="WervingsPatrouille">
             
             <!-- RIJD NAAR PUNT C EN WACHT 20 SEC -->
@@ -178,13 +167,6 @@
     <Action ID="SendDriveQuizLocationA"/>
     <Action ID="SendDriveQuizLocationB"/>
     <Action ID="ExecuteActiveQuiz"/>
-    
-    <!-- Mensen werven -->
-    <Condition ID="IsPersonDetected"/>
-    <Action ID="StartDrivingToPeople"/>
-    <Action ID="CheckingNearbyVisitors"/>
-    <Action ID="RobotRotationFollowMe"/>
-    <Action ID="VisitorNoResponseRecovery"/>
     
     <!-- Patrouille -->
     <Condition ID="IsRobotAtLocationC"/>

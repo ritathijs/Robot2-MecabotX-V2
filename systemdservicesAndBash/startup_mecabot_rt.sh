@@ -81,7 +81,6 @@ required_packages=(
     bumper
     drive_mux
     mecabot_integration
-    people_follower_ros2
     pointcloud_to_laserscan
     tf2_ros
     turn_on_wheeltec_robot
@@ -92,7 +91,6 @@ rt_owned_packages=(
     bumper
     drive_mux
     mecabot_integration
-    people_follower_ros2
 )
 
 for package in "${required_packages[@]}"; do
@@ -194,10 +192,6 @@ sleep 3
 run_in_terminal "RT Camera" "camera.log" \
     "while true; do ros2 launch turn_on_wheeltec_robot wheeltec_camera.launch.py; result=\$?; [[ \$result -eq 130 ]] && break; echo 'Camera stopped; restarting in 3s'; sleep 3; done"
 wait_for_topic "/camera/color/image_raw" 60
-sleep 5
-
-run_in_terminal "RT People Tracker" "people_tracker.log" \
-    "ros2 run people_follower_ros2 visualtracker"
 sleep 5
 
 run_in_terminal "RT Pointcloud to Laserscan" "pointcloud.log" \
