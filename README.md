@@ -36,6 +36,14 @@ Als de pose ontbreekt, de dockstatus wegvalt of AMCL niet bevestigt, blijft de
 start geblokkeerd. Ook hier volgt na een mislukking een nieuwe poging.
 Test onder toezicht, eerst met de wielen vrij van de grond.
 
+## RT-versie: slaapscherm bij laden
+
+Als de robot inactief is en laadstroom detecteert, wordt een achtergebleven
+`robot-startup`-scherm vervangen door `robot-charging` ("Hugoo slaapt").
+Tijdens admin of login wordt het scherm onthouden en bij het sluiten hersteld.
+Andere schermen, waaronder terugkeer- en foutschermen, worden niet vervangen.
+Dit verandert de docking- of bewegingslogica niet.
+
 ## RT-versie: batterijspanningsgrenzen
 
 De batterijcontrole leest `config/spanningsniveaus.json` uit het geïnstalleerde

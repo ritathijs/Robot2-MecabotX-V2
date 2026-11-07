@@ -671,6 +671,7 @@ class RobotStateManager(Node):
             self.state.charging_current = float(msg.data)
             self.state.charging_current_received = True
             self._update_dock_status_locked()
+        self._restore_sleep_screen_if_needed()
         self._publish_status_snapshot()
 
     def on_camera_info(self, msg: CameraInfo) -> None:
@@ -699,6 +700,30 @@ class RobotStateManager(Node):
 
         if self.state.docked:
             self.state.at_station = True
+
+    def _screen_for_state_locked(self, screen: str) -> str:
+        if (
+            screen == "robot-startup"
+            and not self.state.robot_active
+            and self.state.charging
+        ):
+            return "robot-charging"
+        return screen
+
+    def _restore_sleep_screen_if_needed(self) -> None:
+        with self.lock:
+            if self.state.last_screen != "robot-startup":
+                return
+            screen = self._screen_for_state_locked(self.state.last_screen)
+            if screen == self.state.last_screen:
+                return
+            self.state.last_screen = screen
+            admin_open = self.state.admin_open or self.state.admin_login_open
+
+        if not admin_open:
+            screen_msg = String()
+            screen_msg.data = screen
+            self.screen_pub.publish(screen_msg)
 
     def _startup_sensors_ready_locked(self) -> bool:
         return (
@@ -1003,6 +1028,7 @@ class RobotStateManager(Node):
                 f"[Robot] /RobotActive ontvangen: {msg.data}"
             )
 
+        self._restore_sleep_screen_if_needed()
         self._publish_status_snapshot()
 
     def on_amcl(self, msg: PoseWithCovarianceStamped) -> None:
@@ -1381,7 +1407,7 @@ class RobotStateManager(Node):
         destination = self.DESTINATION_BY_NODE.get(node_name)
 
         with self.lock:
-            admin_open = self.state.admin_open
+            admin_open = self.state.admin_open or self.state.admin_login_open
             self.state.active_destination = destination
 
             if destination is not None:
@@ -1443,6 +1469,7 @@ class RobotStateManager(Node):
                 else node_name
             )
             with self.lock:
+                screen_name = self._screen_for_state_locked(screen_name)
                 self.state.last_screen = screen_name
 
             # Tijdens login/admin wel onthouden, niet tonen: bij sluiten wordt
@@ -1649,6 +1676,7 @@ class RobotStateManager(Node):
                     self.state.robot_active = not self.state.robot_active
                 new_status = self.state.robot_active
 
+            self._restore_sleep_screen_if_needed()
             self._publish_status_snapshot()
             self.get_logger().info(
                 f"Robot actief-status gewijzigd naar {new_status}."

@@ -268,6 +268,96 @@ class StartupAmclConfirmationTest(unittest.TestCase):
         self.assertFalse(self.node.state.robot_active)
         self.assertTrue(self.node.state.localization_valid)
 
+    def test_inactive_while_charging_restores_sleep_screen(self):
+        for activation_source in ("socket", "topic"):
+            for admin_open in (False, True):
+                with self.subTest(source=activation_source, admin=admin_open):
+                    self.setUp()
+                    self.node.state.startup_location_resolved = True
+                    self.node.state.robot_active = True
+                    self.node.state.charging = True
+                    self.node.state.last_screen = "robot-startup"
+                    self.node.state.admin_open = admin_open
+                    if activation_source == "socket":
+                        self.node.handle_socket_event(
+                            "active_button_toggled", (None, None)
+                        )
+                    else:
+                        self.node.on_robot_active(SimpleNamespace(data=False))
+                    self.assertFalse(self.node.state.robot_active)
+                    self.assertEqual(self.node.state.last_screen, "robot-charging")
+                    if admin_open:
+                        self.node.screen_pub.publish.assert_not_called()
+                    else:
+                        self.assertEqual(
+                            self.node.screen_pub.publish.call_args.args[0].data,
+                            "robot-charging",
+                        )
+
+    def test_charging_measurement_recovers_stale_startup_screen(self):
+        self.node.state.last_screen = "robot-startup"
+        self.node.on_charging_current(SimpleNamespace(data=1.26))
+        self.assertEqual(self.node.state.last_screen, "robot-charging")
+        self.assertEqual(
+            self.node.screen_pub.publish.call_args.args[0].data, "robot-charging"
+        )
+        self.node.on_charging_current(SimpleNamespace(data=1.26))
+        self.assertEqual(self.node.screen_pub.publish.call_count, 1)
+
+    def test_late_work_area_node_does_not_replace_sleep_screen(self):
+        self.node.state.charging = True
+        self.node.state.last_screen = "robot-charging"
+        self.node.on_behavior_node_changed(SimpleNamespace(data="DriveWorkArea"))
+        self.assertEqual(self.node.state.last_screen, "robot-charging")
+        self.assertEqual(
+            self.node.screen_pub.publish.call_args.args[0].data, "robot-charging"
+        )
+
+    def test_sleep_screen_is_restored_after_admin_closes(self):
+        for closing_method in ("_handle_admin_closed", "_handle_robot_login_closed"):
+            with self.subTest(method=closing_method):
+                self.setUp()
+                self.node.state.admin_open = closing_method == "_handle_admin_closed"
+                self.node.state.admin_login_open = not self.node.state.admin_open
+                self.node.state.last_screen = "robot-startup"
+                self.node._stop_admin_pause = Mock()
+                self.node.on_charging_current(SimpleNamespace(data=1.26))
+                self.node.screen_pub.publish.assert_not_called()
+                getattr(self.node, closing_method)()
+                self.assertEqual(
+                    self.node.screen_pub.publish.call_args.args[0].data,
+                    "robot-charging",
+                )
+
+    def test_active_work_area_still_shows_startup(self):
+        self.node.state.robot_active = True
+        self.node.state.charging = True
+        self.node.on_behavior_node_changed(SimpleNamespace(data="DriveWorkArea"))
+        self.assertEqual(self.node.state.last_screen, "robot-startup")
+        self.assertEqual(
+            self.node.screen_pub.publish.call_args.args[0].data, "robot-startup"
+        )
+
+    def test_charging_recovery_preserves_other_states_and_screens(self):
+        for active, screen in (
+            (True, "robot-startup"),
+            (False, "robot-error-charge"),
+            (False, "robot-go-charge"),
+        ):
+            with self.subTest(active=active, screen=screen):
+                self.setUp()
+                self.node.state.robot_active = active
+                self.node.state.last_screen = screen
+                self.node.on_charging_current(SimpleNamespace(data=1.26))
+                self.assertEqual(self.node.state.last_screen, screen)
+                self.node.screen_pub.publish.assert_not_called()
+
+        self.setUp()
+        self.node.state.last_screen = "robot-startup"
+        self.node.on_charging_current(SimpleNamespace(data=0.0))
+        self.assertEqual(self.node.state.last_screen, "robot-startup")
+        self.node.screen_pub.publish.assert_not_called()
+
     def test_simulator_applies_map_initial_pose(self):
         source = SOURCE.parent / "sim_robot.py"
         tree = ast.parse(source.read_text())
