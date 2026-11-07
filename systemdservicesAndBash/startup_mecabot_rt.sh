@@ -173,9 +173,9 @@ echo "Logs: $LOG_DIR"
 echo "RT runtime-data: $RT_DATA_DIR"
 
 # Static TF and navigation are shared robot infrastructure.
-run_in_terminal "RT Static TF" "static_tf.log" \
-    "ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 odom odom_combined"
-sleep 2
+#run_in_terminal "RT Static TF" "static_tf.log" \
+#    "ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 odom odom_combined"
+#sleep 2
 
 run_in_terminal "RT Nav2" "nav2.log" \
     "ros2 launch wheeltec_nav2 wheeltec_nav2.launch.py"

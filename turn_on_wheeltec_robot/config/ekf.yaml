@@ -2,10 +2,11 @@
 ekf_filter_node:
     ros__parameters:
         frequency: 20.0  #RT : origineel=30
-        sensor_timeout: 2.0
+        predict_to_current_time: true
+        sensor_timeout: 0.2 #orig 2.0
         two_d_mode: true
-        transform_time_offset: 0.0
-        transform_timeout: 0.2
+        transform_time_offset: 0.03 #orig 0
+        transform_timeout: 0.05 #orig 0.2
         print_diagnostics: false
         debug: false
         debug_out_file: /path/to/debug/file.txt
@@ -23,14 +24,14 @@ ekf_filter_node:
                        true,  true,  false,
                        false, false, true,
                        false, false, false]
-        odom0_queue_size: 10 #RT origineel 1
+        odom0_queue_size: 5 #RT origineel 1
         odom0_nodelay: false
-        odom0_differential: true
+        odom0_differential: false  #RT orig true
         odom0_relative: false
 
-        imu0: /imu/data_raw
+        imu0: /imu/data  #orig: /imu/data_raw
         imu0_config: [false, false, false,
-                      false, false, true,
+                      false, false, false,    #orig false, false, true
                       false, false, false,
                       false, false, true,
                       false,  false, false]
@@ -82,4 +83,5 @@ ekf_filter_node:
                                       0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     1e-9, 0.0,    0.0,
                                       0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    1e-9, 0.0,
                                       0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,     0.0,     0.0,     0.0,    0.0,    1e-9]
-
+     
+    
