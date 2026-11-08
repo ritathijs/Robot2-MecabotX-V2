@@ -368,6 +368,10 @@ class QuizSocketBridge(Node):
             self.gui_cmd_vel_pub.publish(msg)
         except Exception as e:
             self.get_logger().error(f"Publish gui_cmd_vel failed: {e}")
+            return
+
+        if msg.linear.x or msg.linear.y or msg.angular.z:
+            self._safe_state_callback("manual_drive_activity", None)
 
     # ============================================================
     # ADMIN PANEL EVENTS (ROS-thread) (GEFIXT VOOR NAAMCONFLICT)

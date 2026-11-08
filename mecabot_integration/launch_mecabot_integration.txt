@@ -13,6 +13,12 @@ ros2 launch mecabot_integration quiz_socket_bridge.launch.py
 # heeft bij een mislukte tagdetectie een XSTOP-fallback.
 ros2 run april_tabloo april_tabloo
 
+# Na handmatig rijden vraagt de state manager een AprilTag-correctie aan
+# zodra de pijlknoppen losgelaten zijn en de robot kort heeft stilgestaan.
+# Een aanvraag of "done" bevestigt niet dat AMCL de pose goed heeft overgenomen.
+# Houd het adminpaneel open tijdens de controle; controleer de AMCL-pose en
+# de veiligheid van de rijzone voordat autonoom rijden hervat wordt.
+
 # De statusverwerking zit in RobotStateManager, gestart door de Quiz Socket Bridge.
 # Start geen aparte status_reader-node.
 

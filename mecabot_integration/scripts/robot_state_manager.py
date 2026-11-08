@@ -146,6 +146,7 @@ class RobotStateManager(Node):
 
         self.last_drive_time: float | None = None
         self.manual_drive_reset_due: float | None = None
+        self.manual_drive_lock = Lock()
         self.estop_end_time: float | None = None
         # Timers worden nooit vernietigd (race met de MultiThreadedExecutor);
         # ze worden gepauzeerd met cancel() en hervat met reset().
@@ -1784,6 +1785,10 @@ class RobotStateManager(Node):
         elif event == "manual_drive":
             self.handle_manual_drive(data)
 
+        elif event == "manual_drive_activity":
+            with self.manual_drive_lock:
+                self.last_drive_time = time.monotonic()
+
         elif event == "connect":
             with self.lock:
                 self.state.network_ok = True
@@ -2003,33 +2008,35 @@ class RobotStateManager(Node):
         twist.angular.z = angular_z
 
         self.manual_drive_pub.publish(twist)
-        self.last_drive_time = time.monotonic()
+        with self.manual_drive_lock:
+            self.last_drive_time = time.monotonic()
 
     def _manual_drive_timeout_check(self) -> None:
-        now = time.monotonic()
+        with self.manual_drive_lock:
+            now = time.monotonic()
 
-        if (
-            self.manual_drive_reset_due is not None
-            and self.last_drive_time is None
-            and now >= self.manual_drive_reset_due
-        ):
-            self.manual_drive_reset_due = None
-            self._request_apriltag_reset_after_manual_drive()
+            if (
+                self.manual_drive_reset_due is not None
+                and self.last_drive_time is None
+                and now >= self.manual_drive_reset_due
+            ):
+                self.manual_drive_reset_due = None
+                self._request_apriltag_reset_after_manual_drive()
 
-        if self.last_drive_time is None:
-            return
+            if self.last_drive_time is None:
+                return
 
-        if now - self.last_drive_time > self.DRIVE_TIMEOUT_SEC:
-            self.get_logger().info(
-                "Handmatige besturing gestopt wegens timeout."
-            )
-            self._publish_zero_twist()
-            self.send_robot_command("STOP")
-            self.last_drive_time = None
-            # Wacht tot de robot stilstaat voordat de tag gelezen wordt.
-            self.manual_drive_reset_due = (
-                now + self.MANUAL_DRIVE_RESET_DELAY_SEC
-            )
+            if now - self.last_drive_time > self.DRIVE_TIMEOUT_SEC:
+                self.get_logger().info(
+                    "Handmatige besturing gestopt wegens timeout."
+                )
+                self._publish_zero_twist()
+                self.send_robot_command("STOP")
+                self.last_drive_time = None
+                # Wacht tot de robot stilstaat voordat de tag gelezen wordt.
+                self.manual_drive_reset_due = (
+                    now + self.MANUAL_DRIVE_RESET_DELAY_SEC
+                )
 
     def _request_apriltag_reset_after_manual_drive(self) -> None:
         with self.lock:
