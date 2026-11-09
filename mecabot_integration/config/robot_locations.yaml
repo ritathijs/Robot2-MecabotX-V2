@@ -2,12 +2,12 @@ robot_controller:
   ros__parameters:
     # Aanrijpunt 1,2 m voor het laadstation (zelfde punt als Charger_Position.json); [x, y, yaw]
     docking_station_pose: [11.995127224734865, -16.80049479389625, -1.0520934072346257]
-    quiz_location_a_pose: [-1.3658989667892456, -1.4719496965408325, 0.7611905941274879]
-    quiz_location_b_pose: [-4.064824104309082, 1.6677558422088623, 0.06429647754059412]
+    quiz_location_a_pose: [-3.085447, -1.038642, 0.7611905941274879]
+    quiz_location_b_pose: [-0.031, -4.092, 0.7611905941274879]
     work_area_pose: [-1.3658989667892456, -1.4719496965408325, 0.7611905941274879]
-    patrol_location_c_pose: [-1.7236404418945312, 0.25307464599609375, 0.0]
-    patrol_location_d_pose: [3.2080953121185303, -5.83170747756958, 0.7860673445242651]
-    patrol_location_e_pose: [-4.064824104309082, 1.6677558422088623, 0.06429647754059412]
+    patrol_location_c_pose: [0.147577, -2.111411, -0.422852]
+    patrol_location_d_pose: [4.72087955474853, -4.196039199829102, -2.380402059462305]
+    patrol_location_e_pose: [-2.850318, 1.474283, -0.79]
 
 robot_state_manager:
   ros__parameters:
