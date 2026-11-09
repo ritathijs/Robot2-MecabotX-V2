@@ -44,7 +44,8 @@ def generate_launch_description():
             package='keepout_filter_throttle',
             executable='keepout_filter_throttle',
             name='keepout_filter_throttle',
-            output='screen')
+            output='screen',
+            parameters=[{'diagnostics_enabled': False}])
                         
     ])
     
