@@ -200,13 +200,14 @@ class StartupAmclConfirmationTest(unittest.TestCase):
         self.node.state.battery_voltage = 25.0
         self.node.state.infrared_detected = True
 
-    def test_dock_start_waits_for_matching_amcl_and_stays_inactive(self):
+    def test_dock_start_wake_waits_for_matching_amcl(self):
         self.dock_sensors()
         self.tick(101.0)
         self.assertEqual(self.node.state.startup_pose_source, "dock")
         self.assertFalse(self.node.state.startup_location_resolved)
         self.node.on_robot_active(SimpleNamespace(data=True))
         self.assertFalse(self.node.state.robot_active)
+        self.assertTrue(self.node.state.dock_wake_pending)
         self.tick(102.0)
         self.tick(103.0)
         self.assertEqual(self.node.initial_pose_pub.publish.call_count, 2)
@@ -217,7 +218,7 @@ class StartupAmclConfirmationTest(unittest.TestCase):
         self.node.on_amcl(pose(x=12.0, y=-16.0, stamp=201))
         self.assertTrue(self.node.state.startup_location_resolved)
         self.assertTrue(self.node.state.at_station)
-        self.assertFalse(self.node.state.robot_active)
+        self.assertTrue(self.node.state.robot_active)
 
     def prepare_sleeping_dock(self):
         self.dock_sensors()
@@ -355,19 +356,60 @@ class StartupAmclConfirmationTest(unittest.TestCase):
                 self.assertFalse(self.node.state.dock_wake_pending)
                 self.node.initial_pose_pub.publish.assert_not_called()
 
-    def test_activation_with_ir_only_dock_is_immediate(self):
-        # IR + spanning zonder laadstroom is geen bewijs voor de laadpaalpose.
-        self.node.state.battery_voltage = 25.0
-        self.node.state.infrared_detected = True
-        self.node.state.battery_status_received = True
-        self.node.state.startup_location_resolved = True
-        self.node._update_dock_status_locked()
-        self.assertTrue(self.node.state.docked)
-        self.assertFalse(self.node.state.charging)
+    def test_activation_with_ir_only_dock_requires_amcl_confirmation(self):
+        for source in ("topic", "socket"):
+            for rejected in (False, True):
+                with self.subTest(source=source, rejected=rejected):
+                    self.setUp()
+                    self.node.state.battery_voltage = 25.0
+                    self.node.state.infrared_detected = True
+                    self.node.state.startup_location_resolved = True
+                    self.node.state.dock_pose_rejected = rejected
+                    self.node._update_dock_status_locked()
+                    self.assertTrue(self.node.state.docked)
+                    self.assertFalse(self.node.state.charging)
+                    self.request_wake(source)
+                    self.assertFalse(self.node.state.robot_active)
+                    self.assertTrue(self.node.state.dock_wake_pending)
+                    self.assertFalse(self.node.state.startup_location_resolved)
+                    self.tick(102.0)
+                    published = self.node.initial_pose_pub.publish.call_args.args[0]
+                    self.assertEqual(published.pose.pose.position.x, 12.0)
+                    self.assertEqual(published.pose.pose.position.y, -16.0)
+                    self.node.on_amcl(pose(x=12.0, y=-16.0, stamp=201))
+                    self.assertTrue(self.node.state.robot_active)
+                    self.assertTrue(self.node.state.startup_location_resolved)
+
+    def test_ir_without_dock_does_not_request_dock_pose(self):
+        for source in ("topic", "socket"):
+            for resolved in (False, True):
+                with self.subTest(source=source, resolved=resolved):
+                    self.setUp()
+                    self.node.state.battery_voltage = 23.7
+                    self.node.state.infrared_detected = True
+                    self.node.state.startup_location_resolved = resolved
+                    self.node.state.startup_location_failed = not resolved
+                    self.node._update_dock_status_locked()
+                    self.assertFalse(self.node.state.docked)
+                    self.request_wake(source)
+                    self.assertFalse(self.node.state.dock_wake_pending)
+                    self.assertEqual(self.node.state.robot_active, resolved)
+                    self.assertFalse(self.node.state.docked)
+                    self.assertFalse(self.node.state.charging)
+                    self.assertIsNone(self.node.state.startup_pose_source)
+                    self.node.initial_pose_pub.publish.assert_not_called()
+
+    def test_charging_event_preserves_pending_dock_wake(self):
+        self.prepare_sleeping_dock()
         self.request_wake("topic")
+        self.tick(102.0)
+        self.node.on_recharge_event(SimpleNamespace(data="0ROBOT-CHARGING"))
+        self.node.on_recharge_event(SimpleNamespace(data="0ROBOT-CHARGING"))
+        self.assertTrue(self.node.state.dock_wake_pending)
+        self.assertEqual(self.node.state.startup_pose_confirmation_started_at, 101.0)
+        self.assertEqual(self.node.state.startup_pose_first_sent_ns, 200_000_000_000)
+        self.node.on_amcl(pose(x=12.0, y=-16.0, stamp=201))
         self.assertTrue(self.node.state.robot_active)
-        self.assertFalse(self.node.state.dock_wake_pending)
-        self.node.initial_pose_pub.publish.assert_not_called()
 
     def test_pushed_onto_dock_shows_charging_screen_and_recovers(self):
         self.node.state.startup_location_resolved = True

@@ -509,23 +509,18 @@ class RobotStateManager(Node):
         self.state.dock_pose_rejected = True
 
     def _activate_robot_locked(self) -> str:
-        if (
-            self.state.startup_dock_fallback_active
-            or not self.state.startup_location_resolved
-        ):
+        if self.state.startup_dock_fallback_active:
             return "blocked"
         if self.state.robot_active:
-            return "active"
-        if (
-            self.state.docked
-            and self.state.charging
-            and not self.state.dock_pose_rejected
-        ):
+            return "active" if self.state.startup_location_resolved else "blocked"
+        if self.state.docked:
             self._request_dock_pose_locked()
             if self.state.startup_location_failed:
                 return "blocked"
             self.state.dock_wake_pending = True
             return "pending"
+        if not self.state.startup_location_resolved:
+            return "blocked"
         self.state.robot_active = True
         self.state.docking_attempts = 0
         return "active"
@@ -1465,7 +1460,8 @@ class RobotStateManager(Node):
                 self.state.docked = True
                 self.state.robot_active = False
                 self.state.docking_attempts = 0
-                self._request_dock_pose_locked()
+                if not self.state.dock_wake_pending:
+                    self._request_dock_pose_locked()
 
             elif event.endswith("ROBOT-CHARGING-STOPPED"):
                 self.state.charging = False
