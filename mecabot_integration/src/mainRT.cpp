@@ -1716,6 +1716,42 @@ int main(int argc, char **argv)
 
     auto april_tag_patrol_state = std::make_shared<AprilTagPatrolState>();
 
+    // De teller van gemiste rondes begint opnieuw na docken en na een
+    // geslaagde AprilTag-pose (bijvoorbeeld de reset na handmatig rijden).
+    // Alle callbacks draaien in spin_some op dezelfde thread als de BT.
+    auto reset_missed_cycles =
+        [bt_node, april_tag_patrol_state](const std::string& reason) {
+            if (april_tag_patrol_state->consecutive_cycles_without_tag > 0) {
+                RCLCPP_INFO(
+                    bt_node->get_logger(),
+                    "Teller gemiste patrouillerondes teruggezet (%s).",
+                    reason.c_str());
+            }
+            april_tag_patrol_state->consecutive_cycles_without_tag = 0;
+            april_tag_patrol_state->tag_seen_since_cycle_completion = false;
+        };
+    auto docked_sub = bt_node->create_subscription<std_msgs::msg::Bool>(
+        "/IsRobotDocked", 10,
+        [reset_missed_cycles](std_msgs::msg::Bool::SharedPtr msg) {
+            if (msg->data) {
+                reset_missed_cycles("robot gedockt");
+            }
+        });
+    auto charging_sub = bt_node->create_subscription<std_msgs::msg::Bool>(
+        "/IsRobotCharging", 10,
+        [reset_missed_cycles](std_msgs::msg::Bool::SharedPtr msg) {
+            if (msg->data) {
+                reset_missed_cycles("robot laadt");
+            }
+        });
+    auto pose_reset_sub = bt_node->create_subscription<std_msgs::msg::String>(
+        "/reset_done", 10,
+        [reset_missed_cycles](std_msgs::msg::String::SharedPtr msg) {
+            if (msg->data == "done") {
+                reset_missed_cycles("AprilTag-pose gecorrigeerd");
+            }
+        });
+
     // Registreer alle Acties
     REGISTER_BT_NODE(ExecuteUndockDrive)
     REGISTER_BT_NODE(SendDriveWorkArea)
