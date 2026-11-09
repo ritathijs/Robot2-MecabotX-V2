@@ -76,26 +76,46 @@ settings = None
 if os.name != 'nt' and sys.stdin.isatty():
     settings = list(termios.tcgetattr(sys.stdin))
 
+# Verdwijnt de terminal (gnome-terminal/SSH gesloten), dan geeft stdin
+# Errno 5. De node moet dan zonder toetsenbord blijven werken.
+tty_available = settings is not None
+
+
+def disable_tty(error):
+    global tty_available
+    if tty_available:
+        tty_available = False
+        print(f"Terminal niet meer beschikbaar ({error}); toetsenbord uit.")
+
+
 def get_key(settings):
     if os.name == 'nt':
         return msvcrt.getch().decode('utf-8')
-    if sys.stdin.isatty():
+    if not tty_available:
+        time.sleep(0.1)
+        return ''
+    try:
         tty.setraw(sys.stdin.fileno())
-    rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
-    if rlist:
-        key = sys.stdin.read(1)
-    else:
-        key = ''
-    if sys.stdin.isatty():
+        rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
+        key = sys.stdin.read(1) if rlist else ''
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, settings)
+    except (OSError, ValueError, termios.error) as error:
+        disable_tty(error)
+        return ''
     return key
 
 def print_and_fixRetract(str):
     global settings
     '''键盘控制会导致回调函数内使用print()出现自动缩进的问题，此函数可以解决该现象'''
-    if sys.stdin.isatty():
-        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, settings)
-    print(str)
+    if tty_available:
+        try:
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, settings)
+        except (OSError, ValueError, termios.error) as error:
+            disable_tty(error)
+    try:
+        print(str, flush=True)
+    except OSError:
+        pass
 
 class AutoRecharger(Node):
     def __init__(self):
@@ -218,6 +238,9 @@ class AutoRecharger(Node):
         # Watchdog voor het firmware-docken: tijdstip waarop chargeflag=1 werd gezet
         self.dock_start_time = None
         self.DOCK_TIMEOUT_S = 60.0
+        self.SERVICE_TIMEOUT_S = 3.0
+        # set_charge_mode blokkeert; nooit vanuit een callback uitvoeren.
+        self.pending_charge_start = False
 
         #Variabele voor het vastleggen van tijdstempels door robots
         self.last_time= self.get_clock().now()
@@ -417,13 +440,15 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                 req.x = float(value)
                 self.set_charge.call_async(req).add_done_callback(self.wait_server_callback)  # assynchrone call + callback voor response te ontvangen
 
-                # 死循环等待响应结果
-                while True:
-                    rclpy.spin_once(self)  #wacht op response via ros spin loop (telkens callback afgaan)
-                    if self.wait_server_done==1:
-                        self.wait_server_done = 0
-                        break
-                # 输出结果
+                # Wacht maximaal SERVICE_TIMEOUT_S op het antwoord van de chassis,
+                # zodat de node nooit eeuwig blijft hangen.
+                self.wait_server_done = 0
+                deadline = time.monotonic() + self.SERVICE_TIMEOUT_S
+                while self.wait_server_done != 1:
+                    if time.monotonic() > deadline:
+                        raise TimeoutError("Geen antwoord van chassis-service")
+                    rclpy.spin_once(self, timeout_sec=0.1)
+                self.wait_server_done = 0
                 state = self.server_set_state  #resultaat lezen en opslaan
                 
             except Exception  as e:
@@ -981,8 +1006,8 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         if self.red_count >= 3:
             self.chargeflag = 1
             self.dock_start_time = self.get_clock().now()
-            # self.publish_docking_status("DOCKING_ENABLED")
-            self.Pub_Recharger_Flag()
+            # De service-aanroep gebeurt in de hoofdlus, niet in deze callback.
+            self.pending_charge_start = True
             print_and_fixRetract(
                 'Geforceerd laden: sterke IR gedetecteerd, direct docken.'
             )
@@ -1109,6 +1134,10 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                     print_and_fixRetract(GREEN+"Robot battery is full."+RESET)
                 print_and_fixRetract("\n")
 
+        if self.pending_charge_start:
+            self.pending_charge_start = False
+            self.Pub_Recharger_Flag()
+
          # bij rotatie IR gevonden : stop rotatie en ga IR docken
         if self.find_redsignal>=3:
 
@@ -1209,7 +1238,12 @@ def main():
 
             while rclpy.ok():
                 key = get_key(settings) 
-                autorecharger.autoRecharger(key) 
+                try:
+                    autorecharger.autoRecharger(key)
+                except Exception as e:
+                    # Eén foutieve iteratie mag de laadcontroller niet stoppen.
+                    print_and_fixRetract(f"Fout in laadlus (genegeerd): {e!r}")
+                    time.sleep(0.5)
                 
                 rclpy.spin_once(autorecharger, timeout_sec=0.1)
 
