@@ -273,7 +273,7 @@ local_costmap:
           obstacle_min_range: 0.2   
           raytrace_min_range: 0.2                            
           
-      always_send_full_costmap: False                 #是否每次更新时都发送完整的成本图，而不是更新 RT orig op True op False gezet 25/7/2026
+      always_send_full_costmap: True                 #是否每次更新时都发送完整的成本图，而不是更新 RT orig op True op False gezet 25/7/2026
       
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
