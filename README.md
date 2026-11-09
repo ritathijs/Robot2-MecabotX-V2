@@ -91,3 +91,20 @@ is hiermee niet gewijzigd.
 - Bij activeren met `docked=True` wordt de laadpaalpose opnieuw aangevraagd, ook zonder laadstroom en bij een onbekende startlocatie. De robot blijft inactief tot AMCL die pose bevestigt. IR alleen is geen reden om de laadpaalpose bij activeren te gebruiken.
 - Wordt de robot handmatig tegen het laadstation geduwd terwijl het dockingscherm staat, dan schakelt het scherm bij laadstroom naar het slaapscherm (`robot-charging`), zolang de robot inactief is.
 - Bevestigt AMCL de laadpaalpose niet binnen de timeout (bijv. geduwde robot of AMCL-drift), dan wordt `dock_pose_rejected` gezet en volgt AprilTag-lokalisatie in plaats van eindeloos dezelfde controle te herhalen. Een nieuwe laadgebeurtenis (`ROBOT-CHARGING`) geeft de laadpaalpose weer een nieuwe kans.
+
+## RT-versie: handmatig rijden bij onbekende startlocatie
+
+Bij `robot-error-drive` en de neutrale toestand `None` houdt de drive-mux
+autonome ROS-rijbronnen tegen, maar laat hij handmatig rijden via GUI toe.
+De drive-to-goal-node publiceert hiervoor `/autonomy_inhibit`; ontbreekt deze
+status meer dan 1,5 seconde, dan blokkeert de mux de autonome bronnen.
+Stopt de GUI-stroom tijdens deze blokkering langer dan 0,4 seconde, dan
+publiceert de mux een nulcommando. De mux toont of autonome bronnen geblokkeerd
+zijn. Noodstop en de bestaande bumperprioriteit blijven gelden; bij
+`LAADCYCLUS` worden bumpercommando's echter nog steeds genegeerd.
+
+Dit blokkeert ROS-rijcommando's, maar garandeert niet dat een eventueel al
+actieve autonome dockingfunctie in de motorcontroller gestopt is. Test eerst
+met de wielen vrij van de grond en de hardware-noodstop bereikbaar. Bouw bij
+uitrol zowel `drive_mux` als `mecabot_integration` opnieuw en herstart beide
+onder toezicht; een oude mux begrijpt `/autonomy_inhibit` niet.

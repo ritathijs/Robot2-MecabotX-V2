@@ -5,6 +5,7 @@ from pathlib import Path
 from geometry_msgs.msg import Twist
 from rclpy.duration import Duration
 from std_msgs.msg import String
+from std_msgs.msg import Bool
 
 DEFAULT_DATA_DIRECTORY = "/home/wheeltec/wheeltec_ros2_rt/src/auto_recharge_ros2"
 
@@ -44,6 +45,8 @@ class driveMux(Node):
         self.lastmessage_bump = past_time
         self.lastmessage_search = past_time
         self.lastmessage_nav = past_time
+        self.lastmessage_inhibit = past_time
+        self.autonomy_inhibited = True
 
         self.last_cmd = Twist()
         self.active_source = "NONE"
@@ -103,6 +106,9 @@ class driveMux(Node):
             self.nav_callback,
             10)
 
+        self.inhibit_sub = self.create_subscription(
+            Bool, '/autonomy_inhibit', self.inhibit_callback, 10)
+
         self.pub = self.create_publisher(
             Twist,
             '/robot_cmd_vel',
@@ -111,6 +117,7 @@ class driveMux(Node):
         self.timer = self.create_timer(
             1.0,
             self.print_status)
+        self.inhibit_timer = self.create_timer(0.1, self.inhibit_watchdog)
 
     # -------------------------
     # callbacks
@@ -122,6 +129,8 @@ class driveMux(Node):
         self.pub.publish(msg)
 
     def chargehp_callback(self, msg):
+        if self.autonomy_blocked():
+            return
         self.lastmessage_chargehp = self.get_clock().now()
         if 6 >= self.currentPriority():
             self.publish_command(msg, "CHARGEHP")
@@ -142,11 +151,15 @@ class driveMux(Node):
             self.publish_command(msg, "ESTOP")
 
     def turn_callback(self, msg):
+        if self.autonomy_blocked():
+            return
         self.lastmessage_turn = self.get_clock().now()
         if 4 >= self.currentPriority():
             self.publish_command(msg, "TURN")
 
     def charge_callback(self, msg):
+        if self.autonomy_blocked():
+            return
         self.lastmessage_charge = self.get_clock().now()
         if 3 >= self.currentPriority():
             self.publish_command(msg, "CHARGE")
@@ -167,14 +180,42 @@ class driveMux(Node):
             self.publish_command(msg, "BUMP")
 
     def search_callback(self, msg):
+        if self.autonomy_blocked():
+            return
         self.lastmessage_search = self.get_clock().now()
         if 1 >= self.currentPriority():
             self.publish_command(msg, "SEARCH")
 
     def nav_callback(self, msg):
+        if self.autonomy_blocked():
+            return
         self.lastmessage_nav = self.get_clock().now()
         if 0.5 >= self.currentPriority():
             self.publish_command(msg, "NAV")
+
+    def autonomy_blocked(self):
+        now = self.get_clock().now()
+        return (
+            self.autonomy_inhibited
+            or now - self.lastmessage_inhibit > Duration(seconds=1.5)
+        )
+
+    def inhibit_callback(self, msg):
+        was_blocked = self.autonomy_blocked()
+        self.lastmessage_inhibit = self.get_clock().now()
+        self.autonomy_inhibited = msg.data
+        if msg.data and not was_blocked and self.currentPriority() < 6.5:
+            self.publish_command(Twist(), "AUTONOMY_STOP")
+
+    def inhibit_watchdog(self):
+        if not self.autonomy_blocked():
+            return
+        now = self.get_clock().now()
+        if (
+            now - self.lastmessage_gui > Duration(seconds=0.4)
+            and self.currentPriority() < 6.5
+        ):
+            self.publish_command(Twist(), "AUTONOMY_STOP")
 
     # -------------------------
     # prioriteit
@@ -204,7 +245,10 @@ class driveMux(Node):
             return 6.5
 
         # 3. CHARGEHP
-        elif now - self.lastmessage_chargehp <= Duration(seconds=1.0):
+        elif (
+            not self.autonomy_blocked()
+            and now - self.lastmessage_chargehp <= Duration(seconds=1.0)
+        ):
             return 6
 
         # 4. GUI
@@ -260,6 +304,7 @@ class driveMux(Node):
 
         print(f"{color}Actieve bron : {self.active_source}{RESET}")
         print(f"Prioriteit   : {priority}")
+        print(f"Autonome bronnen geblokkeerd : {'ja' if self.autonomy_blocked() else 'nee'}")
 
         # ---- IR docking / bumper status: ALTIJD tonen ----
         print("\nIR docking / bumper:")

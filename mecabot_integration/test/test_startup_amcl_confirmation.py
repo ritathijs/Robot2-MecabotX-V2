@@ -443,6 +443,26 @@ class StartupAmclConfirmationTest(unittest.TestCase):
         self.assertNotEqual(self.node.state.startup_pose_source, "dock")
         self.node.localization_reset_pub.publish.assert_called_once()
 
+    def test_failed_unknown_start_retries_apriltag_and_requires_fresh_amcl(self):
+        self.node.state.robot_active = False
+        self.node.state.startup_location_failed = True
+        self.node._startup_failed_since = 100.0
+        self.tick(129.0)
+        self.assertTrue(self.node.state.startup_location_failed)
+        self.node.localization_reset_pub.publish.assert_not_called()
+        self.tick(131.0)
+        self.tick(132.0)
+        self.node.localization_reset_pub.publish.assert_called_once()
+        self.assertFalse(self.node.state.startup_location_resolved)
+        with patch.object(time, "monotonic", return_value=132.1):
+            self.node.on_startup_initial_pose(pose())
+            self.node.on_localization_reset(SimpleNamespace(data="done"))
+        self.tick(133.0)
+        self.node.on_amcl(pose(stamp=200))
+        self.assertFalse(self.node.state.startup_location_resolved)
+        self.node.on_amcl(pose(stamp=201))
+        self.assertTrue(self.node.state.startup_location_resolved)
+
     def test_dock_timeout_and_retry_never_unlock(self):
         self.dock_sensors()
         self.tick(101.0)

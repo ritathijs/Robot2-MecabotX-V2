@@ -4,6 +4,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from geometry_msgs.msg import PoseStamped, Twist
 from std_msgs.msg import String, Bool
 from nav2_msgs.action import NavigateToPose
@@ -23,7 +24,7 @@ class GoalRecord:
 
 behavior_tree_nodes = {
 	# keepoutfilter_on: "True" / "False" / "none"
-	# drive_action: "estop" / "release" / "behaviortree" / "peoplesearch"
+	# drive_action: "manual_only" / "estop" / "release" / "behaviortree" / "peoplesearch"
 	# message_frequency: "always" / "once"
 
 	# These names are published by robot_controller.cpp. Keepout changes only
@@ -39,10 +40,10 @@ behavior_tree_nodes = {
 	"explore-location-c": {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always"},
 	"explore-location-d": {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always"},
 	"explore-location-e": {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always"},
-	"robot-error-drive": {"keepoutfilter_on": "none", "drive_action": "estop", "message_frequency": "always"},
+	"robot-error-drive": {"keepoutfilter_on": "none", "drive_action": "manual_only", "message_frequency": "always"},
 
 	# Neutrale toestand (o.a. na herstel van de startlocatie): blijf veilig stilstaan.
-	"None": {"keepoutfilter_on": "none", "drive_action": "estop", "message_frequency": "always"},
+	"None": {"keepoutfilter_on": "none", "drive_action": "manual_only", "message_frequency": "always"},
 
 	# --- Default ---
 	"Default":					{"keepoutfilter_on": "none",  "drive_action": "estop", "message_frequency": "always"},
@@ -97,11 +98,16 @@ class DriveToCoord(Node):
 		# --- PUBLISHERS ---
 		self.status_pub = self.create_publisher(String, '/drive_to_coord_status', 10)
 		self.estop_cmd_vel_pub = self.create_publisher(Twist, '/estop_cmd_vel', 1)
+		self.autonomy_inhibit_pub = self.create_publisher(Bool, '/autonomy_inhibit', 1)
 		self.keepout_filter_pub = self.create_publisher(Bool, '/toggle_keepout', 1)
 
 		# --- SUBSCRIBERS ---
+		bt_qos = QoSProfile(
+			depth=1, reliability=ReliabilityPolicy.RELIABLE,
+			durability=DurabilityPolicy.TRANSIENT_LOCAL
+		)
 		self.BehaviorTreeNode_sub = self.create_subscription(
-			String, '/BehaviorTreeNode', self.BehaviorTreeNode_callback, 1, 
+			String, '/BehaviorTreeNode', self.BehaviorTreeNode_callback, bt_qos,
 			callback_group=self.sub_cb_group
 		)
 		self.btDriveCoord_sub = self.create_subscription(
@@ -151,6 +157,7 @@ class DriveToCoord(Node):
 		with self.lock:
 			node_name = msg.data.strip()
 			self.last_BehaviorTreeNode = node_name
+			self.publish_autonomy_inhibit()
 			# Nieuw commando van de BT: een eerder bereikte bestemming mag opnieuw aangeleerd worden.
 			self.last_finished_pose = None
 			self.docking_active = False
@@ -209,6 +216,7 @@ class DriveToCoord(Node):
 	def control_loop(self):
 		"""Wordt door de ROS timer 4 keer per seconde aangeroepen."""
 		with self.lock:
+			self.publish_autonomy_inhibit()
 			self.release_dead_goals()
 			if self.needs_action:
 				self.actiondistribute()
@@ -247,7 +255,9 @@ class DriveToCoord(Node):
 		elif currentnode["keepoutfilter_on"] == "False": 
 			self.keepout_filter(False)
 			
-		if currentnode["drive_action"] == "estop":
+		if currentnode["drive_action"] == "manual_only":
+			self.cancel_all_goals()
+		elif currentnode["drive_action"] == "estop":
 			self.emergencystop()
 			self.cancel_all_goals()
 		elif currentnode["drive_action"] == "release":
@@ -291,6 +301,12 @@ class DriveToCoord(Node):
 		self.get_logger().info("Noodstop procedure: 0-velocity sturen.")
 		stop_msg = Twist()
 		self.estop_cmd_vel_pub.publish(stop_msg)
+
+	def publish_autonomy_inhibit(self):
+		config = behavior_tree_nodes.get(self.last_BehaviorTreeNode)
+		msg = Bool()
+		msg.data = config is None or config["drive_action"] in ("manual_only", "estop")
+		self.autonomy_inhibit_pub.publish(msg)
 	
 	def cancel_all_goals(self):
 		if not self.current_goals:

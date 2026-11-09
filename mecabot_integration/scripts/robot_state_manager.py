@@ -190,6 +190,9 @@ class RobotStateManager(Node):
         self.drive_pub = self.create_publisher(
             Twist, "/cmd_vel", 10
         )
+        self.estop_cmd_vel_pub = self.create_publisher(
+            Twist, "/estop_cmd_vel", 10
+        )
         self.manual_drive_pub = self.create_publisher(
             Twist, "/gui_cmd_vel", 10
         )
@@ -1702,6 +1705,7 @@ class RobotStateManager(Node):
                 self._publish_status_snapshot()
             return
 
+        self.estop_cmd_vel_pub.publish(Twist())
         self._publish_zero_twist()
         self.send_robot_command("STOP")
         if status_changed:

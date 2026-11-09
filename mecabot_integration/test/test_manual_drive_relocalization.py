@@ -60,6 +60,7 @@ class ManualDriveRelocalizationTest(unittest.TestCase):
         self.manager.localization_reset_pub = Mock()
         self.manager.localization_reset_pub.get_subscription_count.return_value = 1
         self.manager._publish_zero_twist = Mock()
+        self.manager.estop_cmd_vel_pub = Mock()
         self.manager.send_robot_command = Mock()
         self.manager.get_logger = Mock(return_value=Mock())
         self.bridge = QuizSocketBridge.__new__(QuizSocketBridge)
@@ -124,6 +125,17 @@ class ManualDriveRelocalizationTest(unittest.TestCase):
         self.bridge._process_drive_event({"direction": "forward", "speed": 1})
         self.assertIsNone(self.manager.last_drive_time)
         self.bridge.get_logger().error.assert_called_once()
+
+    def test_temporary_stop_uses_high_priority_estop_topic(self):
+        self.manager.state.estop_active = True
+        self.manager.state.quiz_options_pause = False
+        self.manager.estop_end_time = None
+        self.manager._estop_tick()
+        self.manager.estop_cmd_vel_pub.publish.assert_called_once()
+        self.assertEqual(
+            self.manager.estop_cmd_vel_pub.publish.call_args.args[0].linear.x, 0.0
+        )
+        self.manager.send_robot_command.assert_called_once_with("STOP")
 
 
 if __name__ == "__main__":
