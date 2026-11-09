@@ -89,3 +89,5 @@ is hiermee niet gewijzigd.
 - Volledige interne status (o.a. `startup_location_resolved`, `startup_location_failed`, `docked`, `charging`, `dock_wake_pending`, `dock_pose_rejected`, `docking_attempts`, `last_screen`): `ros2 topic echo /robot_state_debug --once`
 - Een geblokkeerde Behavior Tree (startlocatie niet bevestigd) wordt om de 10 s als waarschuwing gelogd.
 - Een docked-detectie zonder laadstroom (enkel IR + spanning) wordt niet als laadpaalpose gebruikt: activeren gebeurt dan direct en een mislukte laadpaalcontrole wordt niet eindeloos herhaald.
+- Wordt de robot handmatig tegen het laadstation geduwd terwijl het dockingscherm staat, dan schakelt het scherm bij laadstroom naar het slaapscherm (`robot-charging`), zolang de robot inactief is.
+- Bevestigt AMCL de laadpaalpose niet binnen de timeout (bijv. geduwde robot of AMCL-drift), dan wordt `dock_pose_rejected` gezet en volgt AprilTag-lokalisatie in plaats van eindeloos dezelfde controle te herhalen. Een nieuwe laadgebeurtenis (`ROBOT-CHARGING`) geeft de laadpaalpose weer een nieuwe kans.

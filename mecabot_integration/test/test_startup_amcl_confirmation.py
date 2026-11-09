@@ -90,6 +90,8 @@ class StartupAmclConfirmationTest(unittest.TestCase):
         self.node.startup_dock_fallback = False
         self.node.dock_pose = (12.0, -16.0, 0.0, 1.0)
         self.node.initial_pose_pub = Mock()
+        self.node.localization_reset_pub = Mock()
+        self.node.localization_reset_pub.get_subscription_count.return_value = 1
         self.node.cmd_pub = Mock()
         self.node.screen_pub = Mock()
         self.node.cmd_pub.get_subscription_count.return_value = 0
@@ -327,8 +329,11 @@ class StartupAmclConfirmationTest(unittest.TestCase):
         self.tick(164.0)
         self.tick(165.0)
         self.tick(166.0)
+        # Na de mislukte laadpaalpose volgt AprilTag-herstel, geen nieuwe wake.
+        self.assertTrue(self.node.state.dock_pose_rejected)
+        self.assertTrue(self.node.state.localization_recovery_requested)
         self.node.on_amcl(pose(x=12.0, y=-16.0, stamp=201))
-        self.assertTrue(self.node.state.startup_location_resolved)
+        self.assertFalse(self.node.state.startup_location_resolved)
         self.assertFalse(self.node.state.robot_active)
         self.assertFalse(self.node.state.dock_wake_pending)
 
@@ -364,6 +369,21 @@ class StartupAmclConfirmationTest(unittest.TestCase):
         self.assertFalse(self.node.state.dock_wake_pending)
         self.node.initial_pose_pub.publish.assert_not_called()
 
+    def test_pushed_onto_dock_shows_charging_screen_and_recovers(self):
+        self.node.state.startup_location_resolved = True
+        self.node.state.robot_active = False
+        self.node.state.last_screen = "robot-docking"
+        self.node.state.charging_current = 0.0
+        self.node.on_charging_current(SimpleNamespace(data=1.2))
+        self.assertEqual(self.node.state.last_screen, "robot-charging")
+        self.node.screen_pub.publish.assert_called()
+
+    def test_active_docking_keeps_docking_screen(self):
+        self.node.state.robot_active = True
+        self.node.state.last_screen = "robot-docking"
+        self.node.on_charging_current(SimpleNamespace(data=1.2))
+        self.assertEqual(self.node.state.last_screen, "robot-docking")
+
     def test_rejected_ir_only_dock_pose_is_not_retried(self):
         self.node.state.battery_voltage = 25.0
         self.node.state.infrared_detected = True
@@ -377,8 +397,6 @@ class StartupAmclConfirmationTest(unittest.TestCase):
         self.tick(164.0)
         self.assertFalse(self.node.state.startup_location_failed)
         self.assertIsNone(self.node.state.startup_pose_source)
-        self.node.localization_reset_pub = Mock()
-        self.node.localization_reset_pub.get_subscription_count.return_value = 1
         self.tick(165.0)
         self.assertNotEqual(self.node.state.startup_pose_source, "dock")
         self.node.localization_reset_pub.publish.assert_called_once()
@@ -395,7 +413,8 @@ class StartupAmclConfirmationTest(unittest.TestCase):
         self.tick(133.0)
         self.tick(164.0)
         self.tick(165.0)
-        self.assertEqual(self.node.state.startup_pose_source, "dock")
+        self.assertNotEqual(self.node.state.startup_pose_source, "dock")
+        self.assertTrue(self.node.state.dock_pose_rejected)
         self.assertFalse(self.node.state.startup_location_resolved)
 
     def test_missing_dock_pose_and_lost_dock_remain_blocked(self):

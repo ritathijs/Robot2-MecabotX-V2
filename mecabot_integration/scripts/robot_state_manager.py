@@ -68,8 +68,8 @@ class RobotState:
     startup_location_failed: bool = False
     startup_dock_fallback_active: bool = False
     dock_wake_pending: bool = False
-    # Docked-heuristiek (IR + spanning) zonder laadstroom bleek niet op de
-    # laadpaalpose te staan: niet opnieuw als laadpaalpose gebruiken.
+    # De laadpaalpose werd niet door AMCL bevestigd (geduwd/gedreven robot,
+    # driftende AMCL): niet blijven herhalen, maar AprilTag-lokalisatie gebruiken.
     dock_pose_rejected: bool = False
     lost_screen_sent: bool = False
 
@@ -503,15 +503,10 @@ class RobotStateManager(Node):
         )
 
     def _dock_pose_usable_locked(self) -> bool:
-        # Zonder laadstroom zegt IR + spanning niet dat de robot op de
-        # laadpaalpose staat; na een mislukte controle niet blijven herhalen.
-        return self.state.docked and (
-            self.state.charging or not self.state.dock_pose_rejected
-        )
+        return self.state.docked and not self.state.dock_pose_rejected
 
     def _reject_dock_pose_locked(self) -> None:
-        if not self.state.charging:
-            self.state.dock_pose_rejected = True
+        self.state.dock_pose_rejected = True
 
     def _activate_robot_locked(self) -> str:
         if (
@@ -521,7 +516,11 @@ class RobotStateManager(Node):
             return "blocked"
         if self.state.robot_active:
             return "active"
-        if self.state.docked and self.state.charging:
+        if (
+            self.state.docked
+            and self.state.charging
+            and not self.state.dock_pose_rejected
+        ):
             self._request_dock_pose_locked()
             if self.state.startup_location_failed:
                 return "blocked"
@@ -770,7 +769,7 @@ class RobotStateManager(Node):
 
     def _screen_for_state_locked(self, screen: str) -> str:
         if (
-            screen == "robot-startup"
+            screen in ("robot-startup", "robot-docking")
             and not self.state.robot_active
             and self.state.charging
         ):
@@ -779,7 +778,9 @@ class RobotStateManager(Node):
 
     def _restore_sleep_screen_if_needed(self) -> None:
         with self.lock:
-            if self.state.last_screen != "robot-startup":
+            if self.state.last_screen not in (
+                "robot-startup", "robot-docking"
+            ):
                 return
             screen = self._screen_for_state_locked(self.state.last_screen)
             if screen == self.state.last_screen:
@@ -1195,7 +1196,7 @@ class RobotStateManager(Node):
                 or self.state.startup_location_resolved
                 or self.state.startup_location_failed
                 or self.state.startup_pose_confirmation_started_at is not None
-                or self.state.docked
+                or self._dock_pose_usable_locked()
             ):
                 return
 
