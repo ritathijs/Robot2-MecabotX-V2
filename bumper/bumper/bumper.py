@@ -17,6 +17,7 @@ class GPIOReaderNode(Node):
         self.bumper_status_pub = self.create_publisher(String, '/bump_status', 1)
         
         self.action = "Free"
+        self.last_logged_status = None
         
         self.timer_10s = None
         self.timer_3s = None
@@ -31,8 +32,6 @@ class GPIOReaderNode(Node):
 
     def detect(self):
         states = {pin: GPIO.input(pin) for pin in PINS}
-        
-        self.get_logger().info(f'status: {self.action} \t pinnen: {states}')
                    
         if self.action == "Free":
             if 1 in states.values():
@@ -61,6 +60,11 @@ class GPIOReaderNode(Node):
 
             if 1 not in states.values():
                 self.action = "Free"
+
+        status = (self.action, tuple(states[pin] for pin in PINS))
+        if status != self.last_logged_status:
+            self.get_logger().info(f'status: {self.action} \t pinnen: {states}')
+            self.last_logged_status = status
                 
     def publishStates(self):
         # Draai links en rechts om zodat je vanuit het standpunt van de gebruiker kijkt
