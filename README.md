@@ -82,3 +82,10 @@ source install/setup.bash
 De RT-opstart vereist dit package uit de RT-workspace. Controleer in het
 batterijlog dat de gewenste grenzen geladen zijn. Het pad voor `batstatus.txt`
 is hiermee niet gewijzigd.
+
+## RT-versie: status opvragen van de robot_state_manager
+
+- Kerngegevens: `ros2 service call /get_robot_state wheeltec_robot_msg/srv/GetRobotState "{}"`
+- Volledige interne status (o.a. `startup_location_resolved`, `startup_location_failed`, `docked`, `charging`, `dock_wake_pending`, `dock_pose_rejected`, `docking_attempts`, `last_screen`): `ros2 topic echo /robot_state_debug --once`
+- Een geblokkeerde Behavior Tree (startlocatie niet bevestigd) wordt om de 10 s als waarschuwing gelogd.
+- Een docked-detectie zonder laadstroom (enkel IR + spanning) wordt niet als laadpaalpose gebruikt: activeren gebeurt dan direct en een mislukte laadpaalcontrole wordt niet eindeloos herhaald.

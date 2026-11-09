@@ -350,6 +350,39 @@ class StartupAmclConfirmationTest(unittest.TestCase):
                 self.assertFalse(self.node.state.dock_wake_pending)
                 self.node.initial_pose_pub.publish.assert_not_called()
 
+    def test_activation_with_ir_only_dock_is_immediate(self):
+        # IR + spanning zonder laadstroom is geen bewijs voor de laadpaalpose.
+        self.node.state.battery_voltage = 25.0
+        self.node.state.infrared_detected = True
+        self.node.state.battery_status_received = True
+        self.node.state.startup_location_resolved = True
+        self.node._update_dock_status_locked()
+        self.assertTrue(self.node.state.docked)
+        self.assertFalse(self.node.state.charging)
+        self.request_wake("topic")
+        self.assertTrue(self.node.state.robot_active)
+        self.assertFalse(self.node.state.dock_wake_pending)
+        self.node.initial_pose_pub.publish.assert_not_called()
+
+    def test_rejected_ir_only_dock_pose_is_not_retried(self):
+        self.node.state.battery_voltage = 25.0
+        self.node.state.infrared_detected = True
+        self.node.state.charging_current = 0.0
+        self.tick(101.0)
+        self.assertEqual(self.node.state.startup_pose_source, "dock")
+        self.tick(132.0)
+        self.assertTrue(self.node.state.startup_location_failed)
+        self.assertTrue(self.node.state.dock_pose_rejected)
+        self.tick(133.0)
+        self.tick(164.0)
+        self.assertFalse(self.node.state.startup_location_failed)
+        self.assertIsNone(self.node.state.startup_pose_source)
+        self.node.localization_reset_pub = Mock()
+        self.node.localization_reset_pub.get_subscription_count.return_value = 1
+        self.tick(165.0)
+        self.assertNotEqual(self.node.state.startup_pose_source, "dock")
+        self.node.localization_reset_pub.publish.assert_called_once()
+
     def test_dock_timeout_and_retry_never_unlock(self):
         self.dock_sensors()
         self.tick(101.0)

@@ -68,6 +68,9 @@ class RobotState:
     startup_location_failed: bool = False
     startup_dock_fallback_active: bool = False
     dock_wake_pending: bool = False
+    # Docked-heuristiek (IR + spanning) zonder laadstroom bleek niet op de
+    # laadpaalpose te staan: niet opnieuw als laadpaalpose gebruiken.
+    dock_pose_rejected: bool = False
     lost_screen_sent: bool = False
 
     at_quiz: bool = False
@@ -396,6 +399,12 @@ class RobotStateManager(Node):
             0.1,
             self._startup_location_check,
         )
+        # Diagnose: volledige interne status als JSON, zie README.
+        self.debug_pub = self.create_publisher(
+            String, "/robot_state_debug", 10
+        )
+        self._last_blocked_warning = 0.0
+        self.debug_timer = self.create_timer(1.0, self._publish_debug)
 
         self.dock_pose = self._load_dock_pose()
 
@@ -493,6 +502,17 @@ class RobotStateManager(Node):
             "wachten op een overeenkomende AMCL-pose."
         )
 
+    def _dock_pose_usable_locked(self) -> bool:
+        # Zonder laadstroom zegt IR + spanning niet dat de robot op de
+        # laadpaalpose staat; na een mislukte controle niet blijven herhalen.
+        return self.state.docked and (
+            self.state.charging or not self.state.dock_pose_rejected
+        )
+
+    def _reject_dock_pose_locked(self) -> None:
+        if not self.state.charging:
+            self.state.dock_pose_rejected = True
+
     def _activate_robot_locked(self) -> str:
         if (
             self.state.startup_dock_fallback_active
@@ -501,7 +521,7 @@ class RobotStateManager(Node):
             return "blocked"
         if self.state.robot_active:
             return "active"
-        if self.state.docked:
+        if self.state.docked and self.state.charging:
             self._request_dock_pose_locked()
             if self.state.startup_location_failed:
                 return "blocked"
@@ -611,6 +631,27 @@ class RobotStateManager(Node):
         self.tracking_enable_pub.publish(
             self._bool_message(tracking_enabled)
         )
+
+    def _publish_debug(self) -> None:
+        with self.lock:
+            data = {
+                key: value
+                for key, value in vars(self.state).items()
+                if isinstance(value, (bool, int, float, str, type(None)))
+            }
+            blocked = (
+                not self.state.startup_location_resolved
+                or self.state.startup_location_failed
+            )
+        self.debug_pub.publish(String(data=json.dumps(data)))
+
+        now = time.monotonic()
+        if blocked and now - self._last_blocked_warning >= 10.0:
+            self._last_blocked_warning = now
+            self.get_logger().warn(
+                "[Status] Startlocatie niet bevestigd; de Behavior Tree "
+                "blijft geblokkeerd. Zie /robot_state_debug."
+            )
 
     def send_robot_command(self, command: str) -> None:
         msg = String()
@@ -825,7 +866,10 @@ class RobotStateManager(Node):
                 # Sensoren die te laat binnenkwamen: gedockt blijft bepalend.
                 if self._startup_sensors_ready_locked():
                     self._update_dock_status_locked()
-                    if self.state.docked and self.state.startup_pose_source != "dock":
+                    if (
+                        self._dock_pose_usable_locked()
+                        and self.state.startup_pose_source != "dock"
+                    ):
                         self.state.startup_location_failed = False
                         self._startup_failed_since = None
                         self.state.at_station = True
@@ -881,7 +925,7 @@ class RobotStateManager(Node):
                     self._update_dock_status_locked()
 
                     if (
-                        self.state.docked
+                        self._dock_pose_usable_locked()
                         and self.state.startup_pose_source != "dock"
                     ):
                         self.state.at_station = True
@@ -911,6 +955,7 @@ class RobotStateManager(Node):
                             now - self.state.startup_pose_confirmation_started_at
                             >= self.STARTUP_AMCL_TIMEOUT_SEC
                         ):
+                            self._reject_dock_pose_locked()
                             self.state.robot_active = False
                             self.state.localization_valid = False
                             self.state.startup_location_failed = True
@@ -1239,6 +1284,7 @@ class RobotStateManager(Node):
             and started_at is not None
             and time.monotonic() - started_at >= self.STARTUP_AMCL_TIMEOUT_SEC
         ):
+            self._reject_dock_pose_locked()
             self.state.robot_active = False
             self.state.localization_valid = False
             self.state.startup_location_failed = True
@@ -1311,6 +1357,7 @@ class RobotStateManager(Node):
             location = min(distances, key=distances.get)
         else:
             return None
+        self.state.dock_pose_rejected = False
         self.state.localization_valid = True
         self.state.startup_location_resolved = True
         self.state.at_station = location == "charging_area"
@@ -1411,6 +1458,7 @@ class RobotStateManager(Node):
             elif event.endswith("ROBOT-CHARGING"):
                 self.state.startup_dock_fallback_active = False
                 self._clear_remote_locations_locked()
+                self.state.dock_pose_rejected = False
                 self.state.charging = True
                 self.state.at_station = True
                 self.state.docked = True
@@ -2165,6 +2213,10 @@ class RobotStateManager(Node):
             response.charging = self.state.charging
             response.visitors_nearby = self.state.visitors_nearby
             response.in_working_zone = self.state.in_working_zone
+            response.admin_login_open = self.state.admin_login_open
+            response.manual_drive = self.state.manual_drive
+            response.estop_active = self.state.estop_active
+            response.last_screen = self.state.last_screen or ""
 
         return response
 
