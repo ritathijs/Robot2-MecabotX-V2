@@ -30,11 +30,29 @@ De overeenkomende pose is een controle, geen expliciete ontvangstbevestiging
 van AMCL of garantie dat de fysieke positie correct is.
 
 Dezelfde AMCL-controle geldt bij opstart aan het laadstation en na opnieuw
-aanmeren, op basis van de vaste laadstationpose. Tijdens deze controle blijft
-de robot inactief; na bevestiging is opnieuw activeren nodig om te vertrekken.
-Als de pose ontbreekt, de dockstatus wegvalt of AMCL niet bevestigt, blijft de
-start geblokkeerd. Ook hier volgt na een mislukking een nieuwe poging.
-Test onder toezicht, eerst met de wielen vrij van de grond.
+aanmeren, op basis van `docked_robot_pose` in
+`mecabot_integration/config/robot_locations.yaml`. Omdat AMCL tijdens de slaap
+kan driften, wordt bij een activeringsverzoek aan het laadstation deze pose
+opnieuw verstuurd. De robot blijft inactief tot AMCL een nieuwe, overeenkomende
+pose bevestigt en wordt dan automatisch actief. Een tweede druk op de
+activeringsknop of een inactief-commando annuleert het wachtende verzoek.
+
+Als de pose ontbreekt, de dockstatus wegvalt of AMCL niet tijdig bevestigt,
+blijft de start geblokkeerd en vervalt het activeringsverzoek. De lokalisatie
+wordt opnieuw geprobeerd, maar na herstel is een nieuw activeringsverzoek nodig.
+De vaste pose moet overeenkomen met de werkelijke positie en richting van de
+robot aan het station; de AMCL-controle bewijst dat niet. Test onder toezicht,
+eerst met de wielen vrij van de grond en de noodstop bereikbaar.
+
+Na het ophalen van de wijzigingen bouw je op de robot het RT-package opnieuw:
+
+```bash
+cd ~/wheeltec_ros2_rt
+colcon build --packages-select mecabot_integration
+source install/setup.bash
+```
+
+Herstart daarna de RT-nodes zodat ze de geïnstalleerde code gebruiken.
 
 ## RT-versie: slaapscherm bij laden
 

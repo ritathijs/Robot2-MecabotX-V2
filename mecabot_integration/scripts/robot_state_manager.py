@@ -67,6 +67,7 @@ class RobotState:
     startup_reset_done_received: bool = False
     startup_location_failed: bool = False
     startup_dock_fallback_active: bool = False
+    dock_wake_pending: bool = False
     lost_screen_sent: bool = False
 
     at_quiz: bool = False
@@ -451,6 +452,7 @@ class RobotStateManager(Node):
         self.state.startup_location_resolved = False
         self.state.localization_valid = False
         self.state.robot_active = False
+        self.state.dock_wake_pending = False
         self.state.startup_pose_source = "dock"
         self.state.startup_pose_first_sent_ns = None
         self.state.startup_pose_last_sent_at = None
@@ -490,6 +492,24 @@ class RobotStateManager(Node):
             f"[Localization] Laadstationpose ({x:.2f}, {y:.2f}); "
             "wachten op een overeenkomende AMCL-pose."
         )
+
+    def _activate_robot_locked(self) -> str:
+        if (
+            self.state.startup_dock_fallback_active
+            or not self.state.startup_location_resolved
+        ):
+            return "blocked"
+        if self.state.robot_active:
+            return "active"
+        if self.state.docked:
+            self._request_dock_pose_locked()
+            if self.state.startup_location_failed:
+                return "blocked"
+            self.state.dock_wake_pending = True
+            return "pending"
+        self.state.robot_active = True
+        self.state.docking_attempts = 0
+        return "active"
 
     def _declare_apriltag_pose(
         self,
@@ -701,6 +721,11 @@ class RobotStateManager(Node):
 
         if self.state.docked:
             self.state.at_station = True
+        elif self.state.dock_wake_pending:
+            self.state.dock_wake_pending = False
+            self.get_logger().error(
+                "[Localization] Dockstatus verloren; activering geannuleerd."
+            )
 
     def _screen_for_state_locked(self, screen: str) -> str:
         if (
@@ -876,6 +901,7 @@ class RobotStateManager(Node):
                             self.state.robot_active = False
                             self.state.localization_valid = False
                             self.state.startup_location_failed = True
+                            self.state.dock_wake_pending = False
                             self.get_logger().error(
                                 "[Localization] Dockstatus verloren tijdens "
                                 "AMCL-bevestiging; start blijft geblokkeerd."
@@ -888,6 +914,7 @@ class RobotStateManager(Node):
                             self.state.robot_active = False
                             self.state.localization_valid = False
                             self.state.startup_location_failed = True
+                            self.state.dock_wake_pending = False
                             self.get_logger().error(
                                 "[Localization] Geen overeenkomende AMCL-pose "
                                 "voor startpositie; robot blijft geblokkeerd."
@@ -902,6 +929,7 @@ class RobotStateManager(Node):
                             if target is None:
                                 self.state.robot_active = False
                                 self.state.startup_location_failed = True
+                                self.state.dock_wake_pending = False
                                 self.get_logger().error(
                                     "[Localization] Startpose ontbreekt "
                                     "tijdens AMCL-bevestiging."
@@ -1003,26 +1031,26 @@ class RobotStateManager(Node):
 
     def on_robot_active(self, msg: Bool) -> None:
         with self.lock:
-            if msg.data and (
-                self.state.startup_dock_fallback_active
-                or not self.state.startup_location_resolved
-            ):
-                # Zonder bekende positie mag de robot niet op missie.
-                self.state.robot_active = False
-                ignored = True
+            previous = self.state.robot_active
+            if msg.data:
+                if self.state.dock_wake_pending:
+                    result = "pending"
+                else:
+                    result = self._activate_robot_locked()
             else:
-                ignored = False
-                changed = self.state.robot_active != msg.data
-                self.state.robot_active = msg.data
-                if msg.data and changed:
-                    self.state.docking_attempts = 0
+                self.state.dock_wake_pending = False
+                self.state.robot_active = False
+                result = "inactive"
+            changed = previous != self.state.robot_active
 
-        if ignored:
+        if result == "blocked":
             self.get_logger().warn(
                 "[Robot] Activering genegeerd: startlocatie nog niet bevestigd."
             )
-            self._publish_status_snapshot()
-            return
+        elif result == "pending":
+            self.get_logger().info(
+                "[Robot] Activering wacht op bevestiging van de laadstationpose."
+            )
 
         if changed:
             self.get_logger().info(
@@ -1204,10 +1232,25 @@ class RobotStateManager(Node):
     ) -> str | None:
         expected = self.state.startup_initial_pose
         first_sent_ns = self.state.startup_pose_first_sent_ns
+        started_at = self.state.startup_pose_confirmation_started_at
+        if (
+            not self.state.startup_location_resolved
+            and not self.state.startup_location_failed
+            and started_at is not None
+            and time.monotonic() - started_at >= self.STARTUP_AMCL_TIMEOUT_SEC
+        ):
+            self.state.robot_active = False
+            self.state.localization_valid = False
+            self.state.startup_location_failed = True
+            self.state.dock_wake_pending = False
+            self.get_logger().error(
+                "[Localization] AMCL-bevestiging te laat; robot blijft geblokkeerd."
+            )
+            return None
         if (
             self.state.startup_location_resolved
             or self.state.startup_location_failed
-            or self.state.startup_pose_confirmation_started_at is None
+            or started_at is None
             or (
                 self.state.startup_pose_source == "dock"
                 and not self.state.docked
@@ -1274,6 +1317,10 @@ class RobotStateManager(Node):
         self.state.at_work_area = location == "work_area"
         if self.state.at_work_area:
             self.state.robot_active = True
+        elif self.state.dock_wake_pending:
+            self.state.robot_active = True
+            self.state.docking_attempts = 0
+        self.state.dock_wake_pending = False
         self.state.at_quiz = False
         self.state.at_location_c = False
         self.state.at_location_d = False
@@ -1378,6 +1425,7 @@ class RobotStateManager(Node):
                 self.state.charging = False
                 self.state.docked = False
                 self.state.at_station = False
+                self.state.dock_wake_pending = False
 
             elif event.endswith("DOCKING-FAILED") or event.endswith("DOCK-FAILED"):
                 # Zonder bekende positie mag een retry niet navigeren.
@@ -1386,6 +1434,7 @@ class RobotStateManager(Node):
                 )
                 self.state.docked = False
                 self.state.charging = False
+                self.state.dock_wake_pending = False
 
         if show_charging_screen:
             with self.lock:
@@ -1665,16 +1714,22 @@ class RobotStateManager(Node):
             _socket_data, bridge = data
 
             with self.lock:
-                if not self.state.robot_active and (
-                    not self.state.startup_location_resolved
-                    or self.state.startup_dock_fallback_active
-                ):
+                if self.state.robot_active or self.state.dock_wake_pending:
+                    self.state.robot_active = False
+                    self.state.dock_wake_pending = False
+                    result = "inactive"
+                else:
+                    result = self._activate_robot_locked()
+                if result == "blocked":
                     self.get_logger().warn(
                         "[Robot] Activering genegeerd: startlocatie "
                         "nog niet bevestigd."
                     )
-                else:
-                    self.state.robot_active = not self.state.robot_active
+                elif result == "pending":
+                    self.get_logger().info(
+                        "[Robot] Activering wacht op bevestiging van de "
+                        "laadstationpose."
+                    )
                 new_status = self.state.robot_active
 
             self._restore_sleep_screen_if_needed()

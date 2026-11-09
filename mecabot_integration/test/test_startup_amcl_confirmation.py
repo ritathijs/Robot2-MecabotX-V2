@@ -68,6 +68,9 @@ def pose(x=3.0, y=4.0, yaw=0.0, stamp=0):
 
 class StartupAmclConfirmationTest(unittest.TestCase):
     def setUp(self):
+        clock = patch.object(time, "monotonic", return_value=103.0)
+        clock.start()
+        self.addCleanup(clock.stop)
         self.node = RobotStateManager.__new__(RobotStateManager)
         self.node.state = RobotState(
             battery_status_received=True,
@@ -213,8 +216,139 @@ class StartupAmclConfirmationTest(unittest.TestCase):
         self.assertTrue(self.node.state.startup_location_resolved)
         self.assertTrue(self.node.state.at_station)
         self.assertFalse(self.node.state.robot_active)
-        self.node.on_robot_active(SimpleNamespace(data=True))
+
+    def prepare_sleeping_dock(self):
+        self.dock_sensors()
+        self.node._update_dock_status_locked()
+        self.node.state.startup_location_resolved = True
+        self.node.state.localization_valid = True
+        self.node.state.robot_active = False
+
+    def request_wake(self, source):
+        with patch.object(time, "monotonic", return_value=101.0):
+            if source == "topic":
+                self.node.on_robot_active(SimpleNamespace(data=True))
+            else:
+                self.node.handle_socket_event(
+                    "active_button_toggled", (None, None)
+                )
+
+    def test_wake_requires_new_dock_pose_and_matching_fresh_amcl(self):
+        for source in ("topic", "socket"):
+            with self.subTest(source=source):
+                self.setUp()
+                self.prepare_sleeping_dock()
+                self.request_wake(source)
+                self.assertTrue(self.node.state.dock_wake_pending)
+                self.assertFalse(self.node.state.robot_active)
+                self.assertFalse(self.node.state.startup_location_resolved)
+                self.node.on_amcl(pose(x=12.0, y=-16.0, stamp=201))
+                self.assertFalse(self.node.state.robot_active)
+                self.tick(102.0)
+                published = self.node.initial_pose_pub.publish.call_args.args[0]
+                self.assertEqual(published.header.frame_id, "map")
+                self.assertEqual(published.pose.pose.position.x, 12.0)
+                self.assertEqual(published.pose.pose.position.y, -16.0)
+                for sample in (
+                    pose(x=12.0, y=-16.0, stamp=200),
+                    pose(x=13.0, y=-16.0, stamp=201),
+                    pose(x=12.0, y=-16.0, yaw=1.0, stamp=201),
+                ):
+                    self.node.on_amcl(sample)
+                    self.assertFalse(self.node.state.robot_active)
+                self.node.on_amcl(pose(x=12.0, y=-16.0, stamp=201))
+                self.assertTrue(self.node.state.robot_active)
+                self.assertTrue(self.node.state.startup_location_resolved)
+                self.assertFalse(self.node.state.dock_wake_pending)
+
+    def test_pending_wake_can_be_cancelled(self):
+        for cancel_source in ("topic", "socket"):
+            with self.subTest(source=cancel_source):
+                self.setUp()
+                self.prepare_sleeping_dock()
+                self.request_wake("topic")
+                if cancel_source == "topic":
+                    self.node.on_robot_active(SimpleNamespace(data=False))
+                else:
+                    self.node.handle_socket_event(
+                        "active_button_toggled", (None, None)
+                    )
+                self.tick(102.0)
+                self.node.on_amcl(pose(x=12.0, y=-16.0, stamp=201))
+                self.assertTrue(self.node.state.startup_location_resolved)
+                self.assertFalse(self.node.state.dock_wake_pending)
+                self.assertFalse(self.node.state.robot_active)
+
+    def test_pending_wake_is_cancelled_by_timeout_or_lost_dock(self):
+        for failure in ("timeout", "lost_dock"):
+            with self.subTest(failure=failure):
+                self.setUp()
+                self.prepare_sleeping_dock()
+                self.request_wake("topic")
+                self.tick(102.0)
+                if failure == "timeout":
+                    self.tick(132.0)
+                else:
+                    self.node.on_charging_current(SimpleNamespace(data=0.0))
+                    self.node.on_infrared_status(SimpleNamespace(data=0))
+                    self.tick(103.0)
+                self.assertTrue(self.node.state.startup_location_failed)
+                self.assertFalse(self.node.state.dock_wake_pending)
+                self.node.on_amcl(pose(x=12.0, y=-16.0, stamp=201))
+                self.assertFalse(self.node.state.robot_active)
+                self.assertFalse(self.node.state.startup_location_resolved)
+
+    def test_duplicate_wake_topic_does_not_restart_confirmation(self):
+        self.prepare_sleeping_dock()
+        self.request_wake("topic")
+        self.tick(102.0)
+        self.request_wake("topic")
+        self.assertEqual(self.node.state.startup_pose_confirmation_started_at, 101.0)
+        self.assertEqual(self.node.state.startup_pose_first_sent_ns, 200_000_000_000)
+        self.node.on_amcl(pose(x=12.0, y=-16.0, stamp=201))
         self.assertTrue(self.node.state.robot_active)
+
+    def test_late_amcl_cannot_wake_even_before_timeout_timer_runs(self):
+        self.prepare_sleeping_dock()
+        self.request_wake("topic")
+        self.tick(102.0)
+        with patch.object(time, "monotonic", return_value=132.0):
+            self.node.on_amcl(pose(x=12.0, y=-16.0, stamp=201))
+        self.assertTrue(self.node.state.startup_location_failed)
+        self.assertFalse(self.node.state.dock_wake_pending)
+        self.assertFalse(self.node.state.robot_active)
+
+    def test_retry_after_wake_timeout_does_not_wake_without_new_request(self):
+        self.prepare_sleeping_dock()
+        self.request_wake("topic")
+        self.tick(102.0)
+        self.tick(132.0)
+        self.tick(133.0)
+        self.tick(164.0)
+        self.tick(165.0)
+        self.tick(166.0)
+        self.node.on_amcl(pose(x=12.0, y=-16.0, stamp=201))
+        self.assertTrue(self.node.state.startup_location_resolved)
+        self.assertFalse(self.node.state.robot_active)
+        self.assertFalse(self.node.state.dock_wake_pending)
+
+    def test_wake_with_missing_dock_pose_stays_inactive(self):
+        self.prepare_sleeping_dock()
+        self.node.dock_pose = None
+        self.request_wake("topic")
+        self.assertTrue(self.node.state.startup_location_failed)
+        self.assertFalse(self.node.state.dock_wake_pending)
+        self.assertFalse(self.node.state.robot_active)
+
+    def test_activation_away_from_dock_remains_immediate(self):
+        for source in ("topic", "socket"):
+            with self.subTest(source=source):
+                self.setUp()
+                self.node.state.startup_location_resolved = True
+                self.request_wake(source)
+                self.assertTrue(self.node.state.robot_active)
+                self.assertFalse(self.node.state.dock_wake_pending)
+                self.node.initial_pose_pub.publish.assert_not_called()
 
     def test_dock_timeout_and_retry_never_unlock(self):
         self.dock_sensors()
