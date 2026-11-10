@@ -67,14 +67,14 @@ amcl_rclcpp_node:
 lifecycle_manager_navigation:
   ros__parameters:
     bond_timeout: 10.0   # default 4.0 s; voorkomt shutdown bij korte stall (costmap-clear/keepout reload)
-    attempt_respawn_reconnection: true
-    bond_respawn_max_duration: 10.0
+    # Nav2 mag na een bond-uitval NIET automatisch terug actief worden (pose kan onjuist zijn).
+    attempt_respawn_reconnection: false
 
 lifecycle_manager_localization:
   ros__parameters:
     bond_timeout: 10.0
-    attempt_respawn_reconnection: true
-    bond_respawn_max_duration: 10.0
+    # Nav2 mag na een bond-uitval NIET automatisch terug actief worden (pose kan onjuist zijn).
+    attempt_respawn_reconnection: false
 
 bt_navigator:
   ros__parameters:
