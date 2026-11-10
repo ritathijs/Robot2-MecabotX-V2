@@ -81,7 +81,7 @@ bt_navigator:
     odom_topic: /odom_combined
     bt_loop_duration: 100        #BT 执行每次迭代的持续时间（以毫秒为单位 RT van 100HZ (orig 10 = om de 10msec) naar 100 (10 keer per seconde).
     default_server_timeout: 500  #BT 操作节点等待操作服务器确认时的默认超时值（以毫秒为单位）RT:orig 20 
-    default_nav_to_pose_bt_xml: /home/wheeltec/wheeltec_ros2_rt/src/wheeltec_nav2/behavior_trees/navigate_to_pose_no_recovery.xml
+    default_nav_to_pose_bt_xml: /home/wheeltec/wheeltec_ros2_rt/src/wheeltec_nav2/behavior_trees/navigate_with_replanning.xml
     
     # 'default_nav_through_poses_bt_xml' and 'default_nav_to_pose_bt_xml' are use defaults:
     # nav2_bt_navigator/navigate_to_pose_w_replanning_and_recovery.xml
