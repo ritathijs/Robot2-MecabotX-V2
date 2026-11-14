@@ -177,7 +177,7 @@ controller_server:
         collision_margin_distance: 0.15 #MM1708-org:0.15 org:0.1 碰撞边缘距离，应该设置在0.05-0.2之间，请确保将此参数设置为预计机器人需要穿越的最窄空间
         near_goal_distance: 0.4 #MM1708-org:0.4 靠近目标的距离（米）停止应用优先障碍物项，以允许机器人平稳地收敛到靠近障碍物的目标姿势，0.5 --> 0.6 -->0.3(Tues) 
         cost_scaling_factor: 3.5
-        inflation_radius: 0.85  #org: 0.15 膨胀半径，仅限Humble
+        inflation_radius: 0.55  #org: 0.15 膨胀半径，仅限Humble
 
       PreferForwardCritic: #激励机器人前进，而不是后退
         enabled: true
@@ -240,7 +240,7 @@ local_costmap:
       inflation_layer:                             #膨胀层参数
         plugin: "nav2_costmap_2d::InflationLayer"  #膨胀层插件。
         cost_scaling_factor: 3.5                  #org: 3成本缩放因子，决定障碍物成本随距离的递减速度。
-        inflation_radius: 0.85                    #testwaarden tot nu 0.55; org: 0.35 膨胀半径       
+        inflation_radius: 0.55                    #testwaarden tot nu 0.55; org: 0.35 膨胀半径       
         
       keepout_filter:
         plugin: "nav2_costmap_2d::KeepoutFilter"

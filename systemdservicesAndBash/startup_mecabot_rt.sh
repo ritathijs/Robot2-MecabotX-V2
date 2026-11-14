@@ -7,6 +7,8 @@ LOG_DIR="$RT_WORKSPACE/logs"
 RT_CONFIG="$RT_WORKSPACE/install/mecabot_integration/share/mecabot_integration/config/robot_locations.yaml"
 RT_DATA_DIR="$RT_WORKSPACE/src/auto_recharge_ros2"
 ENABLE_LOGS="${ENABLE_LOGS:-true}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_WRITER="$SCRIPT_DIR/rt_log_writer.py"
 
 ROS_SETUP="/opt/ros/$ROS_DISTRO/setup.bash"
 RT_SETUP="$RT_WORKSPACE/install/setup.bash"
@@ -63,6 +65,12 @@ done
 command -v lsusb >/dev/null 2>&1 || fail "lsusb is niet beschikbaar."
 lsusb | grep -qi "Orbbec" || fail "Orbbec-camera niet gevonden."
 command -v gnome-terminal >/dev/null 2>&1 || fail "gnome-terminal is niet beschikbaar."
+if [[ "$ENABLE_LOGS" == "true" ]]; then
+    command -v python3 >/dev/null 2>&1 || fail "python3 is nodig voor de RT-logging."
+    [[ -r "$LOG_WRITER" ]] || fail "RT-logscript ontbreekt: $LOG_WRITER"
+    python3 "$LOG_WRITER" --cleanup "$LOG_DIR" ||
+        fail "Oude RT-logs konden niet worden opgeruimd."
+fi
 
 [[ -r "$RT_DATA_DIR/Charger_Position.json" ]] ||
     fail "RT-laadpaalbestand ontbreekt: $RT_DATA_DIR/Charger_Position.json"
@@ -136,7 +144,7 @@ run_in_terminal() {
     # Een 4de argument "nolog" schakelt het wegschrijven van de log uit voor
     # componenten die het scherm continu herschrijven (zoals mux en bumper).
     if [[ "$ENABLE_LOGS" == "true" && "$nolog" != "nolog" ]]; then
-        logging_setup="exec > >(tee -a '$LOG_DIR/$logfile') 2>&1"
+        logging_setup="exec > >(python3 '$LOG_WRITER' '$LOG_DIR/$logfile') 2>&1"
     fi
 
     gnome-terminal --title="$title" -- bash -lc "
