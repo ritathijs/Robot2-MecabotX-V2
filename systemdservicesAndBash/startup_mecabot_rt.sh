@@ -179,6 +179,16 @@ echo "Start RT-stack vanuit $RT_WORKSPACE"
 echo "Logs: $LOG_DIR"
 echo "RT runtime-data: $RT_DATA_DIR"
 
+# Start the keepout publishers before Nav2 so its costmaps have filter info
+# and a mask as soon as they configure the keepout filter.
+run_in_terminal "RT Keepout Filter" "keepout.log" \
+    "ros2 launch wheeltec_nav2 keepout_filter.launch.py"
+echo "Wachten op keepout-filterinformatie en masker..."
+timeout 30s ros2 topic echo --once /costmap_filter_info >/dev/null 2>&1 ||
+    fail "Keepout-filterinformatie niet ontvangen. Controleer keepout.log."
+timeout 30s ros2 topic echo --once /keepout_filter_mask >/dev/null 2>&1 ||
+    fail "Keepout-masker niet ontvangen. Controleer keepout.log."
+
 # Static TF and navigation are shared robot infrastructure.
 #run_in_terminal "RT Static TF" "static_tf.log" \
 #    "ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 odom odom_combined"
@@ -207,10 +217,6 @@ run_in_terminal "RT Pointcloud to Laserscan" "pointcloud.log" \
     "ros2 run pointcloud_to_laserscan pointcloud_to_laserscan_node --ros-args --remap cloud_in:=/camera/depth/points --remap scan:=/camera_scan -p target_frame:=camera_link -p min_height:=0.1 -p max_height:=1.0 -p angle_min:=-0.6 -p angle_max:=0.6 -p angle_increment:=0.015 -p range_min:=0.5 -p range_max:=3.5 -p use_inf:=true"
 wait_for_topic "/camera_scan"
 sleep 5
-
-run_in_terminal "RT Keepout Filter" "keepout.log" \
-    "ros2 launch wheeltec_nav2 keepout_filter.launch.py"
-sleep 2
 
 wait_for_topic "/PowerVoltage" 30
 
