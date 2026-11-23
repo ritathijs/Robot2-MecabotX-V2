@@ -6,6 +6,7 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from geometry_msgs.msg import PoseStamped, Twist
+from mecabot_integration.msg import BehaviorCommand
 from std_msgs.msg import String, Bool
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
@@ -23,30 +24,27 @@ class GoalRecord:
 	sent_time: any = None	   # Tijdstip van verzenden (voor time-out op ontbrekend antwoord)
 
 behavior_tree_nodes = {
-	# keepoutfilter_on: "True" / "False" / "none"
 	# drive_action: "manual_only" / "estop" / "release" / "behaviortree" / "peoplesearch"
 	# message_frequency: "always" / "once"
 
-	# These names are published by robot_controller.cpp. Keepout changes only
-	# when crossing between the work area and the charging station.
-	"DriveWorkArea": {"keepoutfilter_on": "False", "drive_action": "behaviortree", "message_frequency": "always"},
-	"robot-go-charge": {"keepoutfilter_on": "False", "drive_action": "behaviortree", "message_frequency": "always"},
-	"robot-docking": {"keepoutfilter_on": "False", "drive_action": "release", "message_frequency": "once"},
+	"DriveWorkArea": {"drive_action": "behaviortree", "message_frequency": "always"},
+	"robot-go-charge": {"drive_action": "behaviortree", "message_frequency": "always"},
+	"robot-docking": {"drive_action": "release", "message_frequency": "once"},
 
-	"follow-robot-screen": {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always"},
-	"robot-arrived-at-quiz-location": {"keepoutfilter_on": "True", "drive_action": "release", "message_frequency": "once"},
-	"RobotRotationFollowMe": {"keepoutfilter_on": "True", "drive_action": "peoplesearch", "message_frequency": "always"},
-	"robot-arrived-at-visitors": {"keepoutfilter_on": "True", "drive_action": "release", "message_frequency": "once"},
-	"explore-location-c": {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always"},
-	"explore-location-d": {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always"},
-	"explore-location-e": {"keepoutfilter_on": "True", "drive_action": "behaviortree", "message_frequency": "always"},
-	"robot-error-drive": {"keepoutfilter_on": "none", "drive_action": "manual_only", "message_frequency": "always"},
+	"follow-robot-screen": {"drive_action": "behaviortree", "message_frequency": "always"},
+	"robot-arrived-at-quiz-location": {"drive_action": "release", "message_frequency": "once"},
+	"RobotRotationFollowMe": {"drive_action": "peoplesearch", "message_frequency": "always"},
+	"robot-arrived-at-visitors": {"drive_action": "release", "message_frequency": "once"},
+	"explore-location-c": {"drive_action": "behaviortree", "message_frequency": "always"},
+	"explore-location-d": {"drive_action": "behaviortree", "message_frequency": "always"},
+	"explore-location-e": {"drive_action": "behaviortree", "message_frequency": "always"},
+	"robot-error-drive": {"drive_action": "manual_only", "message_frequency": "always"},
 
 	# Neutrale toestand (o.a. na herstel van de startlocatie): blijf veilig stilstaan.
-	"None": {"keepoutfilter_on": "none", "drive_action": "manual_only", "message_frequency": "always"},
+	"None": {"drive_action": "manual_only", "message_frequency": "always"},
 
 	# --- Default ---
-	"Default":					{"keepoutfilter_on": "none",  "drive_action": "estop", "message_frequency": "always"},
+	"Default": {"drive_action": "estop", "message_frequency": "always"},
 }
 
 class DriveToCoord(Node):
@@ -74,7 +72,6 @@ class DriveToCoord(Node):
 		
 		self.needs_action = False
 		
-		self.keepoutfilter_state = None
 		self.robot_docked = False
 		self.robot_active = True
 
@@ -99,7 +96,6 @@ class DriveToCoord(Node):
 		self.status_pub = self.create_publisher(String, '/drive_to_coord_status', 10)
 		self.estop_cmd_vel_pub = self.create_publisher(Twist, '/estop_cmd_vel', 1)
 		self.autonomy_inhibit_pub = self.create_publisher(Bool, '/autonomy_inhibit', 1)
-		self.keepout_filter_pub = self.create_publisher(Bool, '/toggle_keepout', 1)
 
 		# --- SUBSCRIBERS ---
 		bt_qos = QoSProfile(
@@ -110,8 +106,8 @@ class DriveToCoord(Node):
 			String, '/BehaviorTreeNode', self.BehaviorTreeNode_callback, bt_qos,
 			callback_group=self.sub_cb_group
 		)
-		self.btDriveCoord_sub = self.create_subscription(
-			PoseStamped, '/btDriveCoord', self.btDriveCoord_callback, 1, 
+		self.behavior_command_sub = self.create_subscription(
+			BehaviorCommand, '/behavior_command', self.behavior_command_callback, 10,
 			callback_group=self.sub_cb_group
 		)
 		self.peoplesearchCoord_sub = self.create_subscription(
@@ -154,8 +150,13 @@ class DriveToCoord(Node):
 	# --- CALLBACKS (Sub_cb_group) ---
 
 	def BehaviorTreeNode_callback(self, msg):
+		node_name = msg.data.strip()
+		# Controller states arrive on the ordered combined-command topic.
+		if node_name in behavior_tree_nodes and node_name not in (
+			"RobotRotationFollowMe", "robot-arrived-at-visitors", "Default",
+		):
+			return
 		with self.lock:
-			node_name = msg.data.strip()
 			self.last_BehaviorTreeNode = node_name
 			self.publish_autonomy_inhibit()
 			# Nieuw commando van de BT: een eerder bereikte bestemming mag opnieuw aangeleerd worden.
@@ -163,6 +164,25 @@ class DriveToCoord(Node):
 			self.docking_active = False
 			self.needs_action = True
 		self.get_logger().info("Nieuw topic ontvangen van BehaviorTree.")
+
+	def behavior_command_callback(self, msg):
+		node_name = msg.behavior_node.strip()
+		config = behavior_tree_nodes.get(node_name)
+		requires_pose = config is not None and config["drive_action"] == "behaviortree"
+		if requires_pose != msg.has_pose:
+			self.get_logger().error(f"Ongeldig rijcommando voor '{node_name}': pose ontbreekt of is onverwacht.")
+			return
+		with self.lock:
+			self.last_BehaviorTreeNode = node_name
+			if msg.has_pose:
+				self.last_btDriveCoord = msg.pose
+			self.last_finished_pose = None
+			self.docking_active = False
+			self.needs_action = True
+			self.publish_autonomy_inhibit()
+			if msg.has_pose:
+				self.publish_status(11, "coördinaat opgeslagen")
+		self.get_logger().debug(f"Behavior-commando {msg.sequence_id} ontvangen: {node_name}")
 
 	def docked_callback(self, msg):
 		with self.lock:
@@ -199,13 +219,6 @@ class DriveToCoord(Node):
 	def active_callback(self, msg):
 		with self.lock:
 			self.robot_active = msg.data
-
-	def btDriveCoord_callback(self, msg):
-		with self.lock:
-			self.last_btDriveCoord = msg
-			self.last_finished_pose = None
-			self.publish_status(11, "coördinaat opgeslagen")
-		self.get_logger().info('Nieuw coördinaat ontvangen.')
 
 	def peoplesearchcoord_callback(self, msg):
 		with self.lock:
@@ -250,11 +263,6 @@ class DriveToCoord(Node):
 			)
 			print(f"[ESTOP TRIGGER] Onbekende node: {self.last_BehaviorTreeNode}")
 		
-		if currentnode["keepoutfilter_on"] == "True": 
-			self.keepout_filter(True)
-		elif currentnode["keepoutfilter_on"] == "False": 
-			self.keepout_filter(False)
-			
 		if currentnode["drive_action"] == "manual_only":
 			self.cancel_all_goals()
 		elif currentnode["drive_action"] == "estop":
@@ -287,15 +295,6 @@ class DriveToCoord(Node):
 		elif currentnode["message_frequency"] == "once":
 			self.needs_action = False
 
-	def keepout_filter(self, state):
-		if self.keepoutfilter_state != state:
-			self.keepoutfilter_state = state
-			msg = Bool()
-			msg.data = state
-			self.keepout_filter_pub.publish(msg)
-			mode = "aan" if state else "uit"
-			self.get_logger().info(f"Keepoutfilter omgeschakeld: {mode}")
-	
 	def emergencystop(self):
 		# Robot laten stoppen door 0 te sturen op /estop_cmd_vel
 		self.get_logger().info("Noodstop procedure: 0-velocity sturen.")

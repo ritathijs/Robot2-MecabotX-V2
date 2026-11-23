@@ -281,14 +281,6 @@ start_pointcloud() {
     "
 }
 
-start_keepout() {
-    gnome-terminal --title="Keepout Filter" -- bash -c "
-        $SETUP_CMD && \
-        ros2 launch wheeltec_nav2 keepout_filter.launch.py \
-        $(log_cmd keepout.log)
-    "
-}
-
 start_autocharge() {
     gnome-terminal --title="Auto Recharge" -- bash -c "
         $SETUP_CMD && \
@@ -371,10 +363,6 @@ sleep 10
 start_pointcloud
 wait_for_topic "/camera_scan"
 sleep 10
-
-# 7 - Keepout Filter
-start_keepout
-sleep 1
 
 # 9 - Auto Recharge
 start_autocharge

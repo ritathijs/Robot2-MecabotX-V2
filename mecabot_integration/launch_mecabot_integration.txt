@@ -1,14 +1,20 @@
-# 1. Start de C++ Robot Controller
-ros2 launch mecabot_integration rt_robot_controller.launch.py
+# Aanbevolen: start de volledige integratie.
+ros2 launch mecabot_integration mecabot_integration.launch.py
 
-# 2. Start de C++ Behavior Tree
-ros2 launch mecabot_integration rt_behavior_tree.launch.py
-
-# 3. Start de Python Quiz Socket Bridge
-# De bridge start ook de Robot State Manager.
+# Bij handmatig starten in afzonderlijke terminals:
+# 1. Start de bridge voor handmatige bediening; deze start ook de state manager.
 ros2 launch mecabot_integration quiz_socket_bridge.launch.py
 
-# 4. Start de AprilTag detector/reset-node. De state manager vraagt zelf
+# 2. Start de drive-node.
+ros2 run mecabot_integration rt_drive_to_coord.py
+
+# 3. Start de C++ Robot Controller.
+ros2 launch mecabot_integration rt_robot_controller.launch.py
+
+# 4. Start de C++ Behavior Tree.
+ros2 launch mecabot_integration rt_behavior_tree.launch.py
+
+# 5. Start de AprilTag detector/reset-node. De state manager vraagt zelf
 # de locatiereset aan; start robot_position_reset hierbij NIET, want die
 # heeft bij een mislukte tagdetectie een XSTOP-fallback.
 ros2 run april_tabloo april_tabloo
@@ -39,6 +45,12 @@ pkill gnome-terminal-
 
 
 #BUILDEN
+# Dit package genereert ook het BehaviorCommand-bericht. Bouw controller en
+# drive-node samen en source daarna opnieuw de workspace in alle terminals.
+# Start de drive-node voordat rijcommando's worden gegeven. /behavior_command
+# bewaart geen oude commando's: als er geen ontvanger is, meldt de controller
+# een fout en moet het commando na herstel expliciet opnieuw worden gegeven.
+# Handmatig DOCK stuurt /DockingCommand START ook zonder drive-node.
 cd /home/wheeltec/wheeltec_ros2/
 rm -rf build/mecabot_integration install/mecabot_integration
 colcon build --packages-select mecabot_integration --symlink-install

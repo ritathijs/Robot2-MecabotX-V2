@@ -6,7 +6,7 @@ amcl:
     alpha3: 0.15  #里程计的翻译估计中来自translation的预期过程噪声
     alpha4: 0.15  #里程计的平移估计中因旋转而产生的预期过程噪声
     alpha5: 0.15  #仅适用于 Omni 型号：translation噪音
-    base_frame_id: "base_footprint" #机器人底座框架 
+    base_frame_id: "base_footprint" #机器人底座框架
     beam_skip_distance: 0.5         #忽略似然场模型中大多数粒子不同意的光束。考虑跳过的最大距离（米）
     beam_skip_error_threshold: 0.9  #由于收敛性不好，未匹配地图后强制进行完全更新的光束百分比
     beam_skip_threshold: 0.3        #需要跳过的光束的百分比。
@@ -80,16 +80,16 @@ bt_navigator:
     robot_base_frame: base_footprint
     odom_topic: /odom_combined
     bt_loop_duration: 100        #BT 执行每次迭代的持续时间（以毫秒为单位 RT van 100HZ (orig 10 = om de 10msec) naar 100 (10 keer per seconde).
-    default_server_timeout: 500  #BT 操作节点等待操作服务器确认时的默认超时值（以毫秒为单位）RT:orig 20 
+    default_server_timeout: 500  #BT 操作节点等待操作服务器确认时的默认超时值（以毫秒为单位）RT:orig 20
     default_nav_to_pose_bt_xml: /home/wheeltec/wheeltec_ros2_rt/src/wheeltec_nav2/behavior_trees/navigate_to_pose_no_recovery.xml
-    
+
     # 'default_nav_through_poses_bt_xml' and 'default_nav_to_pose_bt_xml' are use defaults:
     # nav2_bt_navigator/navigate_to_pose_w_replanning_and_recovery.xml
     # nav2_bt_navigator/navigate_through_poses_w_replanning_and_recovery.xml
     # They can be set here or via a RewrittenYaml remap from a parent launch file to Nav2.
     #plugin_lib_names: #行为树节点共享库列表，Humble后的版本默认包含所有NAV2 BT库，这里可以加入自定义BT节点
     error_code_names:
-    - compute_path_error_code 
+    - compute_path_error_code
     - follow_path_error_code
 
 # bt_navigator参数说明：https://docs.nav2.org/configuration/packages/configuring-bt-navigator.html?highlight=bt_navigator
@@ -100,7 +100,7 @@ bt_navigator_rclcpp_node:
 
 controller_server:
   ros__parameters:
-    use_sim_time: False                             
+    use_sim_time: False
     controller_frequency: 10.0                      #RT orig:30 运行控制器的频率 (hz)
     controller_plugins: ["FollowPath"]              # 用于处理请求和参数的控制器插件的映射名称列表
     odom_topic: /odom_combined                      #里程计话题名称
@@ -152,9 +152,9 @@ controller_server:
       critics: ["ConstraintCritic", "ObstaclesCritic", "GoalCritic", "GoalAngleCritic", "PathAlignCritic", "PathFollowCritic", "PathAngleCritic", "PreferForwardCritic"] #评论插件
       ConstraintCritic: #修复超出设定的动态或运动学约束的轨迹
         enabled: true
-        cost_power: 1 
+        cost_power: 1
         cost_weight: 4.0  #权重参数
-      
+
       GoalAngleCritic: #当距离目标较近时，GoalAngleCritic会激励导航以达到目标姿势的角度
         enabled: true
         cost_power: 1
@@ -175,7 +175,7 @@ controller_server:
         consider_footprint: true #org: false 是否使用点成本（如果机器人是圆形的或者计算能力低）或计算 SE2 足迹成本
         collision_cost: 10000.0 #应用于轨迹中真实碰撞的成本。
         collision_margin_distance: 0.15 #MM1708-org:0.15 org:0.1 碰撞边缘距离，应该设置在0.05-0.2之间，请确保将此参数设置为预计机器人需要穿越的最窄空间
-        near_goal_distance: 0.4 #MM1708-org:0.4 靠近目标的距离（米）停止应用优先障碍物项，以允许机器人平稳地收敛到靠近障碍物的目标姿势，0.5 --> 0.6 -->0.3(Tues) 
+        near_goal_distance: 0.4 #MM1708-org:0.4 靠近目标的距离（米）停止应用优先障碍物项，以允许机器人平稳地收敛到靠近障碍物的目标姿势，0.5 --> 0.6 -->0.3(Tues)
         cost_scaling_factor: 3.5
         inflation_radius: 0.55  #org: 0.15 膨胀半径，仅限Humble
 
@@ -227,8 +227,8 @@ local_costmap:
       robot_base_frame: base_footprint #机器人底座框架
       use_sim_time: False  #仿真时间
       rolling_window: true #成本地图是否应随机器人基座框架滚动
-      width: 8             #代价地图的宽度（m）
-      height: 8            #代价地图的高度（m）
+      width: 4             #代价地图的宽度（m）
+      height: 4            #代价地图的高度（m）
       resolution: 0.05     #代价地图1像素的分辨率，以米为单位
       #robot_radius: 0.20   #机器人半径，如果未提供足迹坐标，则使用机器人半径。
       #original footprint: "[ [-0.288, -0.303], [-0.288, 0.303],[0.288,0.303],[0.288, -0.303] ]"
@@ -240,13 +240,13 @@ local_costmap:
       inflation_layer:                             #膨胀层参数
         plugin: "nav2_costmap_2d::InflationLayer"  #膨胀层插件。
         cost_scaling_factor: 3.5                  #org: 3成本缩放因子，决定障碍物成本随距离的递减速度。
-        inflation_radius: 0.55                    #testwaarden tot nu 0.55; org: 0.35 膨胀半径       
-        
+        inflation_radius: 0.45                    #testwaarden tot nu 0.55; org: 0.35 膨胀半径
+
       keepout_filter:
         plugin: "nav2_costmap_2d::KeepoutFilter"
         enabled: true
         filter_info_topic: "/costmap_filter_info"
-        
+
       voxel_layer:
         plugin: "nav2_costmap_2d::VoxelLayer"      #体素层插件。
         enabled: False                             #RT orig:True
@@ -264,7 +264,7 @@ local_costmap:
           marking: True                             #是否启用障碍物标记功能
           data_type: "LaserScan"                    #数据类型
           raytrace_max_range: 10.0                  #控制光线追踪从代价地图中清除障碍物的最大范围  RT:24/7/2026 van orig 10 naar 4 meter <egens overbelasting orig 10
-          raytrace_min_range: 0.2                   #控制光线追踪从代价地图中清除障碍物的最大范围 
+          raytrace_min_range: 0.2                   #控制光线追踪从代价地图中清除障碍物的最大范围
           obstacle_max_range: 2.5                   #控制代价地图上标记障碍物的最大范围
           obstacle_min_range: 0.2                   #控制代价地图上标记障碍物的最小范围
 
@@ -288,11 +288,11 @@ local_costmap:
           min_obstacle_height: 0.01
           obstacle_max_range: 2.5
           raytrace_max_range: 10.0
-          obstacle_min_range: 0.2   
-          raytrace_min_range: 0.2                            
-          
+          obstacle_min_range: 0.2
+          raytrace_min_range: 0.2
+
       always_send_full_costmap: True                 #是否每次更新时都发送完整的成本图，而不是更新 RT orig op True op False gezet 25/7/2026
-      
+
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
@@ -324,7 +324,7 @@ global_costmap:
       publish_frequency: 1.0            #将成本图发布到话题的频率
       global_frame: map                 #全局框架
       robot_base_frame: base_footprint  #机器人底座框架
-      use_sim_time: False               #仿真时间 
+      use_sim_time: False               #仿真时间
       #robot_radius: 0.20               #机器人半径
       #original footprint: "[ [-0.288, -0.303], [-0.288, 0.303],[0.288,0.303],[0.288, -0.303] ]"
       #test footprint: "[ [-0.488, -0.503], [-0.488, 0.503], [0.488, 0.503], [0.488, -0.503] ]"
@@ -335,7 +335,7 @@ global_costmap:
 
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
       filters: ["keepout_filter"]
-       
+
       obstacle_layer:                              #障碍层参数
         plugin: "nav2_costmap_2d::ObstacleLayer"   #障碍层插件
         enabled: True
@@ -347,11 +347,11 @@ global_costmap:
           marking: True                            #是否启用障碍物标记功能
           data_type: "LaserScan"                   #数据类型
           raytrace_max_range: 6.0                 #控制光线追踪从代价地图中清除障碍物的最大范围  RT 24/7/2026 naar 4m gebracht om de load te verlagen orig 10
-          raytrace_min_range: 0.2                  #控制光线追踪从代价地图中清除障碍物的最大范围 
+          raytrace_min_range: 0.2                  #控制光线追踪从代价地图中清除障碍物的最大范围
           obstacle_max_range: 5.0                  #控制代价地图上标记障碍物的最大范围 RT 24/7/2026 naar 3m gebracht om de load te verlagen orig 2.5
           obstacle_min_range: 0.2
           observation_persistence: 0.0                  #控制代价地图上标记障碍物的最小范围
- 
+
       # camera_layer:
       #   plugin: "nav2_costmap_2d::ObstacleLayer"
       #   enabled: True
@@ -363,29 +363,29 @@ global_costmap:
       #     marking: True
       #     max_obstacle_height: 2.0
       #     min_obstacle_height: 0.01
-          
+
       static_layer: #静态层参数
         plugin: "nav2_costmap_2d::StaticLayer"     #静态层插件
         map_subscribe_transient_local: True
-        
+
       keepout_filter:
         plugin: "nav2_costmap_2d::KeepoutFilter"
         enabled: True
         filter_info_topic: "/costmap_filter_info"
-          
+
       inflation_layer: #膨胀层参数
         plugin: "nav2_costmap_2d::InflationLayer"  #膨胀层插件
-        cost_scaling_factor: 3.5                   #org: 3成本缩放因子，决定障碍物成本随距离的递减速度。
-        inflation_radius: 0.85                     #testwaarde: 0.55; org: 0.3 膨胀半径
+        cost_scaling_factor: 5                   #org: 3成本缩放因子，决定障碍物成本随距离的递减速度。
+        inflation_radius: 0.50                     #testwaarde: 0.55; org: 0.3 膨胀半径
       always_send_full_costmap: True               #是否每次更新时都发送完整的成本图，而不是更新 RT 25/7/2026 op False gezet orig True
-      
+
   global_costmap_client:
     ros__parameters:
       use_sim_time: False
   global_costmap_rclcpp_node:
     ros__parameters:
       use_sim_time: False
-      
+
 costmap_filter_info_server:
   ros__parameters:
     use_sim_time: False
@@ -419,7 +419,7 @@ planner_server: #规划器服务器参数
       use_astar: true
       allow_unknown: true
       use_final_approach_orientation: False
-    
+
     log_level: info
 
 planner_server_rclcpp_node:
@@ -453,7 +453,7 @@ smoother_server:
      #  plugin: "nav2_behaviors/DriveOnHeading"
      #wait:
      #  plugin: "nav2_behaviors/Wait"
-     
+
      #global_frame: odom_combined
 
      #robot_base_frame: base_footprint
@@ -488,7 +488,7 @@ smoother_server:
 #       simulate_ahead_time: 2.0
 #     drive_on_heading:
 #       plugin: "nav2_behaviors/DriveOnHeading"
-#       simulate_ahead_time: 2.0         
+#       simulate_ahead_time: 2.0
 #     wait:
 #       plugin: "nav2_behaviors/Wait"
 
@@ -506,4 +506,4 @@ waypoint_follower:
       enabled: True
       waypoint_pause_duration: 200 #机器人到达每个航点后休眠/等待的时间（以毫秒为单位）
 #waypoint_follower 参数参考
-#https://docs.nav2.org/configuration/packages/configuring-waypoint-follower.html?highlight=stop_on_failure  
+#https://docs.nav2.org/configuration/packages/configuring-waypoint-follower.html?highlight=stop_on_failure

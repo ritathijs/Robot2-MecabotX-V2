@@ -61,6 +61,31 @@ def generate_launch_description():
             default_value=param_file,
             description='Full path to param file to load'),
         Node(
+            package='nav2_map_server',
+            executable='costmap_filter_info_server',
+            name='costmap_filter_info_server',
+            output='screen',
+            parameters=[param_file]),
+        Node(
+            package='nav2_map_server',
+            executable='map_server',
+            name='keepout_map_server',
+            output='screen',
+            parameters=[param_file, {
+                'yaml_filename': os.path.join(map_dir, 'WHEELTEC_KEEPOUT.yaml')}],
+            remappings=[('/map', '/keepout_filter_mask')]),
+        Node(
+            package='nav2_lifecycle_manager',
+            executable='lifecycle_manager',
+            name='lifecycle_manager_costmap_filters',
+            output='screen',
+            parameters=[
+                {'use_sim_time': use_sim_time},
+                {'autostart': True},
+                {'node_names': [
+                    'costmap_filter_info_server',
+                    'keepout_map_server']}]),
+        Node(
             name='waypoint_cycle',
             package='nav2_waypoint_cycle',
             executable='nav2_waypoint_cycle',

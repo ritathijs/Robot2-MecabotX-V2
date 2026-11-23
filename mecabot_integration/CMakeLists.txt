@@ -11,8 +11,17 @@ find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(behaviortree_cpp_v3 REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/BehaviorCommand.msg"
+  DEPENDENCIES geometry_msgs
+)
+rosidl_get_typesupport_target(cpp_typesupport_target
+  ${PROJECT_NAME} "rosidl_typesupport_cpp")
 
 add_executable(rt_robot_controller src/robot_controller.cpp)
+target_link_libraries(rt_robot_controller "${cpp_typesupport_target}")
 ament_target_dependencies(rt_robot_controller
   rclcpp
   std_msgs
@@ -48,6 +57,8 @@ install(DIRECTORY
   config
   DESTINATION share/${PROJECT_NAME}
 )
+
+ament_export_dependencies(rosidl_default_runtime)
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

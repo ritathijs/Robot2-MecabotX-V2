@@ -179,16 +179,6 @@ echo "Start RT-stack vanuit $RT_WORKSPACE"
 echo "Logs: $LOG_DIR"
 echo "RT runtime-data: $RT_DATA_DIR"
 
-# Start the keepout publishers before Nav2 so its costmaps have filter info
-# and a mask as soon as they configure the keepout filter.
-run_in_terminal "RT Keepout Filter" "keepout.log" \
-    "ros2 launch wheeltec_nav2 keepout_filter.launch.py"
-echo "Wachten op keepout-filterinformatie en masker..."
-timeout 30s ros2 topic echo --once /costmap_filter_info >/dev/null 2>&1 ||
-    fail "Keepout-filterinformatie niet ontvangen. Controleer keepout.log."
-timeout 30s ros2 topic echo --once /keepout_filter_mask >/dev/null 2>&1 ||
-    fail "Keepout-masker niet ontvangen. Controleer keepout.log."
-
 # Static TF and navigation are shared robot infrastructure.
 #run_in_terminal "RT Static TF" "static_tf.log" \
 #    "ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 odom odom_combined"

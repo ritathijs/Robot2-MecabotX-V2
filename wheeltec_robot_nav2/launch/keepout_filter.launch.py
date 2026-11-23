@@ -7,7 +7,7 @@ def generate_launch_description():
     # Bronmap van deze workspace (symlink-install), niet de operationele workspace
     package_src = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     params_file = os.path.join(package_src, 'param', 'wheeltec_params', 'param_flagship_mec_dl.yaml')
-    mask_yaml_file = os.path.join(package_src, 'map', 'WHEELTEC_KEEPOUT_SERVICE.yaml')
+    mask_yaml_file = os.path.join(package_src, 'map', 'WHEELTEC_KEEPOUT.yaml')
 
     return LaunchDescription([
         # Costmap Filter Info Server
@@ -37,16 +37,7 @@ def generate_launch_description():
             output='screen',
             parameters=[{'use_sim_time': False},
                         {'autostart': True},
-                        {'node_names': ['costmap_filter_info_server', 'keepout_map_server']}]),
-        
-        # Keepout_filter_throttle node   
-	Node(
-            package='keepout_filter_throttle',
-            executable='keepout_filter_throttle',
-            name='keepout_filter_throttle',
-            output='screen',
-            parameters=[{'diagnostics_enabled': False}])
-                        
+                        {'node_names': ['costmap_filter_info_server', 'keepout_map_server']}])
     ])
     
  #KULeuven2025-26 

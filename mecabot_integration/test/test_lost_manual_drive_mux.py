@@ -1,5 +1,6 @@
 import ast
 from pathlib import Path
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock
@@ -133,6 +134,16 @@ class LostManualDriveMuxTest(unittest.TestCase):
         self.mux.nav_callback(twist(0.2))
         self.assertEqual(self.mux.active_source, "NAV")
 
+    def test_manual_drive_remains_available_when_heartbeat_expires(self):
+        self.inhibit(False)
+        self.now += 1.51
+        self.mux.gui_callback(twist(0.15))
+        self.mux.inhibit_watchdog()
+        self.assertEqual(self.mux.active_source, "GUI")
+        self.assertEqual(self.mux.last_cmd.linear.x, 0.15)
+        self.mux.nav_callback(twist(0.3))
+        self.assertEqual(self.mux.active_source, "GUI")
+
     def test_entering_lost_stops_existing_autonomous_command(self):
         self.inhibit(False)
         self.mux.chargehp_callback(twist(0.2))
@@ -154,7 +165,6 @@ class LostManualDriveMuxTest(unittest.TestCase):
         node.cancel_all_goals = Mock()
         node.emergencystop = Mock()
         node.autonomy_inhibit_pub = Mock()
-        node.keepout_filter = Mock()
         for state in ("robot-error-drive", "None"):
             node.last_BehaviorTreeNode = state
             node.actiondistribute()
@@ -168,6 +178,84 @@ class LostManualDriveMuxTest(unittest.TestCase):
         node.last_BehaviorTreeNode = "onbekend"
         node.publish_autonomy_inhibit()
         self.assertTrue(node.autonomy_inhibit_pub.publish.call_args.args[0].data)
+
+
+class BehaviorCommandTest(unittest.TestCase):
+    def setUp(self):
+        self.node = DriveToCoord.__new__(DriveToCoord)
+        self.node.lock = threading.Lock()
+        self.node.get_logger = Mock(return_value=Mock())
+        self.node.publish_status = Mock()
+        self.node.autonomy_inhibit_pub = Mock()
+        self.node.send_goal = Mock()
+        self.node.cancel_all_goals = Mock()
+        self.node.robot_docked = False
+        self.node.robot_active = True
+        self.node.docking_active = False
+        self.node.last_finished_pose = None
+        self.node.last_btDriveCoord = None
+        self.node.last_BehaviorTreeNode = None
+        self.node.needs_action = False
+
+    def command(self, state, pose=None, sequence=1):
+        self.node.behavior_command_callback(SimpleNamespace(
+            behavior_node=state, sequence_id=sequence,
+            has_pose=pose is not None, pose=pose,
+        ))
+
+    def test_legacy_status_cannot_combine_with_previous_pose(self):
+        old_pose, new_pose = object(), object()
+        self.command("DriveWorkArea", old_pose)
+        self.node.BehaviorTreeNode_callback(SimpleNamespace(data="explore-location-c"))
+        self.node.actiondistribute()
+        self.node.send_goal.assert_called_once_with("BehaviorTree", old_pose)
+        self.command("explore-location-c", new_pose, sequence=2)
+        self.node.actiondistribute()
+        self.node.send_goal.assert_called_with("BehaviorTree", new_pose)
+
+    def test_same_status_with_new_pose_is_applied_together(self):
+        for pose in (object(), object()):
+            self.command("follow-robot-screen", pose)
+            self.node.actiondistribute()
+            self.node.send_goal.assert_called_with("BehaviorTree", pose)
+
+    def test_all_controller_navigation_states_use_their_own_pose(self):
+        for state in ("follow-robot-screen", "explore-location-c",
+                      "explore-location-d", "explore-location-e",
+                      "DriveWorkArea", "robot-go-charge"):
+            with self.subTest(state=state):
+                pose = object()
+                self.command(state, pose)
+                self.node.actiondistribute()
+                self.node.send_goal.assert_called_with("BehaviorTree", pose)
+
+    def test_status_only_states_cancel_and_cannot_reuse_old_pose(self):
+        for state in ("robot-docking", "robot-arrived-at-quiz-location",
+                      "robot-error-drive", "None"):
+            with self.subTest(state=state):
+                self.command("DriveWorkArea", object())
+                self.command(state)
+                self.node.send_goal.reset_mock()
+                self.node.cancel_all_goals.reset_mock()
+                self.node.actiondistribute()
+                self.node.cancel_all_goals.assert_called_once()
+                self.node.send_goal.assert_not_called()
+
+    def test_invalid_pose_presence_does_not_change_state(self):
+        self.command("DriveWorkArea", object())
+        previous_pose = self.node.last_btDriveCoord
+        self.command("explore-location-c")
+        self.command("robot-docking", object())
+        self.assertEqual(self.node.last_BehaviorTreeNode, "DriveWorkArea")
+        self.assertIs(self.node.last_btDriveCoord, previous_pose)
+        self.assertEqual(self.node.get_logger().error.call_count, 2)
+
+    def test_visitor_and_unknown_legacy_states_are_still_handled(self):
+        for state in ("RobotRotationFollowMe", "robot-arrived-at-visitors",
+                      "Default", "unexpected-state"):
+            with self.subTest(state=state):
+                self.node.BehaviorTreeNode_callback(SimpleNamespace(data=state))
+                self.assertEqual(self.node.last_BehaviorTreeNode, state)
 
 
 if __name__ == "__main__":
