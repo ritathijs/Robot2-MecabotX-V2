@@ -245,7 +245,7 @@ local_costmap:
       inflation_layer:                             #膨胀层参数
         plugin: "nav2_costmap_2d::InflationLayer"  #膨胀层插件。
         cost_scaling_factor: 3.5                  #org: 3成本缩放因子，决定障碍物成本随距离的递减速度。
-        inflation_radius: 0.45                    #testwaarden tot nu 0.55; org: 0.35 膨胀半径
+        inflation_radius: 0.55                    #testwaarden tot nu 0.55; org: 0.35 膨胀半径
 
       keepout_filter:
         plugin: "nav2_costmap_2d::KeepoutFilter"
@@ -387,7 +387,7 @@ global_costmap:
 
       inflation_layer: #膨胀层参数
         plugin: "nav2_costmap_2d::InflationLayer"  #膨胀层插件
-        cost_scaling_factor: 5                   #org: 3成本缩放因子，决定障碍物成本随距离的递减速度。
+        cost_scaling_factor: 5.0                 #org: 3成本缩放因子，决定障碍物成本随距离的递减速度。
         inflation_radius: 0.50                     #testwaarde: 0.55; org: 0.3 膨胀半径
       always_send_full_costmap: True               #是否每次更新时都发送完整的成本图，而不是更新 RT 25/7/2026 op False gezet orig True
 
