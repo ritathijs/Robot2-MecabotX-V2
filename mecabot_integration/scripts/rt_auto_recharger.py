@@ -123,6 +123,13 @@ class AutoRecharger(Node):
         #创建节点
         super().__init__("auto_recharger")
 
+        self.declare_parameter("undock_drive_duration_sec", 3.5)
+        self.undock_drive_duration_sec = float(
+            self.get_parameter("undock_drive_duration_sec").value
+        )
+        if not math.isfinite(self.undock_drive_duration_sec) or self.undock_drive_duration_sec <= 0:
+            raise ValueError("undock_drive_duration_sec must be positive and finite")
+
         self.declare_parameter("data_directory", DEFAULT_DATA_DIRECTORY)
         self.data_directory = Path(
             self.get_parameter("data_directory").value
@@ -909,7 +916,7 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
         - Resets charging state
 
         LET OP: het vooruit rijden om los te koppelen na een stopbericht gebeurt
-        via /gui_cmd_vel (Gui_Cmd_vel_pub) en NIET meer via /charge_cmd_vel.
+        via /chargehp_cmd_vel (Gui_Cmd_vel_pub) en NIET via /charge_cmd_vel.
         """
 
 
@@ -926,12 +933,13 @@ Ctrl+C/c:关闭自动回充功能并退出.    Ctrl+C/c:Quit the program.
                 )
             move = Twist()
             move.linear.x = 0.20
-            self.Gui_Cmd_vel_pub.publish(move)
-            time.sleep(3.0)
-            
-            # Stop weer na het vooruit rijden
-            move.linear.x = 0.0
-            self.Gui_Cmd_vel_pub.publish(move)
+            deadline = time.monotonic() + self.undock_drive_duration_sec
+            try:
+                while time.monotonic() < deadline:
+                    self.Gui_Cmd_vel_pub.publish(move)
+                    time.sleep(min(0.1, max(0.0, deadline - time.monotonic())))
+            finally:
+                self.Gui_Cmd_vel_pub.publish(Twist())
         else:
             print_and_fixRetract(YELLOW + "Gevraagd om niet naar voren te rijden." + RESET)
 
